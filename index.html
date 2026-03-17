@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calepinage Panneaux - Optimiseur Multi-Couleurs</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b27; --border: #2d3555;
+    --accent: #4fd1c5; --accent2: #38b2ac;
+    --text: #e2e8f0; --text2: #a0aec0; --text3: #718096; --text4: #4a5568;
+    --green: #68d391; --yellow: #fbd38d; --red: #fc8181;
+    --radius: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh;
+    padding: 20px; line-height: 1.5;
+  }
+  .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; }
+
+  header { border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; }
+  header h1 { font-size: 22px; font-weight: 800; letter-spacing: 3px; color: var(--accent); }
+  header p { font-size: 11px; color: var(--text4); letter-spacing: 2px; margin-top: 2px; }
+
+  .layout { display: flex; gap: 20px; align-items: flex-start; }
+  .sidebar { flex: 0 0 340px; display: flex; flex-direction: column; gap: 14px; position: sticky; top: 20px; }
+  .main { flex: 1; min-width: 400px; display: flex; flex-direction: column; gap: 16px; }
+
+  .card { background: var(--card); border-radius: var(--radius); padding: 16px; border: 1px solid var(--border); }
+  .card-title { font-size: 10px; letter-spacing: 2.5px; color: var(--accent); margin-bottom: 12px; font-weight: 700; text-transform: uppercase; }
+  .card-accent { border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+
+  .stock-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; cursor: pointer; }
+  .stock-row input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+  .stock-label { font-size: 13px; flex: 1; }
+  .stock-area { font-size: 10px; color: var(--text4); }
+  .stock-row.inactive .stock-label { color: var(--text4); text-decoration: line-through; }
+
+  .kerf-row { display: flex; align-items: center; gap: 10px; }
+  .kerf-row input[type="number"] {
+    width: 58px; background: var(--bg); border: 1px solid var(--text4); border-radius: 8px;
+    color: var(--text); padding: 6px 8px; font-size: 14px; text-align: center; font-family: inherit;
+  }
+  .kerf-row input:focus { outline: none; border-color: var(--accent); }
+
+  .piece-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; max-height: 240px; overflow-y: auto; }
+  .piece-item {
+    display: flex; align-items: center; gap: 8px; background: var(--bg); border-radius: 8px;
+    padding: 6px 10px; border: 1px solid transparent; transition: border-color 0.15s;
+  }
+  .piece-item:hover { border-color: var(--text4); }
+  .piece-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+  .piece-dim { font-size: 13px; flex: 1; }
+  .piece-qty { display: flex; align-items: center; gap: 4px; }
+  .piece-qty button {
+    background: var(--bg); border: 1px solid var(--text4); border-radius: 4px; color: var(--text);
+    width: 22px; height: 22px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;
+  }
+  .piece-qty button:hover { border-color: var(--accent); color: var(--accent); }
+  .piece-qty span { font-size: 13px; min-width: 20px; text-align: center; font-weight: 600; }
+  .piece-remove {
+    background: none; border: none; color: var(--text4); cursor: pointer; font-size: 18px;
+    padding: 0 2px; line-height: 1; transition: color 0.15s;
+  }
+  .piece-remove:hover { color: var(--red); }
+
+  .add-row { display: flex; gap: 6px; align-items: center; }
+  .add-row input {
+    flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--text4); border-radius: 8px;
+    color: var(--text); padding: 8px 10px; font-size: 13px; font-family: inherit;
+  }
+  .add-row input:focus { outline: none; border-color: var(--accent); }
+  .add-row input::placeholder { color: var(--text4); }
+  .btn-add {
+    background: var(--accent); border: none; border-radius: 8px; color: var(--bg);
+    font-weight: 800; cursor: pointer; padding: 8px 14px; font-size: 17px; transition: opacity 0.15s;
+  }
+  .btn-add:hover { opacity: 0.85; }
+
+  .btn-optimize {
+    background: linear-gradient(135deg, var(--accent), var(--accent2)); border: none; border-radius: 12px;
+    color: var(--bg); font-weight: 800; cursor: pointer; padding: 15px; font-size: 14px;
+    letter-spacing: 2px; transition: transform 0.1s, box-shadow 0.2s; font-family: inherit;
+    box-shadow: 0 4px 15px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .btn-optimize:hover { transform: translateY(-1px); box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 40%, transparent); }
+  .btn-optimize:active { transform: translateY(0); }
+
+  .summary-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 13px; }
+  .summary-label { color: var(--text3); }
+  .summary-value { font-weight: 700; }
+  .summary-sub { padding-left: 14px; font-size: 12px; }
+  .summary-divider { border-top: 1px solid var(--border); margin: 6px 0; }
+
+  .panel-card { background: var(--card); border-radius: 14px; padding: 18px; border: 1px solid var(--border); box-shadow: 0 4px 24px #0006; }
+  .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
+  .panel-title { font-weight: 800; font-size: 16px; }
+  .panel-subtitle { font-size: 13px; color: var(--text3); margin-left: 10px; }
+  .panel-badges { display: flex; gap: 10px; align-items: center; }
+  .badge { font-size: 11px; padding: 3px 10px; border-radius: 6px; font-weight: 700; }
+  .badge-waste { background: color-mix(in srgb, var(--green) 15%, transparent); color: var(--green); }
+  .badge-waste.medium { background: color-mix(in srgb, var(--yellow) 15%, transparent); color: var(--yellow); }
+  .badge-waste.high { background: color-mix(in srgb, var(--red) 15%, transparent); color: var(--red); }
+  .panel-svg { display: block; border-radius: 8px; }
+  .panel-legend { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .legend-tag {
+    font-size: 11px; padding: 3px 9px; border-radius: 6px; cursor: default;
+    border: 1px solid; font-family: 'Cascadia Code', 'Fira Code', monospace;
+  }
+
+  .placeholder { text-align: center; padding: 60px 20px; color: var(--text4); }
+  .placeholder .icon { font-size: 50px; margin-bottom: 16px; }
+  .placeholder .text { font-size: 14px; letter-spacing: 1px; line-height: 1.8; }
+
+  .unplaced-box { background: color-mix(in srgb, var(--red) 12%, transparent); border: 1px solid color-mix(in srgb, var(--red) 40%, transparent); border-radius: 10px; padding: 14px; }
+  .unplaced-title { font-size: 12px; color: var(--red); font-weight: 700; margin-bottom: 6px; }
+  .unplaced-item { font-size: 12px; color: var(--red); margin-left: 8px; }
+
+  .order-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .order-table th { text-align: left; font-size: 11px; color: var(--text3); padding: 6px 8px; border-bottom: 1px solid var(--border); letter-spacing: 1px; }
+  .order-table td { padding: 8px; font-size: 13px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
+  .order-table tr:last-child td { border-bottom: none; font-weight: 700; }
+
+  .btn-export {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--text2);
+    padding: 8px 14px; font-size: 12px; cursor: pointer; font-family: inherit; transition: all 0.15s;
+  }
+  .btn-export:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* GROUP TABS */
+  .group-tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+  .group-tab {
+    padding: 7px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 700;
+    border: 2px solid transparent; transition: all 0.15s; display: flex; align-items: center; gap: 8px;
+    background: var(--bg); color: var(--text3);
+  }
+  .group-tab:hover { border-color: var(--text4); color: var(--text); }
+  .group-tab.active { border-color: var(--accent); color: var(--text); background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
+  .group-tab .dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .group-tab .close {
+    font-size: 14px; color: var(--text4); cursor: pointer; margin-left: 4px;
+    transition: color 0.15s; background: none; border: none; padding: 0; line-height: 1;
+  }
+  .group-tab .close:hover { color: var(--red); }
+  .btn-add-group {
+    padding: 7px 12px; border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: 800;
+    border: 2px dashed var(--text4); background: none; color: var(--text4); transition: all 0.15s;
+  }
+  .btn-add-group:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* GROUP NAME INPUT */
+  .group-name-input {
+    background: var(--bg); border: 1px solid var(--text4); border-radius: 6px;
+    color: var(--text); padding: 5px 10px; font-size: 13px; font-family: inherit; width: 100%;
+  }
+  .group-name-input:focus { outline: none; border-color: var(--accent); }
+
+  /* GROUP COLOR PICKER */
+  .color-picker-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .color-swatch {
+    width: 28px; height: 28px; border-radius: 6px; cursor: pointer; border: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .color-swatch:hover { transform: scale(1.15); }
+  .color-swatch.active { border-color: white; transform: scale(1.15); box-shadow: 0 0 8px #fff4; }
+
+  /* GROUP SECTION HEADER */
+  .group-section-title {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+  }
+  .group-section-title .dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+  .group-section-title span { font-size: 10px; letter-spacing: 2.5px; font-weight: 700; text-transform: uppercase; }
+
+  /* RESULT GROUP HEADER */
+  .result-group-header {
+    display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 10px;
+    margin-bottom: 8px; border: 2px solid;
+  }
+  .result-group-header .dot { width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0; }
+  .result-group-header .name { font-size: 16px; font-weight: 800; }
+  .result-group-header .info { font-size: 12px; color: var(--text3); margin-left: auto; }
+
+  @media (max-width: 900px) {
+    .layout { flex-direction: column; }
+    .sidebar { flex: none; width: 100%; position: static; }
+    .main { min-width: 0; }
+  }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--text4); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1 class="mono">&#9670; CALEPINAGE PANNEAUX</h1>
+    <p>OPTIMISEUR DE DECOUPE &mdash; MULTI-COULEURS</p>
+  </div>
+  <div style="font-size:11px;color:var(--text4);">v3.0</div>
+</header>
+
+<div class="layout">
+  <div class="sidebar">
+    <!-- STOCK PANELS -->
+    <div class="card">
+      <div class="card-title">Panneaux fournisseur (communs)</div>
+      <div id="stockList"></div>
+      <div class="add-row" style="margin-top: 10px;">
+        <input type="number" id="newStockW" placeholder="L (mm)" min="1">
+        <span style="color:var(--text4);">&times;</span>
+        <input type="number" id="newStockH" placeholder="H (mm)" min="1">
+        <button class="btn-add" onclick="addStock()" title="Ajouter">+</button>
+      </div>
+    </div>
+
+    <!-- KERF -->
+    <div class="card">
+      <div class="card-title">Trait de scie</div>
+      <div class="kerf-row">
+        <input type="number" id="kerfInput" value="3" min="0" max="15" step="0.5">
+        <span style="font-size:13px;color:var(--text3);">mm par coupe</span>
+      </div>
+    </div>
+
+    <!-- GROUP TABS -->
+    <div class="card">
+      <div class="card-title">Types de panneaux (couleurs)</div>
+      <div class="group-tabs" id="groupTabs"></div>
+    </div>
+
+    <!-- ACTIVE GROUP CONTENT -->
+    <div id="activeGroupContent"></div>
+
+    <!-- OPTIMIZE -->
+    <button class="btn-optimize" onclick="optimize()">&#9654; OPTIMISER TOUT</button>
+
+    <!-- GLOBAL SUMMARY -->
+    <div class="card card-accent" id="summaryCard" style="display:none;">
+      <div class="card-title">Resultat global</div>
+      <div id="summaryContent"></div>
+    </div>
+
+    <!-- ORDER TABLE -->
+    <div class="card" id="orderCard" style="display:none;">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>Bon de commande</span>
+        <button class="btn-export" onclick="exportCSV()">&#128196; CSV</button>
+      </div>
+      <table class="order-table" id="orderTable"></table>
+    </div>
+  </div>
+
+  <div class="main" id="mainContent">
+    <div class="card placeholder">
+      <div class="icon">&#9670;</div>
+      <div class="text">
+        Configure tes types de panneaux et clique sur<br>
+        <span style="color:var(--accent);font-weight:700;">&#9654; OPTIMISER TOUT</span> pour generer le calepinage
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// PIECE COLORS (for pieces within a group)
+// ============================================================
+const PIECE_COLORS = [
+  '#4fd1c5','#f687b3','#68d391','#fbd38d','#76e4f7',
+  '#b794f4','#fc8181','#63b3ed','#f6e05e','#9ae6b4',
+  '#ed64a6','#4299e1','#48bb78','#ecc94b','#9f7aea',
+  '#fd9a51','#7be0cb','#e579c0','#a3d86e','#79b8ff'
+];
+
+// GROUP COLORS (for group identification)
+const GROUP_COLORS = [
+  '#4fd1c5', '#f687b3', '#fbd38d', '#76e4f7', '#b794f4',
+  '#68d391', '#fc8181', '#63b3ed', '#ed64a6', '#9f7aea',
+  '#fd9a51', '#ecc94b'
+];
+
+// ============================================================
+// DATA
+// ============================================================
+let stockPanels = [
+  { id: 1, w: 3650, h: 1800, active: true },
+  { id: 2, w: 2550, h: 1800, active: true },
+  { id: 3, w: 4250, h: 1600, active: true },
+  { id: 4, w: 3650, h: 1600, active: true },
+];
+let nextStockId = 5;
+
+let groups = [
+  {
+    id: 1,
+    name: 'Couleur 1',
+    color: GROUP_COLORS[0],
+    pieces: [
+      { id: 1, w: 2340, h: 600, qty: 1 },
+      { id: 2, w: 2340, h: 400, qty: 1 },
+      { id: 3, w: 2340, h: 800, qty: 1 },
+      { id: 4, w: 2340, h: 400, qty: 1 },
+      { id: 5, w: 3550, h: 350, qty: 1 },
+      { id: 6, w: 3550, h: 1000, qty: 1 },
+      { id: 7, w: 3550, h: 800, qty: 1 },
+    ],
+    nextPieceId: 8,
+  }
+];
+let nextGroupId = 2;
+let activeGroupId = 1;
+let allResults = null; // { groupId: { panels, unplaced } }
+
+// ============================================================
+// STOCK
+// ============================================================
+function renderStock() {
+  document.getElementById('stockList').innerHTML = stockPanels.map(s => {
+    const area = (s.w * s.h / 1e6).toFixed(2);
+    return `<label class="stock-row ${s.active ? '' : 'inactive'}">
+      <input type="checkbox" ${s.active ? 'checked' : ''} onchange="toggleStock(${s.id}, this.checked)">
+      <span class="stock-label mono">${s.w} &times; ${s.h} mm</span>
+      <span class="stock-area">${area} m&sup2;</span>
+      <button class="piece-remove" onclick="removeStock(${s.id}); event.preventDefault();">&times;</button>
+    </label>`;
+  }).join('');
+}
+function toggleStock(id, val) { stockPanels = stockPanels.map(s => s.id === id ? {...s, active: val} : s); renderStock(); }
+function addStock() {
+  const w = parseInt(document.getElementById('newStockW').value);
+  const h = parseInt(document.getElementById('newStockH').value);
+  if (!w || !h || w <= 0 || h <= 0) return;
+  stockPanels.push({ id: nextStockId++, w, h, active: true });
+  document.getElementById('newStockW').value = '';
+  document.getElementById('newStockH').value = '';
+  renderStock();
+}
+function removeStock(id) { stockPanels = stockPanels.filter(s => s.id !== id); renderStock(); }
+function getKerf() { return parseFloat(document.getElementById('kerfInput').value) || 0; }
+
+// ============================================================
+// GROUPS
+// ============================================================
+function getGroup(id) { return groups.find(g => g.id === id); }
+
+function renderGroupTabs() {
+  const el = document.getElementById('groupTabs');
+  let html = groups.map(g => {
+    const isActive = g.id === activeGroupId;
+    const totalPieces = g.pieces.reduce((s, p) => s + p.qty, 0);
+    return `<div class="group-tab ${isActive ? 'active' : ''}" onclick="selectGroup(${g.id})">
+      <span class="dot" style="background:${g.color};"></span>
+      <span>${g.name}</span>
+      <span style="font-size:10px;color:var(--text4);font-weight:400;">(${totalPieces})</span>
+      ${groups.length > 1 ? `<button class="close" onclick="removeGroup(${g.id}); event.stopPropagation();">&times;</button>` : ''}
+    </div>`;
+  }).join('');
+  html += `<button class="btn-add-group" onclick="addGroup()" title="Ajouter un type">+</button>`;
+  el.innerHTML = html;
+}
+
+function renderActiveGroup() {
+  const g = getGroup(activeGroupId);
+  if (!g) return;
+  const el = document.getElementById('activeGroupContent');
+
+  let piecesHtml = g.pieces.map((p, i) => {
+    const col = PIECE_COLORS[i % PIECE_COLORS.length];
+    return `<div class="piece-item" style="border-left: 3px solid ${col};">
+      <span class="piece-dot" style="background:${col};"></span>
+      <span class="piece-dim mono">${p.w} &times; ${p.h} mm</span>
+      <div class="piece-qty">
+        <button onclick="changeQty(${g.id}, ${p.id}, -1)">-</button>
+        <span class="mono">${p.qty}</span>
+        <button onclick="changeQty(${g.id}, ${p.id}, 1)">+</button>
+      </div>
+      <button class="piece-remove" onclick="removePiece(${g.id}, ${p.id})">&times;</button>
+    </div>`;
+  }).join('');
+
+  // Color swatches
+  let colorSwatches = GROUP_COLORS.map(c =>
+    `<div class="color-swatch ${c === g.color ? 'active' : ''}" style="background:${c};" onclick="setGroupColor(${g.id}, '${c}')"></div>`
+  ).join('');
+
+  el.innerHTML = `
+    <div class="card" style="border-color: ${g.color}44;">
+      <div class="group-section-title">
+        <span class="dot" style="background:${g.color};"></span>
+        <span style="color:${g.color};">${g.name} &mdash; Pieces (${g.pieces.reduce((s,p) => s+p.qty, 0)})</span>
+      </div>
+      <!-- Group name -->
+      <div style="margin-bottom: 12px;">
+        <input class="group-name-input" value="${g.name}" onchange="renameGroup(${g.id}, this.value)" placeholder="Nom du type">
+      </div>
+      <!-- Color picker -->
+      <div style="margin-bottom: 14px;">
+        <div style="font-size:10px;color:var(--text4);letter-spacing:1px;margin-bottom:6px;">COULEUR</div>
+        <div class="color-picker-row">${colorSwatches}</div>
+      </div>
+      <!-- Piece list -->
+      <div class="piece-list">${piecesHtml || '<div style="color:var(--text4);font-size:12px;padding:8px;">Aucune piece</div>'}</div>
+      <!-- Add piece -->
+      <div class="add-row">
+        <input type="number" id="newPieceW_${g.id}" placeholder="L (mm)" min="1">
+        <span style="color:var(--text4);">&times;</span>
+        <input type="number" id="newPieceH_${g.id}" placeholder="H (mm)" min="1">
+        <button class="btn-add" onclick="addPiece(${g.id})">+</button>
+      </div>
+    </div>
+  `;
+
+  // Add Enter key listeners for the active group inputs
+  setTimeout(() => {
+    const wInput = document.getElementById(`newPieceW_${g.id}`);
+    const hInput = document.getElementById(`newPieceH_${g.id}`);
+    if (wInput) wInput.onkeydown = (e) => { if (e.key === 'Enter') addPiece(g.id); };
+    if (hInput) hInput.onkeydown = (e) => { if (e.key === 'Enter') addPiece(g.id); };
+  }, 0);
+}
+
+function selectGroup(id) { activeGroupId = id; renderGroupTabs(); renderActiveGroup(); }
+
+function addGroup() {
+  const usedColors = groups.map(g => g.color);
+  const availColor = GROUP_COLORS.find(c => !usedColors.includes(c)) || GROUP_COLORS[groups.length % GROUP_COLORS.length];
+  groups.push({
+    id: nextGroupId,
+    name: `Couleur ${nextGroupId}`,
+    color: availColor,
+    pieces: [],
+    nextPieceId: 1,
+  });
+  activeGroupId = nextGroupId;
+  nextGroupId++;
+  renderGroupTabs();
+  renderActiveGroup();
+}
+
+function removeGroup(id) {
+  if (groups.length <= 1) return;
+  groups = groups.filter(g => g.id !== id);
+  if (activeGroupId === id) activeGroupId = groups[0].id;
+  renderGroupTabs();
+  renderActiveGroup();
+}
+
+function renameGroup(id, name) {
+  const g = getGroup(id);
+  if (g) { g.name = name || `Type ${id}`; renderGroupTabs(); }
+}
+
+function setGroupColor(id, color) {
+  const g = getGroup(id);
+  if (g) { g.color = color; renderGroupTabs(); renderActiveGroup(); }
+}
+
+function addPiece(groupId) {
+  const g = getGroup(groupId);
+  if (!g) return;
+  const w = parseInt(document.getElementById(`newPieceW_${groupId}`).value);
+  const h = parseInt(document.getElementById(`newPieceH_${groupId}`).value);
+  if (!w || !h || w <= 0 || h <= 0) return;
+  g.pieces.push({ id: g.nextPieceId++, w, h, qty: 1 });
+  document.getElementById(`newPieceW_${groupId}`).value = '';
+  document.getElementById(`newPieceH_${groupId}`).value = '';
+  renderGroupTabs();
+  renderActiveGroup();
+}
+
+function removePiece(groupId, pieceId) {
+  const g = getGroup(groupId);
+  if (g) { g.pieces = g.pieces.filter(p => p.id !== pieceId); renderGroupTabs(); renderActiveGroup(); }
+}
+
+function changeQty(groupId, pieceId, delta) {
+  const g = getGroup(groupId);
+  if (g) {
+    g.pieces = g.pieces.map(p => p.id === pieceId ? {...p, qty: Math.max(1, p.qty + delta)} : p);
+    renderGroupTabs();
+    renderActiveGroup();
+  }
+}
+
+// ============================================================
+// ALGORITHM (same as before)
+// ============================================================
+function expandPieces(pcs) {
+  const result = [];
+  let globalIdx = 0;
+  pcs.forEach((p, pieceTypeIdx) => {
+    for (let q = 0; q < p.qty; q++) {
+      result.push({ w: p.w, h: p.h, pieceTypeIdx, globalIdx: globalIdx++ });
+    }
+  });
+  return result;
+}
+
+function allFittingStocks(activeStocks, pw, ph) {
+  const fits = [];
+  for (const s of activeStocks) {
+    if ((s.w >= pw && s.h >= ph) || (s.w >= ph && s.h >= pw)) fits.push(s);
+  }
+  return fits.sort((a, b) => a.w * a.h - b.w * b.h);
+}
+
+function splitMaxRectShort(rect, pw, ph) {
+  const rects = [], rw = rect.w - pw, rh = rect.h - ph;
+  if (rw > 0 && rh > 0) {
+    if (rw < rh) { rects.push({ x: rect.x+pw, y: rect.y, w: rw, h: rect.h }); rects.push({ x: rect.x, y: rect.y+ph, w: pw, h: rh }); }
+    else { rects.push({ x: rect.x, y: rect.y+ph, w: rect.w, h: rh }); rects.push({ x: rect.x+pw, y: rect.y, w: rw, h: ph }); }
+  } else if (rw > 0) rects.push({ x: rect.x+pw, y: rect.y, w: rw, h: rect.h });
+  else if (rh > 0) rects.push({ x: rect.x, y: rect.y+ph, w: rect.w, h: rh });
+  return rects;
+}
+function splitMaxRectLong(rect, pw, ph) {
+  const rects = [], rw = rect.w - pw, rh = rect.h - ph;
+  if (rw > 0 && rh > 0) {
+    if (rw >= rh) { rects.push({ x: rect.x+pw, y: rect.y, w: rw, h: rect.h }); rects.push({ x: rect.x, y: rect.y+ph, w: pw, h: rh }); }
+    else { rects.push({ x: rect.x, y: rect.y+ph, w: rect.w, h: rh }); rects.push({ x: rect.x+pw, y: rect.y, w: rw, h: ph }); }
+  } else if (rw > 0) rects.push({ x: rect.x+pw, y: rect.y, w: rw, h: rect.h });
+  else if (rh > 0) rects.push({ x: rect.x, y: rect.y+ph, w: rect.w, h: rh });
+  return rects;
+}
+
+function heuristicBestAreaFit(freeRects, pw, ph) {
+  let bestIdx = -1, bestW = Infinity, bestR = false;
+  for (let i = 0; i < freeRects.length; i++) {
+    const r = freeRects[i];
+    if (r.w >= pw && r.h >= ph) { const w = r.w*r.h - pw*ph; if (w < bestW) { bestW=w; bestIdx=i; bestR=false; } }
+    if (r.w >= ph && r.h >= pw) { const w = r.w*r.h - pw*ph; if (w < bestW) { bestW=w; bestIdx=i; bestR=true; } }
+  }
+  return { idx: bestIdx, rotated: bestR };
+}
+function heuristicBestShortSideFit(freeRects, pw, ph) {
+  let bestIdx = -1, bestS = Infinity, bestR = false;
+  for (let i = 0; i < freeRects.length; i++) {
+    const r = freeRects[i];
+    if (r.w >= pw && r.h >= ph) { const s = Math.min(r.w-pw, r.h-ph); if (s < bestS) { bestS=s; bestIdx=i; bestR=false; } }
+    if (r.w >= ph && r.h >= pw) { const s = Math.min(r.w-ph, r.h-pw); if (s < bestS) { bestS=s; bestIdx=i; bestR=true; } }
+  }
+  return { idx: bestIdx, rotated: bestR };
+}
+function heuristicBottomLeft(freeRects, pw, ph) {
+  let bestIdx = -1, bestY = Infinity, bestX = Infinity, bestR = false;
+  for (let i = 0; i < freeRects.length; i++) {
+    const r = freeRects[i];
+    if (r.w >= pw && r.h >= ph) { if (r.y < bestY || (r.y===bestY && r.x < bestX)) { bestY=r.y; bestX=r.x; bestIdx=i; bestR=false; } }
+    if (r.w >= ph && r.h >= pw) { if (r.y < bestY || (r.y===bestY && r.x < bestX)) { bestY=r.y; bestX=r.x; bestIdx=i; bestR=true; } }
+  }
+  return { idx: bestIdx, rotated: bestR };
+}
+
+const SORT_STRATEGIES = [
+  (a,b) => (b.w*b.h) - (a.w*a.h),
+  (a,b) => b.h - a.h || b.w - a.w,
+  (a,b) => b.w - a.w || b.h - a.h,
+  (a,b) => (b.w+b.h) - (a.w+a.h),
+  (a,b) => Math.max(b.w,b.h) - Math.max(a.w,a.h),
+];
+const HEURISTICS = [heuristicBestAreaFit, heuristicBestShortSideFit, heuristicBottomLeft];
+const SPLITS = [splitMaxRectShort, splitMaxRectLong];
+
+function placePiece(panel, piece, rectIdx, rotated, kerf, splitFn) {
+  const r = panel.freeRects[rectIdx];
+  const fw = rotated ? piece.h : piece.w, fh = rotated ? piece.w : piece.h;
+  panel.placements.push({ ...piece, w: fw, h: fh, x: r.x, y: r.y, pieceNum: panel.placements.length+1, rotated });
+  panel.freeRects.splice(rectIdx, 1, ...splitFn(r, fw+kerf, fh+kerf));
+}
+
+function packAttempt(activeStocks, expanded, kerf, sortFn, hFn, sFn, stockPref) {
+  const sorted = [...expanded].sort(sortFn);
+  const panels = [], unplaced = [];
+  for (const piece of sorted) {
+    const pw = piece.w+kerf, ph = piece.h+kerf;
+    let placed = false;
+    for (const panel of panels) {
+      const { idx, rotated } = hFn(panel.freeRects, pw, ph);
+      if (idx !== -1) { placePiece(panel, piece, idx, rotated, kerf, sFn); placed = true; break; }
+    }
+    if (!placed) {
+      const fits = allFittingStocks(activeStocks, pw, ph);
+      if (!fits.length) { unplaced.push(piece); continue; }
+      let stock;
+      if (stockPref === 'largest') stock = fits[fits.length-1];
+      else if (typeof stockPref === 'number') stock = fits[Math.min(stockPref, fits.length-1)];
+      else stock = fits[0];
+      const panel = { stock: {...stock, label: `${stock.w}\u00d7${stock.h}`}, idx: panels.length+1, placements: [], freeRects: [{x:0,y:0,w:stock.w,h:stock.h}] };
+      panels.push(panel);
+      const { idx, rotated } = hFn(panel.freeRects, pw, ph);
+      if (idx !== -1) placePiece(panel, piece, idx, rotated, kerf, sFn);
+      else unplaced.push(piece);
+    }
+  }
+  return { panels, unplaced };
+}
+
+function scoreResult(r) {
+  if (!r) return Infinity;
+  return r.panels.reduce((s,p) => s+p.stock.w*p.stock.h, 0) + r.panels.length*1000 + r.unplaced.length*1e9;
+}
+
+function optimizePack(activeStocks, expanded, kerf) {
+  let best = null, bestScore = Infinity;
+  const prefs = ['smallest','largest'];
+  for (let i = 0; i < Math.min(activeStocks.length, 4); i++) prefs.push(i);
+  for (const sort of SORT_STRATEGIES)
+    for (const h of HEURISTICS)
+      for (const s of SPLITS)
+        for (const pref of prefs) {
+          const r = packAttempt(activeStocks, expanded, kerf, sort, h, s, pref);
+          const sc = scoreResult(r);
+          if (sc < bestScore) { bestScore = sc; best = r; }
+        }
+  if (best) {
+    best.panels.forEach((p,i) => { p.idx = i+1; p.placements.forEach((pl,j) => { pl.pieceNum = j+1; }); });
+  }
+  return best;
+}
+
+// ============================================================
+// MAIN OPTIMIZE — runs per group
+// ============================================================
+function optimize() {
+  const activeStocks = stockPanels.filter(s => s.active);
+  if (!activeStocks.length) { alert('Active au moins un panneau fournisseur !'); return; }
+
+  const kerf = getKerf();
+  allResults = {};
+  let hasAny = false;
+
+  for (const g of groups) {
+    if (!g.pieces.length) { allResults[g.id] = { panels: [], unplaced: [] }; continue; }
+    hasAny = true;
+    const expanded = expandPieces(g.pieces);
+    allResults[g.id] = optimizePack(activeStocks, expanded, kerf);
+  }
+
+  if (!hasAny) { alert('Ajoute des pieces dans au moins un type !'); return; }
+  renderAllResults();
+}
+
+// ============================================================
+// RENDER ALL RESULTS
+// ============================================================
+function renderAllResults() {
+  const mainEl = document.getElementById('mainContent');
+  let html = '';
+
+  let grandTotalStock = 0, grandTotalUsed = 0, grandTotalPanels = 0;
+  const grandStockCount = {}; // { "groupName|label": count }
+  const orderByGroup = []; // { groupName, groupColor, stockCount: {label: count} }
+
+  for (const g of groups) {
+    const result = allResults[g.id];
+    if (!result || !result.panels.length && !result.unplaced.length) continue;
+
+    const groupTotalStock = result.panels.reduce((s,p) => s+p.stock.w*p.stock.h, 0);
+    const groupTotalUsed = result.panels.reduce((s,p) => s+p.placements.reduce((ss,pl)=>ss+pl.w*pl.h,0), 0);
+    const groupWaste = groupTotalStock ? ((1-groupTotalUsed/groupTotalStock)*100).toFixed(1) : '0.0';
+
+    grandTotalStock += groupTotalStock;
+    grandTotalUsed += groupTotalUsed;
+    grandTotalPanels += result.panels.length;
+
+    const gStockCount = {};
+    result.panels.forEach(p => { gStockCount[p.stock.label] = (gStockCount[p.stock.label]||0)+1; });
+    orderByGroup.push({ name: g.name, color: g.color, stockCount: gStockCount, totalPanels: result.panels.length });
+
+    // Group header
+    html += `<div class="result-group-header" style="border-color:${g.color}44; background:${g.color}0a;">
+      <span class="dot" style="background:${g.color};"></span>
+      <span class="name">${g.name}</span>
+      <span class="info">${result.panels.length} panneau${result.panels.length>1?'x':''} &mdash; chute ${groupWaste}%</span>
+    </div>`;
+
+    // Panels
+    const colorMap = {};
+    g.pieces.forEach((_, i) => { colorMap[i] = PIECE_COLORS[i % PIECE_COLORS.length]; });
+
+    for (const panel of result.panels) {
+      html += renderPanelCard(panel, colorMap, g);
+    }
+
+    // Unplaced
+    if (result.unplaced.length > 0) {
+      html += `<div class="unplaced-box">
+        <div class="unplaced-title">&#9888; ${g.name} &mdash; Pieces non placees (${result.unplaced.length})</div>
+        ${result.unplaced.map(p => `<div class="unplaced-item">&bull; ${p.w}&times;${p.h} mm</div>`).join('')}
+      </div>`;
+    }
+
+    html += '<div style="height:24px;"></div>';
+  }
+
+  mainEl.innerHTML = html || '<div class="card placeholder"><div class="icon">&#9888;</div><div class="text">Aucun resultat</div></div>';
+
+  // Global summary
+  const globalWaste = grandTotalStock ? ((1-grandTotalUsed/grandTotalStock)*100).toFixed(1) : '0.0';
+  const wasteStyle = globalWaste < 20 ? 'color:var(--green)' : globalWaste < 35 ? 'color:var(--yellow)' : 'color:var(--red)';
+
+  let sumHTML = `<div class="summary-row"><span class="summary-label">Total panneaux</span><span class="summary-value" style="font-size:16px;">${grandTotalPanels}</span></div>`;
+
+  for (const og of orderByGroup) {
+    sumHTML += `<div class="summary-divider"></div>`;
+    sumHTML += `<div class="summary-row"><span class="summary-label" style="display:flex;align-items:center;gap:6px;">
+      <span style="width:8px;height:8px;border-radius:50%;background:${og.color};display:inline-block;"></span> ${og.name}
+    </span><span class="summary-value">${og.totalPanels}</span></div>`;
+    for (const [label, count] of Object.entries(og.stockCount)) {
+      sumHTML += `<div class="summary-row summary-sub"><span class="summary-label">&rdsh; ${label} mm</span><span class="summary-value" style="color:${og.color};">&times; ${count}</span></div>`;
+    }
+  }
+
+  sumHTML += `<div class="summary-divider"></div>`;
+  sumHTML += `<div class="summary-row"><span class="summary-label">Surface achetee</span><span class="summary-value">${(grandTotalStock/1e6).toFixed(2)} m&sup2;</span></div>`;
+  sumHTML += `<div class="summary-row"><span class="summary-label">Surface utile</span><span class="summary-value" style="color:var(--green);">${(grandTotalUsed/1e6).toFixed(2)} m&sup2;</span></div>`;
+  sumHTML += `<div class="summary-row"><span class="summary-label">Chute globale</span><span class="summary-value" style="${wasteStyle};font-size:15px;">${globalWaste}%</span></div>`;
+
+  document.getElementById('summaryContent').innerHTML = sumHTML;
+  document.getElementById('summaryCard').style.display = 'block';
+
+  // Order table — grouped by type
+  let tableHTML = `<tr><th>TYPE</th><th>FORMAT</th><th>QTE</th><th>SURFACE</th></tr>`;
+  for (const og of orderByGroup) {
+    for (const [label, count] of Object.entries(og.stockCount)) {
+      const dims = label.split('\u00d7').map(Number);
+      const area = (dims[0]*dims[1]*count/1e6).toFixed(2);
+      tableHTML += `<tr>
+        <td style="display:flex;align-items:center;gap:6px;">
+          <span style="width:8px;height:8px;border-radius:50%;background:${og.color};display:inline-block;"></span>
+          ${og.name}
+        </td>
+        <td class="mono">${label} mm</td>
+        <td style="text-align:center;color:${og.color};font-weight:700;">&times; ${count}</td>
+        <td>${area} m&sup2;</td>
+      </tr>`;
+    }
+  }
+  tableHTML += `<tr><td></td><td>TOTAL</td><td style="text-align:center;">${grandTotalPanels}</td><td>${(grandTotalStock/1e6).toFixed(2)} m&sup2;</td></tr>`;
+  document.getElementById('orderTable').innerHTML = tableHTML;
+  document.getElementById('orderCard').style.display = 'block';
+}
+
+function renderPanelCard(panel, colorMap, group) {
+  const maxW = 520, maxH = 280;
+  const scale = Math.min(maxW / panel.stock.w, maxH / panel.stock.h);
+  const svgW = Math.round(panel.stock.w * scale);
+  const svgH = Math.round(panel.stock.h * scale);
+  const totalArea = panel.stock.w * panel.stock.h;
+  const usedArea = panel.placements.reduce((s, p) => s + p.w * p.h, 0);
+  const waste = ((1 - usedArea / totalArea) * 100).toFixed(1);
+  const wasteCls = waste < 20 ? '' : waste < 35 ? 'medium' : 'high';
+  const kerf = getKerf();
+
+  let svg = `<rect x="0" y="0" width="${svgW}" height="${svgH}" fill="#0a0e18" rx="4"/>`;
+  for (let x = 500; x < panel.stock.w; x += 500)
+    svg += `<line x1="${x*scale}" y1="0" x2="${x*scale}" y2="${svgH}" stroke="#ffffff06"/>`;
+  for (let y = 500; y < panel.stock.h; y += 500)
+    svg += `<line x1="0" y1="${y*scale}" x2="${svgW}" y2="${y*scale}" stroke="#ffffff06"/>`;
+
+  for (const p of panel.placements) {
+    const col = colorMap[p.pieceTypeIdx] || '#4fd1c5';
+    const px = p.x*scale+1, py = p.y*scale+1, pw = p.w*scale-2, ph = p.h*scale-2;
+    const label = `${panel.idx}.${p.pieceNum}`;
+    const fs = Math.max(8, Math.min(14, Math.min(pw, ph)/3.5));
+    svg += `<rect x="${px}" y="${py}" width="${pw}" height="${ph}" fill="${col}" fill-opacity="0.22" stroke="${col}" stroke-width="1.5" rx="3"/>`;
+    if (p.rotated && pw > 18 && ph > 18)
+      svg += `<text x="${px+pw-5}" y="${py+11}" font-size="9" fill="${col}" fill-opacity="0.5" font-family="monospace">\u21bb</text>`;
+    if (pw > 32 && ph > 16) {
+      const ty = ph > 28 ? py+ph/2-fs*0.4 : py+ph/2;
+      svg += `<text x="${px+pw/2}" y="${ty}" text-anchor="middle" dominant-baseline="middle" fill="${col}" font-size="${fs*1.1}" font-weight="800" font-family="monospace">${label}</text>`;
+      if (ph > 28)
+        svg += `<text x="${px+pw/2}" y="${py+ph/2+fs}" text-anchor="middle" fill="${col}" font-size="${fs*0.75}" fill-opacity="0.7" font-family="monospace">${p.w}\u00d7${p.h}</text>`;
+    }
+    if (kerf > 0) {
+      const kpx = Math.max(1, kerf*scale);
+      if (p.x+p.w+kerf <= panel.stock.w) svg += `<rect x="${(p.x+p.w)*scale}" y="${p.y*scale}" width="${kpx}" height="${p.h*scale}" fill="#ff6b6b" fill-opacity="0.15"/>`;
+      if (p.y+p.h+kerf <= panel.stock.h) svg += `<rect x="${p.x*scale}" y="${(p.y+p.h)*scale}" width="${p.w*scale}" height="${kpx}" fill="#ff6b6b" fill-opacity="0.15"/>`;
+    }
+  }
+
+  svg += `<rect x="0" y="0" width="${svgW}" height="${svgH}" fill="none" stroke="#4a5568" stroke-width="1.5" rx="4"/>`;
+  svg += `<text x="${svgW/2}" y="${svgH+16}" text-anchor="middle" fill="#4a5568" font-size="10" font-family="monospace">${panel.stock.w} mm</text>`;
+  svg += `<text x="-${svgH/2}" y="-8" text-anchor="middle" fill="#4a5568" font-size="10" font-family="monospace" transform="rotate(-90)">${panel.stock.h} mm</text>`;
+
+  const legend = panel.placements.map(p => {
+    const col = colorMap[p.pieceTypeIdx] || '#4fd1c5';
+    return `<span class="legend-tag" style="border-color:${col};color:${col};background:${col}18;">${panel.idx}.${p.pieceNum} &mdash; ${p.w}&times;${p.h}${p.rotated?' \u21bb':''}</span>`;
+  }).join('');
+
+  return `<div class="panel-card" style="border-left: 4px solid ${group.color};">
+    <div class="panel-header">
+      <div>
+        <span class="panel-title">Panneau ${panel.idx}</span>
+        <span class="panel-subtitle mono">${panel.stock.label} mm</span>
+        <span style="font-size:11px;color:${group.color};margin-left:8px;font-weight:700;">${group.name}</span>
+      </div>
+      <div class="panel-badges">
+        <span class="badge" style="color:var(--text3);">${panel.placements.length} piece${panel.placements.length>1?'s':''}</span>
+        <span class="badge badge-waste ${wasteCls}">chute ${waste}%</span>
+      </div>
+    </div>
+    <svg class="panel-svg" width="${svgW}" height="${svgH+22}" viewBox="-16 -2 ${svgW+20} ${svgH+24}">${svg}</svg>
+    <div class="panel-legend">${legend}</div>
+  </div>`;
+}
+
+// ============================================================
+// EXPORT CSV
+// ============================================================
+function exportCSV() {
+  if (!allResults) return;
+  let csv = 'Type;Panneau;Format;Ref;Piece L;Piece H;Rotation;Position X;Position Y\n';
+  for (const g of groups) {
+    const result = allResults[g.id];
+    if (!result) continue;
+    for (const panel of result.panels) {
+      for (const p of panel.placements) {
+        csv += `${g.name};${panel.idx};${panel.stock.label};${panel.idx}.${p.pieceNum};${p.w};${p.h};${p.rotated?'Oui':'Non'};${p.x};${p.y}\n`;
+      }
+    }
+  }
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `calepinage_${new Date().toISOString().slice(0,10)}.csv`;
+  link.click();
+}
+
+// ============================================================
+// KEYBOARD
+// ============================================================
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) optimize();
+});
+['newStockW','newStockH'].forEach(id => {
+  document.getElementById(id)?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addStock(); });
+});
+
+// ============================================================
+// INIT
+// ============================================================
+renderStock();
+renderGroupTabs();
+renderActiveGroup();
+</script>
+</body>
+</html>
