@@ -25,7 +25,7 @@
   header p { font-size: 11px; color: var(--text4); letter-spacing: 2px; margin-top: 2px; }
 
   .layout { display: flex; gap: 20px; align-items: flex-start; }
-  .sidebar { flex: 0 0 340px; display: flex; flex-direction: column; gap: 14px; position: sticky; top: 20px; }
+  .sidebar { flex: 0 0 360px; display: flex; flex-direction: column; gap: 14px; position: sticky; top: 20px; }
   .main { flex: 1; min-width: 400px; display: flex; flex-direction: column; gap: 16px; }
 
   .card { background: var(--card); border-radius: var(--radius); padding: 16px; border: 1px solid var(--border); }
@@ -45,7 +45,7 @@
   }
   .kerf-row input:focus { outline: none; border-color: var(--accent); }
 
-  .piece-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; max-height: 240px; overflow-y: auto; }
+  .piece-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; max-height: 200px; overflow-y: auto; }
   .piece-item {
     display: flex; align-items: center; gap: 8px; background: var(--bg); border-radius: 8px;
     padding: 6px 10px; border: 1px solid transparent; transition: border-color 0.15s;
@@ -92,6 +92,7 @@
   .summary-label { color: var(--text3); }
   .summary-value { font-weight: 700; }
   .summary-sub { padding-left: 14px; font-size: 12px; }
+  .summary-sub2 { padding-left: 28px; font-size: 11px; }
   .summary-divider { border-top: 1px solid var(--border); margin: 6px 0; }
 
   .panel-card { background: var(--card); border-radius: 14px; padding: 18px; border: 1px solid var(--border); box-shadow: 0 4px 24px #0006; }
@@ -173,6 +174,39 @@
   .group-section-title .dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
   .group-section-title span { font-size: 10px; letter-spacing: 2.5px; font-weight: 700; text-transform: uppercase; }
 
+  /* SUBSECTION TABS (façades) */
+  .subsection-zone { margin-bottom: 12px; }
+  .subsection-label { font-size: 10px; color: var(--text4); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px; }
+  .subsection-tabs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+  .subsection-tab {
+    padding: 5px 11px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600;
+    border: 1.5px solid transparent; transition: all 0.15s; display: flex; align-items: center; gap: 5px;
+    background: var(--bg); color: var(--text3);
+  }
+  .subsection-tab:hover { border-color: var(--text4); color: var(--text); }
+  .subsection-tab.active { border-color: var(--accent); color: var(--text); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); }
+  .subsection-tab .sdot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .subsection-tab .sclose {
+    font-size: 12px; color: var(--text4); cursor: pointer; margin-left: 2px;
+    transition: color 0.15s; background: none; border: none; padding: 0; line-height: 1;
+  }
+  .subsection-tab .sclose:hover { color: var(--red); }
+  .btn-add-subsection {
+    padding: 4px 9px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 800;
+    border: 1.5px dashed var(--text4); background: none; color: var(--text4); transition: all 0.15s;
+  }
+  .btn-add-subsection:hover { border-color: var(--accent); color: var(--accent); }
+  .subsection-name-input {
+    background: var(--bg); border: 1px solid var(--text4); border-radius: 6px;
+    color: var(--text); padding: 4px 8px; font-size: 12px; font-family: inherit; width: 100%;
+    margin-bottom: 10px;
+  }
+  .subsection-name-input:focus { outline: none; border-color: var(--accent); }
+  .facade-badge {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 10px; padding: 2px 7px;
+    border-radius: 4px; font-weight: 700; margin-bottom: 8px;
+  }
+
   /* RESULT GROUP HEADER */
   .result-group-header {
     display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 10px;
@@ -181,6 +215,15 @@
   .result-group-header .dot { width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0; }
   .result-group-header .name { font-size: 16px; font-weight: 800; }
   .result-group-header .info { font-size: 12px; color: var(--text3); margin-left: auto; }
+
+  /* RESULT SUBSECTION HEADER */
+  .result-subsection-header {
+    display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 7px;
+    margin-bottom: 6px; margin-top: 4px; border: 1px solid;
+  }
+  .result-subsection-header .sdot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .result-subsection-header .sname { font-size: 13px; font-weight: 700; }
+  .result-subsection-header .sinfo { font-size: 11px; color: var(--text3); margin-left: auto; }
 
   @media (max-width: 900px) {
     .layout { flex-direction: column; }
@@ -197,9 +240,9 @@
 <header>
   <div>
     <h1 class="mono">&#9670; CALEPINAGE PANNEAUX</h1>
-    <p>OPTIMISEUR DE DECOUPE &mdash; MULTI-COULEURS</p>
+    <p>OPTIMISEUR DE DECOUPE &mdash; MULTI-COULEURS &mdash; MULTI-FACADES</p>
   </div>
-  <div style="font-size:11px;color:var(--text4);">v3.0</div>
+  <div style="font-size:11px;color:var(--text4);">v4.0</div>
 </header>
 
 <div class="layout">
@@ -227,7 +270,7 @@
 
     <!-- GROUP TABS -->
     <div class="card">
-      <div class="card-title">Types de panneaux (couleurs)</div>
+      <div class="card-title">Types de panneaux</div>
       <div class="group-tabs" id="groupTabs"></div>
     </div>
 
@@ -257,7 +300,7 @@
     <div class="card placeholder">
       <div class="icon">&#9670;</div>
       <div class="text">
-        Configure tes types de panneaux et clique sur<br>
+        Configure tes types de panneaux, ajoute tes facades et clique sur<br>
         <span style="color:var(--accent);font-weight:700;">&#9654; OPTIMISER TOUT</span> pour generer le calepinage
       </div>
     </div>
@@ -266,7 +309,7 @@
 
 <script>
 // ============================================================
-// PIECE COLORS (for pieces within a group)
+// COLORS
 // ============================================================
 const PIECE_COLORS = [
   '#4fd1c5','#f687b3','#68d391','#fbd38d','#76e4f7',
@@ -275,7 +318,6 @@ const PIECE_COLORS = [
   '#fd9a51','#7be0cb','#e579c0','#a3d86e','#79b8ff'
 ];
 
-// GROUP COLORS (for group identification)
 const GROUP_COLORS = [
   '#4fd1c5', '#f687b3', '#fbd38d', '#76e4f7', '#b794f4',
   '#68d391', '#fc8181', '#63b3ed', '#ed64a6', '#9f7aea',
@@ -296,23 +338,31 @@ let nextStockId = 5;
 let groups = [
   {
     id: 1,
-    name: 'Couleur 1',
+    name: 'Type 1',
     color: GROUP_COLORS[0],
-    pieces: [
-      { id: 1, w: 2340, h: 600, qty: 1 },
-      { id: 2, w: 2340, h: 400, qty: 1 },
-      { id: 3, w: 2340, h: 800, qty: 1 },
-      { id: 4, w: 2340, h: 400, qty: 1 },
-      { id: 5, w: 3550, h: 350, qty: 1 },
-      { id: 6, w: 3550, h: 1000, qty: 1 },
-      { id: 7, w: 3550, h: 800, qty: 1 },
+    subsections: [
+      {
+        id: 1,
+        name: 'Facade 1',
+        pieces: [
+          { id: 1, w: 2340, h: 600, qty: 1 },
+          { id: 2, w: 2340, h: 400, qty: 1 },
+          { id: 3, w: 2340, h: 800, qty: 1 },
+          { id: 4, w: 2340, h: 400, qty: 1 },
+          { id: 5, w: 3550, h: 350, qty: 1 },
+          { id: 6, w: 3550, h: 1000, qty: 1 },
+          { id: 7, w: 3550, h: 800, qty: 1 },
+        ],
+        nextPieceId: 8,
+      }
     ],
-    nextPieceId: 8,
+    nextSubsectionId: 2,
+    activeSubsectionId: 1,
   }
 ];
 let nextGroupId = 2;
 let activeGroupId = 1;
-let allResults = null; // { groupId: { panels, unplaced } }
+let allResults = null;
 
 // ============================================================
 // STOCK
@@ -342,19 +392,40 @@ function removeStock(id) { stockPanels = stockPanels.filter(s => s.id !== id); r
 function getKerf() { return parseFloat(document.getElementById('kerfInput').value) || 0; }
 
 // ============================================================
-// GROUPS
+// GROUPS & SUBSECTIONS
 // ============================================================
 function getGroup(id) { return groups.find(g => g.id === id); }
+function getSubsection(groupId, subId) {
+  const g = getGroup(groupId);
+  return g ? g.subsections.find(s => s.id === subId) : null;
+}
+function getActiveSubsection(groupId) {
+  const g = getGroup(groupId);
+  return g ? getSubsection(groupId, g.activeSubsectionId) : null;
+}
+function getTotalPieceCount(g) {
+  return g.subsections.reduce((s, sub) => s + sub.pieces.reduce((ss, p) => ss + p.qty, 0), 0);
+}
+function getAllGroupPieces(g) {
+  const all = [];
+  for (const sub of g.subsections) {
+    for (const p of sub.pieces) {
+      all.push({ ...p, subsectionId: sub.id, subsectionName: sub.name });
+    }
+  }
+  return all;
+}
 
 function renderGroupTabs() {
   const el = document.getElementById('groupTabs');
   let html = groups.map(g => {
     const isActive = g.id === activeGroupId;
-    const totalPieces = g.pieces.reduce((s, p) => s + p.qty, 0);
+    const totalPieces = getTotalPieceCount(g);
+    const facadeCount = g.subsections.length;
     return `<div class="group-tab ${isActive ? 'active' : ''}" onclick="selectGroup(${g.id})">
       <span class="dot" style="background:${g.color};"></span>
       <span>${g.name}</span>
-      <span style="font-size:10px;color:var(--text4);font-weight:400;">(${totalPieces})</span>
+      <span style="font-size:10px;color:var(--text4);font-weight:400;">${facadeCount}f &middot; ${totalPieces}p</span>
       ${groups.length > 1 ? `<button class="close" onclick="removeGroup(${g.id}); event.stopPropagation();">&times;</button>` : ''}
     </div>`;
   }).join('');
@@ -366,11 +437,31 @@ function renderActiveGroup() {
   const g = getGroup(activeGroupId);
   if (!g) return;
   const el = document.getElementById('activeGroupContent');
+  const activeSub = getSubsection(g.id, g.activeSubsectionId);
+  if (!activeSub) return;
 
-  let piecesHtml = g.pieces.map((p, i) => {
+  // Subsection tabs
+  let subTabsHtml = g.subsections.map((sub, i) => {
+    const isActive = sub.id === g.activeSubsectionId;
     const col = PIECE_COLORS[i % PIECE_COLORS.length];
-    return `<div class="piece-item" style="border-left: 3px solid ${col};">
-      <span class="piece-dot" style="background:${col};"></span>
+    const subPieces = sub.pieces.reduce((s, p) => s + p.qty, 0);
+    return `<div class="subsection-tab ${isActive ? 'active' : ''}" onclick="selectSubsection(${g.id}, ${sub.id})">
+      <span class="sdot" style="background:${col};"></span>
+      <span>${sub.name}</span>
+      <span style="font-size:10px;color:var(--text4);font-weight:400;">(${subPieces})</span>
+      ${g.subsections.length > 1 ? `<button class="sclose" onclick="removeSubsection(${g.id}, ${sub.id}); event.stopPropagation();">&times;</button>` : ''}
+    </div>`;
+  }).join('');
+  subTabsHtml += `<button class="btn-add-subsection" onclick="addSubsection(${g.id})" title="Ajouter une facade">+</button>`;
+
+  // Active subsection index for color
+  const subIdx = g.subsections.findIndex(s => s.id === activeSub.id);
+  const subColor = PIECE_COLORS[subIdx % PIECE_COLORS.length];
+
+  // Pieces of active subsection
+  let piecesHtml = activeSub.pieces.map((p, i) => {
+    return `<div class="piece-item" style="border-left: 3px solid ${subColor};">
+      <span class="piece-dot" style="background:${subColor};"></span>
       <span class="piece-dim mono">${p.w} &times; ${p.h} mm</span>
       <div class="piece-qty">
         <button onclick="changeQty(${g.id}, ${p.id}, -1)">-</button>
@@ -390,19 +481,30 @@ function renderActiveGroup() {
     <div class="card" style="border-color: ${g.color}44;">
       <div class="group-section-title">
         <span class="dot" style="background:${g.color};"></span>
-        <span style="color:${g.color};">${g.name} &mdash; Pieces (${g.pieces.reduce((s,p) => s+p.qty, 0)})</span>
+        <span style="color:${g.color};">${g.name} &mdash; ${getTotalPieceCount(g)} pieces sur ${g.subsections.length} facade${g.subsections.length > 1 ? 's' : ''}</span>
       </div>
       <!-- Group name -->
       <div style="margin-bottom: 12px;">
-        <input class="group-name-input" value="${g.name}" onchange="renameGroup(${g.id}, this.value)" placeholder="Nom du type">
+        <input class="group-name-input" value="${g.name}" onchange="renameGroup(${g.id}, this.value)" placeholder="Nom du type de panneau">
       </div>
       <!-- Color picker -->
       <div style="margin-bottom: 14px;">
-        <div style="font-size:10px;color:var(--text4);letter-spacing:1px;margin-bottom:6px;">COULEUR</div>
+        <div style="font-size:10px;color:var(--text4);letter-spacing:1px;margin-bottom:6px;">COULEUR DU TYPE</div>
         <div class="color-picker-row">${colorSwatches}</div>
       </div>
+      <!-- Subsection tabs -->
+      <div class="subsection-zone">
+        <div class="subsection-label">&#9679; Facades</div>
+        <div class="subsection-tabs">${subTabsHtml}</div>
+      </div>
+      <!-- Active subsection name -->
+      <div style="margin-bottom: 10px;">
+        <input class="subsection-name-input" value="${activeSub.name}"
+          onchange="renameSubsection(${g.id}, ${activeSub.id}, this.value)"
+          placeholder="Nom de la facade">
+      </div>
       <!-- Piece list -->
-      <div class="piece-list">${piecesHtml || '<div style="color:var(--text4);font-size:12px;padding:8px;">Aucune piece</div>'}</div>
+      <div class="piece-list">${piecesHtml || '<div style="color:var(--text4);font-size:12px;padding:8px;">Aucune piece dans cette facade</div>'}</div>
       <!-- Add piece -->
       <div class="add-row">
         <input type="number" id="newPieceW_${g.id}" placeholder="L (mm)" min="1">
@@ -413,7 +515,6 @@ function renderActiveGroup() {
     </div>
   `;
 
-  // Add Enter key listeners for the active group inputs
   setTimeout(() => {
     const wInput = document.getElementById(`newPieceW_${g.id}`);
     const hInput = document.getElementById(`newPieceH_${g.id}`);
@@ -429,10 +530,11 @@ function addGroup() {
   const availColor = GROUP_COLORS.find(c => !usedColors.includes(c)) || GROUP_COLORS[groups.length % GROUP_COLORS.length];
   groups.push({
     id: nextGroupId,
-    name: `Couleur ${nextGroupId}`,
+    name: `Type ${nextGroupId}`,
     color: availColor,
-    pieces: [],
-    nextPieceId: 1,
+    subsections: [{ id: 1, name: 'Facade 1', pieces: [], nextPieceId: 1 }],
+    nextSubsectionId: 2,
+    activeSubsectionId: 1,
   });
   activeGroupId = nextGroupId;
   nextGroupId++;
@@ -458,13 +560,45 @@ function setGroupColor(id, color) {
   if (g) { g.color = color; renderGroupTabs(); renderActiveGroup(); }
 }
 
-function addPiece(groupId) {
+// --- SUBSECTION FUNCTIONS ---
+function selectSubsection(groupId, subId) {
+  const g = getGroup(groupId);
+  if (g) { g.activeSubsectionId = subId; renderActiveGroup(); }
+}
+
+function addSubsection(groupId) {
   const g = getGroup(groupId);
   if (!g) return;
+  const newId = g.nextSubsectionId++;
+  g.subsections.push({ id: newId, name: `Facade ${newId}`, pieces: [], nextPieceId: 1 });
+  g.activeSubsectionId = newId;
+  renderGroupTabs();
+  renderActiveGroup();
+}
+
+function removeSubsection(groupId, subId) {
+  const g = getGroup(groupId);
+  if (!g || g.subsections.length <= 1) return;
+  g.subsections = g.subsections.filter(s => s.id !== subId);
+  if (g.activeSubsectionId === subId) g.activeSubsectionId = g.subsections[0].id;
+  renderGroupTabs();
+  renderActiveGroup();
+}
+
+function renameSubsection(groupId, subId, name) {
+  const sub = getSubsection(groupId, subId);
+  if (sub) { sub.name = name || `Facade ${subId}`; renderGroupTabs(); renderActiveGroup(); }
+}
+
+// --- PIECE FUNCTIONS (work on active subsection) ---
+function addPiece(groupId) {
+  const g = getGroup(groupId);
+  const sub = getActiveSubsection(groupId);
+  if (!g || !sub) return;
   const w = parseInt(document.getElementById(`newPieceW_${groupId}`).value);
   const h = parseInt(document.getElementById(`newPieceH_${groupId}`).value);
   if (!w || !h || w <= 0 || h <= 0) return;
-  g.pieces.push({ id: g.nextPieceId++, w, h, qty: 1 });
+  sub.pieces.push({ id: sub.nextPieceId++, w, h, qty: 1 });
   document.getElementById(`newPieceW_${groupId}`).value = '';
   document.getElementById(`newPieceH_${groupId}`).value = '';
   renderGroupTabs();
@@ -472,28 +606,28 @@ function addPiece(groupId) {
 }
 
 function removePiece(groupId, pieceId) {
-  const g = getGroup(groupId);
-  if (g) { g.pieces = g.pieces.filter(p => p.id !== pieceId); renderGroupTabs(); renderActiveGroup(); }
+  const sub = getActiveSubsection(groupId);
+  if (sub) { sub.pieces = sub.pieces.filter(p => p.id !== pieceId); renderGroupTabs(); renderActiveGroup(); }
 }
 
 function changeQty(groupId, pieceId, delta) {
-  const g = getGroup(groupId);
-  if (g) {
-    g.pieces = g.pieces.map(p => p.id === pieceId ? {...p, qty: Math.max(1, p.qty + delta)} : p);
+  const sub = getActiveSubsection(groupId);
+  if (sub) {
+    sub.pieces = sub.pieces.map(p => p.id === pieceId ? {...p, qty: Math.max(1, p.qty + delta)} : p);
     renderGroupTabs();
     renderActiveGroup();
   }
 }
 
 // ============================================================
-// ALGORITHM (same as before)
+// ALGORITHM
 // ============================================================
 function expandPieces(pcs) {
   const result = [];
   let globalIdx = 0;
   pcs.forEach((p, pieceTypeIdx) => {
     for (let q = 0; q < p.qty; q++) {
-      result.push({ w: p.w, h: p.h, pieceTypeIdx, globalIdx: globalIdx++ });
+      result.push({ ...p, pieceTypeIdx, globalIdx: globalIdx++ });
     }
   });
   return result;
@@ -622,7 +756,7 @@ function optimizePack(activeStocks, expanded, kerf) {
 }
 
 // ============================================================
-// MAIN OPTIMIZE — runs per group
+// MAIN OPTIMIZE — runs per group, flattening all subsections
 // ============================================================
 function optimize() {
   const activeStocks = stockPanels.filter(s => s.active);
@@ -633,10 +767,18 @@ function optimize() {
   let hasAny = false;
 
   for (const g of groups) {
-    if (!g.pieces.length) { allResults[g.id] = { panels: [], unplaced: [] }; continue; }
+    const allPieces = getAllGroupPieces(g);
+    if (!allPieces.length) { allResults[g.id] = { panels: [], unplaced: [], allPieces: [], subsectionColorMap: {} }; continue; }
     hasAny = true;
-    const expanded = expandPieces(g.pieces);
-    allResults[g.id] = optimizePack(activeStocks, expanded, kerf);
+    const expanded = expandPieces(allPieces);
+    const result = optimizePack(activeStocks, expanded, kerf);
+    // Map subsectionId -> color
+    const subsectionColorMap = {};
+    g.subsections.forEach((sub, i) => { subsectionColorMap[sub.id] = PIECE_COLORS[i % PIECE_COLORS.length]; });
+    // colorMap by pieceTypeIdx -> subsection color
+    const colorMap = {};
+    allPieces.forEach((p, i) => { colorMap[i] = subsectionColorMap[p.subsectionId]; });
+    allResults[g.id] = { ...result, allPieces, subsectionColorMap, colorMap };
   }
 
   if (!hasAny) { alert('Ajoute des pieces dans au moins un type !'); return; }
@@ -651,12 +793,11 @@ function renderAllResults() {
   let html = '';
 
   let grandTotalStock = 0, grandTotalUsed = 0, grandTotalPanels = 0;
-  const grandStockCount = {}; // { "groupName|label": count }
-  const orderByGroup = []; // { groupName, groupColor, stockCount: {label: count} }
+  const orderByGroup = [];
 
   for (const g of groups) {
     const result = allResults[g.id];
-    if (!result || !result.panels.length && !result.unplaced.length) continue;
+    if (!result || (!result.panels.length && !result.unplaced.length)) continue;
 
     const groupTotalStock = result.panels.reduce((s,p) => s+p.stock.w*p.stock.h, 0);
     const groupTotalUsed = result.panels.reduce((s,p) => s+p.placements.reduce((ss,pl)=>ss+pl.w*pl.h,0), 0);
@@ -668,28 +809,37 @@ function renderAllResults() {
 
     const gStockCount = {};
     result.panels.forEach(p => { gStockCount[p.stock.label] = (gStockCount[p.stock.label]||0)+1; });
-    orderByGroup.push({ name: g.name, color: g.color, stockCount: gStockCount, totalPanels: result.panels.length });
+
+    // Stats per subsection
+    const subStats = {};
+    g.subsections.forEach(sub => { subStats[sub.id] = { name: sub.name, panels: new Set(), pieces: 0 }; });
+    result.panels.forEach(panel => {
+      panel.placements.forEach(pl => {
+        if (pl.subsectionId && subStats[pl.subsectionId]) {
+          subStats[pl.subsectionId].panels.add(panel.idx);
+          subStats[pl.subsectionId].pieces++;
+        }
+      });
+    });
+
+    orderByGroup.push({ name: g.name, color: g.color, stockCount: gStockCount, totalPanels: result.panels.length, subStats, subsections: g.subsections });
 
     // Group header
     html += `<div class="result-group-header" style="border-color:${g.color}44; background:${g.color}0a;">
       <span class="dot" style="background:${g.color};"></span>
       <span class="name">${g.name}</span>
+      <span style="font-size:11px;color:var(--text4);margin-left:4px;">${g.subsections.length} facade${g.subsections.length>1?'s':''}</span>
       <span class="info">${result.panels.length} panneau${result.panels.length>1?'x':''} &mdash; chute ${groupWaste}%</span>
     </div>`;
 
-    // Panels
-    const colorMap = {};
-    g.pieces.forEach((_, i) => { colorMap[i] = PIECE_COLORS[i % PIECE_COLORS.length]; });
-
     for (const panel of result.panels) {
-      html += renderPanelCard(panel, colorMap, g);
+      html += renderPanelCard(panel, result.colorMap, g, result.subsectionColorMap);
     }
 
-    // Unplaced
     if (result.unplaced.length > 0) {
       html += `<div class="unplaced-box">
         <div class="unplaced-title">&#9888; ${g.name} &mdash; Pieces non placees (${result.unplaced.length})</div>
-        ${result.unplaced.map(p => `<div class="unplaced-item">&bull; ${p.w}&times;${p.h} mm</div>`).join('')}
+        ${result.unplaced.map(p => `<div class="unplaced-item">&bull; ${p.w}&times;${p.h} mm ${p.subsectionName ? '('+p.subsectionName+')' : ''}</div>`).join('')}
       </div>`;
     }
 
@@ -709,8 +859,19 @@ function renderAllResults() {
     sumHTML += `<div class="summary-row"><span class="summary-label" style="display:flex;align-items:center;gap:6px;">
       <span style="width:8px;height:8px;border-radius:50%;background:${og.color};display:inline-block;"></span> ${og.name}
     </span><span class="summary-value">${og.totalPanels}</span></div>`;
+    // Per-facade stats
+    og.subsections.forEach((sub, i) => {
+      const col = PIECE_COLORS[i % PIECE_COLORS.length];
+      const st = og.subStats[sub.id];
+      if (st && st.pieces > 0) {
+        sumHTML += `<div class="summary-row summary-sub"><span class="summary-label" style="display:flex;align-items:center;gap:5px;">
+          <span style="width:6px;height:6px;border-radius:50%;background:${col};display:inline-block;"></span>
+          &rdsh; ${sub.name}
+        </span><span class="summary-value" style="color:${col};">${st.pieces} pieces</span></div>`;
+      }
+    });
     for (const [label, count] of Object.entries(og.stockCount)) {
-      sumHTML += `<div class="summary-row summary-sub"><span class="summary-label">&rdsh; ${label} mm</span><span class="summary-value" style="color:${og.color};">&times; ${count}</span></div>`;
+      sumHTML += `<div class="summary-row summary-sub2"><span class="summary-label">&rdsh; ${label} mm</span><span class="summary-value" style="color:${og.color};">&times; ${count}</span></div>`;
     }
   }
 
@@ -722,7 +883,7 @@ function renderAllResults() {
   document.getElementById('summaryContent').innerHTML = sumHTML;
   document.getElementById('summaryCard').style.display = 'block';
 
-  // Order table — grouped by type
+  // Order table
   let tableHTML = `<tr><th>TYPE</th><th>FORMAT</th><th>QTE</th><th>SURFACE</th></tr>`;
   for (const og of orderByGroup) {
     for (const [label, count] of Object.entries(og.stockCount)) {
@@ -744,7 +905,7 @@ function renderAllResults() {
   document.getElementById('orderCard').style.display = 'block';
 }
 
-function renderPanelCard(panel, colorMap, group) {
+function renderPanelCard(panel, colorMap, group, subsectionColorMap) {
   const maxW = 520, maxH = 280;
   const scale = Math.min(maxW / panel.stock.w, maxH / panel.stock.h);
   const svgW = Math.round(panel.stock.w * scale);
@@ -788,7 +949,8 @@ function renderPanelCard(panel, colorMap, group) {
 
   const legend = panel.placements.map(p => {
     const col = colorMap[p.pieceTypeIdx] || '#4fd1c5';
-    return `<span class="legend-tag" style="border-color:${col};color:${col};background:${col}18;">${panel.idx}.${p.pieceNum} &mdash; ${p.w}&times;${p.h}${p.rotated?' \u21bb':''}</span>`;
+    const facadeLabel = p.subsectionName ? ` [${p.subsectionName}]` : '';
+    return `<span class="legend-tag" style="border-color:${col};color:${col};background:${col}18;">${panel.idx}.${p.pieceNum}${facadeLabel} &mdash; ${p.w}\u00d7${p.h}${p.rotated?' \u21bb':''}</span>`;
   }).join('');
 
   return `<div class="panel-card" style="border-left: 4px solid ${group.color};">
@@ -813,13 +975,13 @@ function renderPanelCard(panel, colorMap, group) {
 // ============================================================
 function exportCSV() {
   if (!allResults) return;
-  let csv = 'Type;Panneau;Format;Ref;Piece L;Piece H;Rotation;Position X;Position Y\n';
+  let csv = 'Type;Facade;Panneau;Format;Ref;Piece L;Piece H;Rotation;Position X;Position Y\n';
   for (const g of groups) {
     const result = allResults[g.id];
     if (!result) continue;
     for (const panel of result.panels) {
       for (const p of panel.placements) {
-        csv += `${g.name};${panel.idx};${panel.stock.label};${panel.idx}.${p.pieceNum};${p.w};${p.h};${p.rotated?'Oui':'Non'};${p.x};${p.y}\n`;
+        csv += `${g.name};${p.subsectionName||''};${panel.idx};${panel.stock.label};${panel.idx}.${p.pieceNum};${p.w};${p.h};${p.rotated?'Oui':'Non'};${p.x};${p.y}\n`;
       }
     }
   }
