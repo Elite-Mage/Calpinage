@@ -526,9 +526,35 @@
           <input type="number" id="ossEntaxeMax" value="600" min="100" max="1200" step="50" oninput="ossatureConfig.entaxeMax=+this.value; renderOssature(); scheduleSave();">
         </div>
         <div>
+          <label>Trait de scie oss. (mm)</label>
+          <input type="number" id="ossKerf" value="0" min="0" max="10" step="0.5" oninput="ossatureConfig.kerf=+this.value; renderOssature(); scheduleSave();">
+        </div>
+      </div>
+    </div>
+    <!-- OMEGA STOCK -->
+    <div class="card">
+      <div class="card-title">Oméga &#937; &mdash; Longueurs fournisseur</div>
+      <div id="omegaStockList"></div>
+      <div class="add-row" style="margin-top:8px;">
+        <input type="number" id="newOmegaLen" placeholder="Longueur (mm)" min="1">
+        <button class="btn-add" onclick="addOmegaStock()">+</button>
+      </div>
+      <div class="oss-config" style="margin-top:10px;">
+        <div>
           <label>Prix omega (&#8364;/ml)</label>
           <input type="number" id="ossPrixOmega" value="" placeholder="0.00" min="0" step="0.01" oninput="ossatureConfig.prixOmega=this.value; renderOssature(); scheduleSave();">
         </div>
+      </div>
+    </div>
+    <!-- ZED STOCK -->
+    <div class="card">
+      <div class="card-title">Zed Z &mdash; Longueurs fournisseur</div>
+      <div id="zedStockList"></div>
+      <div class="add-row" style="margin-top:8px;">
+        <input type="number" id="newZedLen" placeholder="Longueur (mm)" min="1">
+        <button class="btn-add" onclick="addZedStock()">+</button>
+      </div>
+      <div class="oss-config" style="margin-top:10px;">
         <div>
           <label>Prix zed (&#8364;/ml)</label>
           <input type="number" id="ossPrixZed" value="" placeholder="0.00" min="0" step="0.01" oninput="ossatureConfig.prixZed=this.value; renderOssature(); scheduleSave();">
@@ -651,7 +677,7 @@ let nextGroupId = 2;
 let activeGroupId = 1;
 let allResults = null;
 let activeSection = 'panneaux'; // 'panneaux' | 'ossature' | 'devis'
-let ossatureConfig = { entaxeMax: 600, prixOmega: '', prixZed: '' };
+let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [3000, 4000], zedStocks: [3000, 4000] };
 let devisConfig = { prixMO: '' };
 
 // ============================================================
@@ -1596,10 +1622,13 @@ function applyProjectData(data) {
     activeGroupId = data.activeGroupId || groups[0]?.id;
   }
   if (data.ossatureConfig) {
-    ossatureConfig = { ...ossatureConfig, ...data.ossatureConfig };
+    ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], ...data.ossatureConfig };
     document.getElementById('ossEntaxeMax').value = ossatureConfig.entaxeMax || 600;
+    document.getElementById('ossKerf').value = ossatureConfig.kerf || 0;
     document.getElementById('ossPrixOmega').value = ossatureConfig.prixOmega || '';
     document.getElementById('ossPrixZed').value = ossatureConfig.prixZed || '';
+    renderOmegaStockList();
+    renderZedStockList();
   }
   if (data.devisConfig) {
     devisConfig = { ...devisConfig, ...data.devisConfig };
@@ -1829,6 +1858,101 @@ function switchSection(name) {
 }
 
 // ============================================================
+// OSSATURE — STOCK MANAGEMENT (Omega & Zed lengths)
+// ============================================================
+function renderOmegaStockList() {
+  const el = document.getElementById('omegaStockList');
+  if (!ossatureConfig.omegaStocks || !ossatureConfig.omegaStocks.length) {
+    el.innerHTML = '<div style="color:var(--text4);font-size:12px;padding:4px;">Aucune longueur — ajoute ci-dessous</div>';
+    return;
+  }
+  el.innerHTML = ossatureConfig.omegaStocks.map((len, i) =>
+    `<div class="stock-row" style="margin-bottom:4px;">
+      <span class="stock-label mono">${len} mm <span style="color:var(--text4);font-size:11px;">(${(len/1000).toFixed(2)} m)</span></span>
+      <button class="piece-remove" onclick="removeOmegaStock(${i})">&times;</button>
+    </div>`
+  ).join('');
+}
+function renderZedStockList() {
+  const el = document.getElementById('zedStockList');
+  if (!ossatureConfig.zedStocks || !ossatureConfig.zedStocks.length) {
+    el.innerHTML = '<div style="color:var(--text4);font-size:12px;padding:4px;">Aucune longueur — ajoute ci-dessous</div>';
+    return;
+  }
+  el.innerHTML = ossatureConfig.zedStocks.map((len, i) =>
+    `<div class="stock-row" style="margin-bottom:4px;">
+      <span class="stock-label mono">${len} mm <span style="color:var(--text4);font-size:11px;">(${(len/1000).toFixed(2)} m)</span></span>
+      <button class="piece-remove" onclick="removeZedStock(${i})">&times;</button>
+    </div>`
+  ).join('');
+}
+function addOmegaStock() {
+  const v = parseInt(document.getElementById('newOmegaLen').value);
+  if (!v || v <= 0) return;
+  if (!ossatureConfig.omegaStocks) ossatureConfig.omegaStocks = [];
+  ossatureConfig.omegaStocks.push(v);
+  ossatureConfig.omegaStocks.sort((a,b) => a - b);
+  document.getElementById('newOmegaLen').value = '';
+  renderOmegaStockList(); renderOssature(); scheduleSave();
+}
+function addZedStock() {
+  const v = parseInt(document.getElementById('newZedLen').value);
+  if (!v || v <= 0) return;
+  if (!ossatureConfig.zedStocks) ossatureConfig.zedStocks = [];
+  ossatureConfig.zedStocks.push(v);
+  ossatureConfig.zedStocks.sort((a,b) => a - b);
+  document.getElementById('newZedLen').value = '';
+  renderZedStockList(); renderOssature(); scheduleSave();
+}
+function removeOmegaStock(i) {
+  ossatureConfig.omegaStocks.splice(i, 1);
+  renderOmegaStockList(); renderOssature(); scheduleSave();
+}
+function removeZedStock(i) {
+  ossatureConfig.zedStocks.splice(i, 1);
+  renderZedStockList(); renderOssature(); scheduleSave();
+}
+
+// ============================================================
+// 1D BIN PACKING — First Fit Decreasing
+// ============================================================
+function binPack1D(cuts, stockLengths, kerf) {
+  // cuts = array of lengths needed (mm)
+  // stockLengths = available bar lengths (mm), sorted ascending
+  // Returns { bars: [{stock, cuts, remaining}], totalStock, totalUsed, waste }
+  if (!cuts.length || !stockLengths.length) return { bars: [], totalStock: 0, totalUsed: 0, waste: 0, unplaced: cuts };
+  const sorted = [...cuts].sort((a,b) => b - a); // largest first
+  const stocks = [...stockLengths].sort((a,b) => a - b);
+  const bars = [];
+  const unplaced = [];
+
+  for (const cut of sorted) {
+    // Try to fit in existing bar
+    let placed = false;
+    for (const bar of bars) {
+      if (bar.remaining >= cut) {
+        bar.cuts.push(cut);
+        bar.remaining -= cut + kerf;
+        bar.usedLen += cut;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      // Open new bar — pick smallest stock that fits
+      const stock = stocks.find(s => s >= cut);
+      if (!stock) { unplaced.push(cut); continue; }
+      const bar = { stock, cuts: [cut], remaining: stock - cut - kerf, usedLen: cut };
+      bars.push(bar);
+    }
+  }
+
+  const totalStock = bars.reduce((s,b) => s + b.stock, 0);
+  const totalUsed = bars.reduce((s,b) => s + b.usedLen, 0);
+  return { bars, totalStock, totalUsed, waste: totalStock - totalUsed, unplaced };
+}
+
+// ============================================================
 // OSSATURE CALCULATION
 // ============================================================
 function calcOssature() {
@@ -1838,14 +1962,11 @@ function calcOssature() {
   for (const g of groups) {
     const groupData = { group: g, subsections: [] };
     for (const sub of g.subsections) {
-      const subData = { subsection: sub, pieces: [], totalOmegaML: 0, totalZedML: 0 };
-      // Count total panels in this subsection to calculate omega
+      const subData = { subsection: sub, pieces: [], totalOmegaML: 0, totalZedML: 0, omegaCuts: [], zedCuts: [] };
       const totalPanelsInSub = sub.pieces.reduce((s, p) => s + p.qty, 0);
-      // Omegas = total panels + 1 (one at each junction + ends)
       const totalOmegas = totalPanelsInSub > 0 ? totalPanelsInSub + 1 : 0;
 
       for (const p of sub.pieces) {
-        // Number of zed per panel = intermediate supports
         const nbZed = Math.max(0, Math.ceil(p.w / entaxeMax) - 1);
         subData.pieces.push({
           ...p,
@@ -1854,24 +1975,29 @@ function calcOssature() {
           zedML: nbZed * p.qty * p.h / 1000,
         });
         subData.totalZedML += nbZed * p.qty * p.h / 1000;
+        // Collect individual zed cuts (each zed = panel height)
+        for (let q = 0; q < p.qty; q++) {
+          for (let z = 0; z < nbZed; z++) {
+            subData.zedCuts.push(p.h);
+          }
+        }
       }
 
-      // Calculate omega ML: each omega has the height of the panels it separates
-      // Simplified: we use avg height, but more accurately we sum individual panel heights
-      // For each panel, it contributes 1 omega (left side) of its height
-      // Plus 1 extra omega (right side of last panel)
+      // Omega cuts: 1 per panel (left side) + 1 extra (right end)
       let omegaML = 0;
       for (const p of sub.pieces) {
-        omegaML += p.qty * p.h / 1000; // each panel contributes 1 omega (left)
+        omegaML += p.qty * p.h / 1000;
+        for (let q = 0; q < p.qty; q++) {
+          subData.omegaCuts.push(p.h);
+        }
       }
-      // Add 1 extra omega for the rightmost edge (use max height of all pieces)
       if (sub.pieces.length > 0) {
         const maxH = Math.max(...sub.pieces.map(p => p.h));
         omegaML += maxH / 1000;
+        subData.omegaCuts.push(maxH);
       }
       subData.totalOmegaML = omegaML;
       subData.totalOmegas = totalOmegas;
-
       groupData.subsections.push(subData);
     }
     results.push(groupData);
@@ -1880,10 +2006,14 @@ function calcOssature() {
 }
 
 function renderOssature() {
+  renderOmegaStockList();
+  renderZedStockList();
+
   const data = calcOssature();
   const el = document.getElementById('ossatureContent');
   const prixOmega = parseFloat(ossatureConfig.prixOmega) || 0;
   const prixZed = parseFloat(ossatureConfig.prixZed) || 0;
+  const kerf = ossatureConfig.kerf || 0;
 
   if (groups.every(g => g.subsections.every(s => s.pieces.length === 0))) {
     el.innerHTML = '<div class="card placeholder"><div class="icon">&#9670;</div><div class="text">Aucune pièce configurée.<br>Ajoute des pièces dans l\'onglet <span style="color:var(--accent);font-weight:700;">Panneaux</span>.</div></div>';
@@ -1891,8 +2021,11 @@ function renderOssature() {
     return;
   }
 
-  let html = '';
+  // Collect ALL cuts across all groups/subsections
+  let allOmegaCuts = [], allZedCuts = [];
   let grandOmegaML = 0, grandZedML = 0;
+
+  let html = '';
 
   for (const gd of data) {
     const g = gd.group;
@@ -1906,15 +2039,19 @@ function renderOssature() {
       const sub = sd.subsection;
       const subIdx = g.subsections.indexOf(sub);
       const subColor = PIECE_COLORS[subIdx % PIECE_COLORS.length];
-
       if (sd.pieces.length === 0) continue;
+
+      allOmegaCuts.push(...sd.omegaCuts);
+      allZedCuts.push(...sd.zedCuts);
+      grandOmegaML += sd.totalOmegaML;
+      grandZedML += sd.totalZedML;
 
       html += `<div class="oss-card" style="border-left: 3px solid ${subColor};">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
           <span style="width:10px;height:10px;border-radius:50%;background:${subColor};display:inline-block;"></span>
           <span style="font-weight:700;font-size:14px;">${sub.name}</span>
-          <span class="oss-badge omega">&#937; ${sd.totalOmegaML.toFixed(2)} ml</span>
-          <span class="oss-badge zed">Z ${sd.totalZedML.toFixed(2)} ml</span>
+          <span class="oss-badge omega">&#937; ${sd.totalOmegaML.toFixed(2)} ml utiles</span>
+          <span class="oss-badge zed">Z ${sd.totalZedML.toFixed(2)} ml utiles</span>
         </div>
         <table class="oss-table">
           <tr><th>Pièce (L×H)</th><th>Qté</th><th>Zed/pièce</th><th>Total Zed</th><th>ML Zed</th></tr>`;
@@ -1931,42 +2068,109 @@ function renderOssature() {
 
       html += `<tr class="total-row">
         <td colspan="2" style="text-align:right;color:var(--text3);">Totaux façade</td>
-        <td colspan="2" style="text-align:center;"><span class="oss-badge omega">&#937; ${sd.totalOmegas} = ${sd.totalOmegaML.toFixed(2)} ml</span></td>
+        <td colspan="2" style="text-align:center;"><span class="oss-badge omega">&#937; ${sd.totalOmegas} pcs = ${sd.totalOmegaML.toFixed(2)} ml</span></td>
         <td><span class="oss-badge zed">Z ${sd.totalZedML.toFixed(2)} ml</span></td>
       </tr>`;
 
-      if (prixOmega || prixZed) {
-        const coutOmega = sd.totalOmegaML * prixOmega;
-        const coutZed = sd.totalZedML * prixZed;
-        html += `<tr><td colspan="3"></td><td colspan="2" style="color:var(--yellow);font-weight:700;text-align:right;">
-          ${prixOmega ? '&#937; ' + coutOmega.toFixed(2) + ' €' : ''} ${prixZed ? '&nbsp; Z ' + coutZed.toFixed(2) + ' €' : ''}
-        </td></tr>`;
-      }
-
       html += `</table></div>`;
-
-      grandOmegaML += sd.totalOmegaML;
-      grandZedML += sd.totalZedML;
     }
+  }
+
+  // ── BIN PACKING RESULTS ──
+  const omegaStocks = ossatureConfig.omegaStocks || [];
+  const zedStocks = ossatureConfig.zedStocks || [];
+  const omegaPack = omegaStocks.length ? binPack1D(allOmegaCuts, omegaStocks, kerf) : null;
+  const zedPack = zedStocks.length ? binPack1D(allZedCuts, zedStocks, kerf) : null;
+
+  // Omega cutting plan
+  if (omegaPack) {
+    const omegaOrderedML = omegaPack.totalStock / 1000;
+    const omegaWaste = omegaPack.totalStock ? ((omegaPack.waste / omegaPack.totalStock) * 100).toFixed(1) : '0.0';
+    const wasteCls = omegaWaste < 15 ? 'color:var(--green)' : omegaWaste < 30 ? 'color:var(--yellow)' : 'color:var(--red)';
+    // Count bars by stock length
+    const omegaBarCount = {};
+    omegaPack.bars.forEach(b => { omegaBarCount[b.stock] = (omegaBarCount[b.stock]||0) + 1; });
+
+    html += `<div class="oss-card" style="border-color:var(--accent)44;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <span class="oss-badge omega" style="font-size:12px;">&#937; PLAN DE COUPE OMÉGA</span>
+        <span style="font-size:12px;color:var(--text3);">${grandOmegaML.toFixed(2)} ml utiles &rarr; ${omegaOrderedML.toFixed(2)} ml commandés</span>
+        <span style="font-size:12px;font-weight:700;${wasteCls};">chute ${omegaWaste}%</span>
+      </div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:8px;">Commande : ${Object.entries(omegaBarCount).map(([l,c]) => `${c} × ${l} mm`).join(', ')}</div>
+      <table class="oss-table">
+        <tr><th>Barre</th><th>Stock</th><th>Coupes</th><th>Chute</th></tr>`;
+    omegaPack.bars.forEach((bar, i) => {
+      const chute = bar.stock - bar.usedLen;
+      html += `<tr>
+        <td style="font-weight:700;">&#937;-${i+1}</td>
+        <td class="mono">${bar.stock} mm</td>
+        <td class="mono" style="font-size:11px;">${bar.cuts.map(c => c + ' mm').join(' + ')}</td>
+        <td style="${chute > bar.stock*0.3 ? 'color:var(--red)' : chute > bar.stock*0.15 ? 'color:var(--yellow)' : 'color:var(--green)'};font-weight:700;">${chute} mm (${(chute/bar.stock*100).toFixed(1)}%)</td>
+      </tr>`;
+    });
+    if (omegaPack.unplaced.length) {
+      html += `<tr><td colspan="4" style="color:var(--red);font-weight:700;">&#9888; ${omegaPack.unplaced.length} coupe(s) impossible(s) — aucun stock assez long : ${omegaPack.unplaced.map(c => c+'mm').join(', ')}</td></tr>`;
+    }
+    html += `</table></div>`;
+  }
+
+  // Zed cutting plan
+  if (zedPack) {
+    const zedOrderedML = zedPack.totalStock / 1000;
+    const zedWaste = zedPack.totalStock ? ((zedPack.waste / zedPack.totalStock) * 100).toFixed(1) : '0.0';
+    const wasteCls = zedWaste < 15 ? 'color:var(--green)' : zedWaste < 30 ? 'color:var(--yellow)' : 'color:var(--red)';
+    const zedBarCount = {};
+    zedPack.bars.forEach(b => { zedBarCount[b.stock] = (zedBarCount[b.stock]||0) + 1; });
+
+    html += `<div class="oss-card" style="border-color:var(--yellow)44;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <span class="oss-badge zed" style="font-size:12px;">Z PLAN DE COUPE ZED</span>
+        <span style="font-size:12px;color:var(--text3);">${grandZedML.toFixed(2)} ml utiles &rarr; ${zedOrderedML.toFixed(2)} ml commandés</span>
+        <span style="font-size:12px;font-weight:700;${wasteCls};">chute ${zedWaste}%</span>
+      </div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:8px;">Commande : ${Object.entries(zedBarCount).map(([l,c]) => `${c} × ${l} mm`).join(', ')}</div>
+      <table class="oss-table">
+        <tr><th>Barre</th><th>Stock</th><th>Coupes</th><th>Chute</th></tr>`;
+    zedPack.bars.forEach((bar, i) => {
+      const chute = bar.stock - bar.usedLen;
+      html += `<tr>
+        <td style="font-weight:700;">Z-${i+1}</td>
+        <td class="mono">${bar.stock} mm</td>
+        <td class="mono" style="font-size:11px;">${bar.cuts.map(c => c + ' mm').join(' + ')}</td>
+        <td style="${chute > bar.stock*0.3 ? 'color:var(--red)' : chute > bar.stock*0.15 ? 'color:var(--yellow)' : 'color:var(--green)'};font-weight:700;">${chute} mm (${(chute/bar.stock*100).toFixed(1)}%)</td>
+      </tr>`;
+    });
+    if (zedPack.unplaced.length) {
+      html += `<tr><td colspan="4" style="color:var(--red);font-weight:700;">&#9888; ${zedPack.unplaced.length} coupe(s) impossible(s) : ${zedPack.unplaced.map(c => c+'mm').join(', ')}</td></tr>`;
+    }
+    html += `</table></div>`;
   }
 
   el.innerHTML = html;
 
-  // Summary
+  // ── Summary sidebar ──
   const sumEl = document.getElementById('ossatureSummaryContent');
   let sumHTML = '';
-  sumHTML += `<div class="summary-row"><span class="summary-label">Total Oméga</span><span class="summary-value" style="color:var(--accent);">${grandOmegaML.toFixed(2)} ml</span></div>`;
-  sumHTML += `<div class="summary-row"><span class="summary-label">Total Zed</span><span class="summary-value" style="color:var(--yellow);">${grandZedML.toFixed(2)} ml</span></div>`;
-  if (prixOmega) {
-    sumHTML += `<div class="summary-divider"></div>`;
-    sumHTML += `<div class="summary-row"><span class="summary-label">Coût Oméga</span><span class="summary-value" style="color:var(--accent);">${(grandOmegaML * prixOmega).toFixed(2)} €</span></div>`;
+  sumHTML += `<div class="summary-row"><span class="summary-label">Oméga utiles</span><span class="summary-value" style="color:var(--accent);">${grandOmegaML.toFixed(2)} ml</span></div>`;
+  if (omegaPack) {
+    sumHTML += `<div class="summary-row"><span class="summary-label">Oméga commandés</span><span class="summary-value">${(omegaPack.totalStock/1000).toFixed(2)} ml (${omegaPack.bars.length} barres)</span></div>`;
+    sumHTML += `<div class="summary-row"><span class="summary-label">Chute oméga</span><span class="summary-value" style="color:var(--yellow);">${(omegaPack.waste/1000).toFixed(2)} ml</span></div>`;
   }
-  if (prixZed) {
-    sumHTML += `<div class="summary-row"><span class="summary-label">Coût Zed</span><span class="summary-value" style="color:var(--yellow);">${(grandZedML * prixZed).toFixed(2)} €</span></div>`;
+  sumHTML += `<div class="summary-divider"></div>`;
+  sumHTML += `<div class="summary-row"><span class="summary-label">Zed utiles</span><span class="summary-value" style="color:var(--yellow);">${grandZedML.toFixed(2)} ml</span></div>`;
+  if (zedPack) {
+    sumHTML += `<div class="summary-row"><span class="summary-label">Zed commandés</span><span class="summary-value">${(zedPack.totalStock/1000).toFixed(2)} ml (${zedPack.bars.length} barres)</span></div>`;
+    sumHTML += `<div class="summary-row"><span class="summary-label">Chute zed</span><span class="summary-value" style="color:var(--yellow);">${(zedPack.waste/1000).toFixed(2)} ml</span></div>`;
   }
   if (prixOmega || prixZed) {
     sumHTML += `<div class="summary-divider"></div>`;
-    sumHTML += `<div class="summary-row"><span class="summary-label">Total ossature</span><span class="summary-value" style="font-size:15px;">${(grandOmegaML * prixOmega + grandZedML * prixZed).toFixed(2)} €</span></div>`;
+    const omegaCostML = omegaPack ? omegaPack.totalStock/1000 : grandOmegaML;
+    const zedCostML = zedPack ? zedPack.totalStock/1000 : grandZedML;
+    if (prixOmega) sumHTML += `<div class="summary-row"><span class="summary-label">Coût Oméga</span><span class="summary-value" style="color:var(--accent);">${(omegaCostML * prixOmega).toFixed(2)} €</span></div>`;
+    if (prixZed) sumHTML += `<div class="summary-row"><span class="summary-label">Coût Zed</span><span class="summary-value" style="color:var(--yellow);">${(zedCostML * prixZed).toFixed(2)} €</span></div>`;
+    sumHTML += `<div class="summary-divider"></div>`;
+    sumHTML += `<div class="summary-row"><span class="summary-label">Total ossature</span><span class="summary-value" style="font-size:15px;">${(omegaCostML * prixOmega + zedCostML * prixZed).toFixed(2)} €</span></div>`;
   }
   sumEl.innerHTML = sumHTML;
   document.getElementById('ossatureSummaryCard').style.display = 'block';
@@ -2036,33 +2240,53 @@ function renderDevis() {
   // ── 2. Section Ossature ──
   const ossData = calcOssature();
   let grandOmegaML = 0, grandZedML = 0;
+  let allOmegaCutsDevis = [], allZedCutsDevis = [];
   for (const gd of ossData) {
     for (const sd of gd.subsections) {
       grandOmegaML += sd.totalOmegaML;
       grandZedML += sd.totalZedML;
+      allOmegaCutsDevis.push(...sd.omegaCuts);
+      allZedCutsDevis.push(...sd.zedCuts);
     }
   }
-  const coutOmega = grandOmegaML * prixOmega;
-  const coutZed = grandZedML * prixZed;
+  const ossKerf = ossatureConfig.kerf || 0;
+  const omStocks = ossatureConfig.omegaStocks || [];
+  const zdStocks = ossatureConfig.zedStocks || [];
+  const omPack = omStocks.length ? binPack1D(allOmegaCutsDevis, omStocks, ossKerf) : null;
+  const zdPack = zdStocks.length ? binPack1D(allZedCutsDevis, zdStocks, ossKerf) : null;
+  const omegaCmdML = omPack ? omPack.totalStock/1000 : grandOmegaML;
+  const zedCmdML = zdPack ? zdPack.totalStock/1000 : grandZedML;
+  const coutOmega = omegaCmdML * prixOmega;
+  const coutZed = zedCmdML * prixZed;
   totalOssatureHT = coutOmega + coutZed;
+
+  // Count bars for order
+  const omBarCount = omPack ? {} : null;
+  if (omPack) omPack.bars.forEach(b => { omBarCount[b.stock] = (omBarCount[b.stock]||0)+1; });
+  const zdBarCount = zdPack ? {} : null;
+  if (zdPack) zdPack.bars.forEach(b => { zdBarCount[b.stock] = (zdBarCount[b.stock]||0)+1; });
 
   html += `<div class="oss-card"><div class="devis-section">
     <div class="devis-section-title">2. Ossature</div>
     <table class="devis-table">
-      <tr><th>Élément</th><th>Quantité</th><th>Prix/ml</th><th>Total HT</th></tr>
+      <tr><th>Élément</th><th>ML utiles</th><th>ML commandés</th><th>Détail commande</th><th>Prix/ml</th><th>Total HT</th></tr>
       <tr>
         <td><span class="oss-badge omega">Oméga (&#937;)</span></td>
         <td class="mono">${grandOmegaML.toFixed(2)} ml</td>
+        <td class="mono" style="font-weight:700;">${omegaCmdML.toFixed(2)} ml</td>
+        <td style="font-size:11px;color:var(--text3);">${omBarCount ? Object.entries(omBarCount).map(([l,c]) => c+' × '+l+' mm').join(', ') : '—'}</td>
         <td>${prixOmega ? prixOmega.toFixed(2)+' €' : '—'}</td>
         <td style="color:var(--yellow);font-weight:700;">${coutOmega ? coutOmega.toFixed(2)+' €' : '—'}</td>
       </tr>
       <tr>
         <td><span class="oss-badge zed">Zed (Z)</span></td>
         <td class="mono">${grandZedML.toFixed(2)} ml</td>
+        <td class="mono" style="font-weight:700;">${zedCmdML.toFixed(2)} ml</td>
+        <td style="font-size:11px;color:var(--text3);">${zdBarCount ? Object.entries(zdBarCount).map(([l,c]) => c+' × '+l+' mm').join(', ') : '—'}</td>
         <td>${prixZed ? prixZed.toFixed(2)+' €' : '—'}</td>
         <td style="color:var(--yellow);font-weight:700;">${coutZed ? coutZed.toFixed(2)+' €' : '—'}</td>
       </tr>
-      <tr style="font-weight:700;"><td colspan="3" style="text-align:right;color:var(--text3);">Sous-total ossature</td><td style="color:var(--yellow);">${totalOssatureHT ? totalOssatureHT.toFixed(2)+' €' : '—'}</td></tr>
+      <tr style="font-weight:700;"><td colspan="5" style="text-align:right;color:var(--text3);">Sous-total ossature</td><td style="color:var(--yellow);">${totalOssatureHT ? totalOssatureHT.toFixed(2)+' €' : '—'}</td></tr>
     </table>
   </div></div>`;
 
@@ -2154,16 +2378,22 @@ function exportDevisPDF() {
   // Ossature
   const ossData = calcOssature();
   let grandOmegaML = 0, grandZedML = 0;
-  for (const gd of ossData) { for (const sd of gd.subsections) { grandOmegaML += sd.totalOmegaML; grandZedML += sd.totalZedML; } }
-  const cOmega = grandOmegaML * prixOmega, cZed = grandZedML * prixZed;
+  let pdfOmCuts = [], pdfZdCuts = [];
+  for (const gd of ossData) { for (const sd of gd.subsections) { grandOmegaML += sd.totalOmegaML; grandZedML += sd.totalZedML; pdfOmCuts.push(...sd.omegaCuts); pdfZdCuts.push(...sd.zedCuts); } }
+  const pdfOssKerf = ossatureConfig.kerf || 0;
+  const pdfOmPack = (ossatureConfig.omegaStocks||[]).length ? binPack1D(pdfOmCuts, ossatureConfig.omegaStocks, pdfOssKerf) : null;
+  const pdfZdPack = (ossatureConfig.zedStocks||[]).length ? binPack1D(pdfZdCuts, ossatureConfig.zedStocks, pdfOssKerf) : null;
+  const pdfOmCmdML = pdfOmPack ? pdfOmPack.totalStock/1000 : grandOmegaML;
+  const pdfZdCmdML = pdfZdPack ? pdfZdPack.totalStock/1000 : grandZedML;
+  const cOmega = pdfOmCmdML * prixOmega, cZed = pdfZdCmdML * prixZed;
   const totalOss = cOmega + cZed;
 
   body += `<h3 style="margin:16px 0 8px;">2. Ossature</h3>`;
   body += `<table style="width:100%;border-collapse:collapse;font-size:12px;">
-    <tr style="background:#f0f0f0;"><th style="border:1px solid #ccc;padding:6px;">Élément</th><th style="border:1px solid #ccc;padding:6px;">Quantité</th><th style="border:1px solid #ccc;padding:6px;">Prix/ml</th><th style="border:1px solid #ccc;padding:6px;">Total HT</th></tr>
-    <tr><td style="border:1px solid #ccc;padding:6px;">Oméga (&#937;)</td><td style="border:1px solid #ccc;padding:6px;">${grandOmegaML.toFixed(2)} ml</td><td style="border:1px solid #ccc;padding:6px;">${prixOmega?prixOmega.toFixed(2)+' €':'—'}</td><td style="border:1px solid #ccc;padding:6px;font-weight:700;">${cOmega?cOmega.toFixed(2)+' €':'—'}</td></tr>
-    <tr><td style="border:1px solid #ccc;padding:6px;">Zed (Z)</td><td style="border:1px solid #ccc;padding:6px;">${grandZedML.toFixed(2)} ml</td><td style="border:1px solid #ccc;padding:6px;">${prixZed?prixZed.toFixed(2)+' €':'—'}</td><td style="border:1px solid #ccc;padding:6px;font-weight:700;">${cZed?cZed.toFixed(2)+' €':'—'}</td></tr>
-    <tr style="font-weight:700;background:#f9f9f9;"><td colspan="3" style="border:1px solid #ccc;padding:6px;text-align:right;">Sous-total</td><td style="border:1px solid #ccc;padding:6px;">${totalOss?totalOss.toFixed(2)+' €':'—'}</td></tr>
+    <tr style="background:#f0f0f0;"><th style="border:1px solid #ccc;padding:6px;">Élément</th><th style="border:1px solid #ccc;padding:6px;">ML utiles</th><th style="border:1px solid #ccc;padding:6px;">ML commandés</th><th style="border:1px solid #ccc;padding:6px;">Prix/ml</th><th style="border:1px solid #ccc;padding:6px;">Total HT</th></tr>
+    <tr><td style="border:1px solid #ccc;padding:6px;">Oméga (&#937;)</td><td style="border:1px solid #ccc;padding:6px;">${grandOmegaML.toFixed(2)} ml</td><td style="border:1px solid #ccc;padding:6px;font-weight:700;">${pdfOmCmdML.toFixed(2)} ml</td><td style="border:1px solid #ccc;padding:6px;">${prixOmega?prixOmega.toFixed(2)+' €':'—'}</td><td style="border:1px solid #ccc;padding:6px;font-weight:700;">${cOmega?cOmega.toFixed(2)+' €':'—'}</td></tr>
+    <tr><td style="border:1px solid #ccc;padding:6px;">Zed (Z)</td><td style="border:1px solid #ccc;padding:6px;">${grandZedML.toFixed(2)} ml</td><td style="border:1px solid #ccc;padding:6px;font-weight:700;">${pdfZdCmdML.toFixed(2)} ml</td><td style="border:1px solid #ccc;padding:6px;">${prixZed?prixZed.toFixed(2)+' €':'—'}</td><td style="border:1px solid #ccc;padding:6px;font-weight:700;">${cZed?cZed.toFixed(2)+' €':'—'}</td></tr>
+    <tr style="font-weight:700;background:#f9f9f9;"><td colspan="4" style="border:1px solid #ccc;padding:6px;text-align:right;">Sous-total</td><td style="border:1px solid #ccc;padding:6px;">${totalOss?totalOss.toFixed(2)+' €':'—'}</td></tr>
   </table>`;
 
   // Main d'œuvre
@@ -2198,6 +2428,11 @@ document.getElementById('chantierDate').value = chantier.date;
 renderStock();
 renderGroupTabs();
 renderActiveGroup();
+renderOmegaStockList();
+renderZedStockList();
+// Keydown enter for omega/zed stock inputs
+document.getElementById('newOmegaLen')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addOmegaStock(); });
+document.getElementById('newZedLen')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addZedStock(); });
 // Show home screen on load
 detectApi().then(() => loadProjectList());
 </script>
