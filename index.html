@@ -1326,7 +1326,16 @@ let saveTimer = null;
 let ws = null;
 let ignoreNextPatch = false; // prevent echo loops
 
-// ── API helpers ──────────────────────────────────────────────
+// ── Storage abstraction (API si dispo, sinon localStorage) ───
+let useApi = false;
+
+async function detectApi() {
+  try {
+    const res = await fetch('/api/projects', { signal: AbortSignal.timeout(1500) });
+    useApi = res.ok;
+  } catch { useApi = false; }
+}
+
 async function apiFetch(url, opts = {}) {
   const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
@@ -1335,6 +1344,47 @@ async function apiFetch(url, opts = {}) {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
+
+// localStorage helpers
+const LS_KEY = 'calpinage_projects';
+function lsGetAll() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
+}
+function lsSaveAll(arr) { localStorage.setItem(LS_KEY, JSON.stringify(arr)); }
+
+const storage = {
+  async list() {
+    if (useApi) return apiFetch('/api/projects');
+    return lsGetAll().map(p => ({ id: p.id, name: p.name, updated_at: p.updated_at }));
+  },
+  async create(name, data = {}) {
+    if (useApi) return apiFetch('/api/projects', { method: 'POST', body: JSON.stringify({ name, data }) });
+    const id = crypto.randomUUID();
+    const p = { id, name, data, updated_at: new Date().toISOString().slice(0,10) };
+    lsSaveAll([p, ...lsGetAll()]);
+    return { id, name };
+  },
+  async get(id) {
+    if (useApi) return apiFetch(`/api/projects/${id}`);
+    const p = lsGetAll().find(p => p.id === id);
+    if (!p) throw new Error('Not found');
+    return p;
+  },
+  async save(id, name, data) {
+    if (useApi) return apiFetch(`/api/projects/${id}`, { method: 'PUT', body: JSON.stringify({ name, data }) });
+    const all = lsGetAll();
+    const idx = all.findIndex(p => p.id === id);
+    if (idx === -1) return;
+    all[idx] = { ...all[idx], name, data, updated_at: new Date().toISOString().slice(0,10) };
+    lsSaveAll(all);
+    return { ok: true };
+  },
+  async delete(id) {
+    if (useApi) return apiFetch(`/api/projects/${id}`, { method: 'DELETE' });
+    lsSaveAll(lsGetAll().filter(p => p.id !== id));
+    return { ok: true };
+  },
+};
 
 function getProjectData() {
   return {
@@ -1387,10 +1437,7 @@ async function doSave() {
   if (!currentProjectId) return;
   const name = chantier.nom || 'Sans titre';
   try {
-    await apiFetch(`/api/projects/${currentProjectId}`, {
-      method: 'PUT',
-      body: JSON.stringify({ name, data: getProjectData() }),
-    });
+    await storage.save(currentProjectId, name, getProjectData());
     setSaveStatus('saved');
   } catch (e) {
     console.error('Save failed', e);
@@ -1433,7 +1480,7 @@ function disconnectWS() {
 async function loadProjectList() {
   const list = document.getElementById('projectList');
   try {
-    const projects = await apiFetch('/api/projects');
+    const projects = await storage.list();
     if (!projects.length) {
       list.innerHTML = '<div style="color:var(--text4);font-size:13px;text-align:center;padding:20px;">Aucun chantier — crée-en un ci-dessous.</div>';
       return;
@@ -1451,38 +1498,46 @@ async function loadProjectList() {
 }
 
 async function createProject() {
+  const btn = document.querySelector('.btn-home-create');
   const name = document.getElementById('newProjectName').value.trim() || 'Nouveau chantier';
-  const p = await apiFetch('/api/projects', {
-    method: 'POST',
-    body: JSON.stringify({ name }),
-  });
-  document.getElementById('newProjectName').value = '';
-  openProject(p.id);
+  try {
+    btn.disabled = true;
+    const p = await storage.create(name);
+    document.getElementById('newProjectName').value = '';
+    openProject(p.id);
+  } catch(e) {
+    alert('Erreur : ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function openProject(id) {
-  const p = await apiFetch(`/api/projects/${id}`);
-  currentProjectId = id;
-  if (p.data && Object.keys(p.data).length) {
-    applyProjectData(p.data);
-  } else {
-    // Fresh project: set chantier name from project
-    chantier.nom = p.name;
-    document.getElementById('chantierNom').value = p.name;
-    renderStock();
-    renderGroupTabs();
-    renderActiveGroup();
+  try {
+    const p = await storage.get(id);
+    currentProjectId = id;
+    if (p.data && Object.keys(p.data).length) {
+      applyProjectData(p.data);
+    } else {
+      chantier.nom = p.name;
+      document.getElementById('chantierNom').value = p.name;
+      renderStock();
+      renderGroupTabs();
+      renderActiveGroup();
+    }
+    setSaveStatus('saved');
+    if (useApi) connectWS(id);
+    document.getElementById('homeScreen').style.display = 'none';
+    document.getElementById('appScreen').style.display = 'block';
+  } catch(e) {
+    alert('Impossible d\'ouvrir le projet : ' + e.message);
   }
-  setSaveStatus('saved');
-  connectWS(id);
-  document.getElementById('homeScreen').style.display = 'none';
-  document.getElementById('appScreen').style.display = 'block';
 }
 
 async function deleteProject(e, id) {
   e.stopPropagation();
   if (!confirm('Supprimer ce chantier ?')) return;
-  await apiFetch(`/api/projects/${id}`, { method: 'DELETE' });
+  await storage.delete(id);
   loadProjectList();
 }
 
@@ -1499,14 +1554,15 @@ async function importProjectHome(input) {
   const file = input.files[0];
   if (!file) return;
   input.value = '';
-  const text = await file.text();
-  const data = JSON.parse(text);
-  const name = data.chantier?.nom || file.name.replace('.json','');
-  const p = await apiFetch('/api/projects', {
-    method: 'POST',
-    body: JSON.stringify({ name, data }),
-  });
-  openProject(p.id);
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const name = data.chantier?.nom || file.name.replace('.json','');
+    const p = await storage.create(name, data);
+    openProject(p.id);
+  } catch(e) {
+    alert('Fichier invalide : ' + e.message);
+  }
 }
 
 // ── Patch all mutating functions to trigger auto-save ─────────
@@ -1570,7 +1626,7 @@ renderStock();
 renderGroupTabs();
 renderActiveGroup();
 // Show home screen on load
-loadProjectList();
+detectApi().then(() => loadProjectList());
 </script>
 </div><!-- #appScreen -->
 </body>
