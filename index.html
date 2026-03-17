@@ -326,6 +326,53 @@
   }
   .supplier-field input:focus { outline: none; border-color: var(--accent); }
 
+  /* PROJECT SECTION TABS (Panneaux / Ossature / Devis) */
+  .section-tabs {
+    display: flex; gap: 0; margin-bottom: 0; border-bottom: 2px solid var(--border);
+  }
+  .section-tab {
+    padding: 10px 24px; cursor: pointer; font-size: 13px; font-weight: 700;
+    letter-spacing: 1.5px; text-transform: uppercase; color: var(--text3);
+    border-bottom: 3px solid transparent; transition: all 0.15s;
+    background: none; border-top: none; border-left: none; border-right: none;
+    font-family: inherit;
+  }
+  .section-tab:hover { color: var(--text); }
+  .section-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .section-content { display: none; }
+  .section-content.active { display: flex; }
+
+  /* OSSATURE */
+  .oss-card { background: var(--card); border-radius: var(--radius); padding: 16px; border: 1px solid var(--border); margin-bottom: 12px; }
+  .oss-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .oss-table th { text-align: left; font-size: 10px; color: var(--text3); padding: 6px 8px; border-bottom: 1px solid var(--border); letter-spacing: 1px; text-transform: uppercase; }
+  .oss-table td { padding: 8px; font-size: 13px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
+  .oss-table tr:last-child td { border-bottom: none; }
+  .oss-table .total-row td { font-weight: 700; border-top: 2px solid var(--border); }
+  .oss-badge { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 700; }
+  .oss-badge.omega { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+  .oss-badge.zed { background: color-mix(in srgb, var(--yellow) 15%, transparent); color: var(--yellow); }
+  .oss-config { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .oss-config label { font-size: 10px; color: var(--text4); letter-spacing: 1px; display: block; margin-bottom: 3px; text-transform: uppercase; }
+  .oss-config input {
+    width: 120px; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 5px 8px; border-radius: 6px; font-size: 12px; font-family: inherit;
+  }
+  .oss-config input:focus { outline: none; border-color: var(--accent); }
+
+  /* DEVIS */
+  .devis-section { margin-bottom: 20px; }
+  .devis-section-title { font-size: 10px; letter-spacing: 2.5px; color: var(--accent); margin-bottom: 10px; font-weight: 700; text-transform: uppercase; }
+  .devis-table { width: 100%; border-collapse: collapse; }
+  .devis-table th { text-align: left; font-size: 10px; color: var(--text3); padding: 8px; border-bottom: 1px solid var(--border); letter-spacing: 1px; text-transform: uppercase; }
+  .devis-table td { padding: 8px; font-size: 13px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
+  .devis-table .grand-total td { font-weight: 800; font-size: 15px; border-top: 2px solid var(--accent); color: var(--accent); }
+  .devis-input {
+    width: 100px; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 5px 8px; border-radius: 6px; font-size: 12px; font-family: inherit; text-align: right;
+  }
+  .devis-input:focus { outline: none; border-color: var(--accent); }
+
   /* PRINT */
   @media print {
     body { background: white !important; color: black !important; padding: 10mm; }
@@ -380,6 +427,16 @@
   </div>
 </header>
 
+<!-- SECTION TABS -->
+<div class="section-tabs">
+  <button class="section-tab active" onclick="switchSection('panneaux')">Panneaux</button>
+  <button class="section-tab" onclick="switchSection('ossature')">Ossature</button>
+  <button class="section-tab" onclick="switchSection('devis')">Devis</button>
+</div>
+<div style="height:16px;"></div>
+
+<!-- ═══ SECTION: PANNEAUX ═══ -->
+<div id="sectionPanneaux" class="section-content active" style="flex:1;overflow:hidden;">
 <div class="layout">
   <div class="sidebar">
     <!-- STOCK PANELS -->
@@ -454,6 +511,82 @@
     </div>
   </div>
 </div>
+</div><!-- /sectionPanneaux -->
+
+<!-- ═══ SECTION: OSSATURE ═══ -->
+<div id="sectionOssature" class="section-content" style="flex:1;overflow:hidden;">
+<div class="layout">
+  <div class="sidebar">
+    <!-- OSSATURE CONFIG -->
+    <div class="card">
+      <div class="card-title">Configuration ossature</div>
+      <div class="oss-config">
+        <div>
+          <label>Entraxe max (mm)</label>
+          <input type="number" id="ossEntaxeMax" value="600" min="100" max="1200" step="50" oninput="ossatureConfig.entaxeMax=+this.value; renderOssature(); scheduleSave();">
+        </div>
+        <div>
+          <label>Prix omega (&#8364;/ml)</label>
+          <input type="number" id="ossPrixOmega" value="" placeholder="0.00" min="0" step="0.01" oninput="ossatureConfig.prixOmega=this.value; renderOssature(); scheduleSave();">
+        </div>
+        <div>
+          <label>Prix zed (&#8364;/ml)</label>
+          <input type="number" id="ossPrixZed" value="" placeholder="0.00" min="0" step="0.01" oninput="ossatureConfig.prixZed=this.value; renderOssature(); scheduleSave();">
+        </div>
+      </div>
+    </div>
+    <!-- OSSATURE SUMMARY -->
+    <div class="card card-accent" id="ossatureSummaryCard" style="display:none;">
+      <div class="card-title">Résumé ossature</div>
+      <div id="ossatureSummaryContent"></div>
+    </div>
+  </div>
+  <div class="main" id="ossatureContent">
+    <div class="card placeholder">
+      <div class="icon">&#9670;</div>
+      <div class="text">
+        Configure tes panneaux dans l'onglet <span style="color:var(--accent);font-weight:700;">Panneaux</span> d'abord,<br>
+        puis reviens ici pour voir le calepinage ossature.
+      </div>
+    </div>
+  </div>
+</div>
+</div><!-- /sectionOssature -->
+
+<!-- ═══ SECTION: DEVIS ═══ -->
+<div id="sectionDevis" class="section-content" style="flex:1;overflow:hidden;">
+<div class="layout">
+  <div class="sidebar">
+    <div class="card">
+      <div class="card-title">Paramètres devis</div>
+      <div class="oss-config">
+        <div>
+          <label>Main d'&#339;uvre (&#8364;/m&#178;)</label>
+          <input type="number" id="devisPrixMO" value="" placeholder="0.00" min="0" step="0.01" oninput="devisConfig.prixMO=this.value; renderDevis(); scheduleSave();">
+        </div>
+      </div>
+    </div>
+    <div class="card card-accent" id="devisTotalCard" style="display:none;">
+      <div class="card-title">Total devis</div>
+      <div id="devisTotalContent"></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn-export" onclick="exportDevisPDF()">&#128247; PDF Devis</button>
+      </div>
+    </div>
+  </div>
+  <div class="main" id="devisContent">
+    <div class="card placeholder">
+      <div class="icon">&#9670;</div>
+      <div class="text">
+        Lance d'abord une <span style="color:var(--accent);font-weight:700;">optimisation</span> dans l'onglet Panneaux<br>
+        pour générer le devis automatiquement.
+      </div>
+    </div>
+  </div>
+</div>
+</div><!-- /sectionDevis -->
 
 <script>
 // ============================================================
@@ -517,6 +650,9 @@ let groups = [
 let nextGroupId = 2;
 let activeGroupId = 1;
 let allResults = null;
+let activeSection = 'panneaux'; // 'panneaux' | 'ossature' | 'devis'
+let ossatureConfig = { entaxeMax: 600, prixOmega: '', prixZed: '' };
+let devisConfig = { prixMO: '' };
 
 // ============================================================
 // STOCK
@@ -1441,6 +1577,8 @@ function getProjectData() {
     groups,
     nextGroupId,
     activeGroupId,
+    ossatureConfig,
+    devisConfig,
   };
 }
 
@@ -1457,6 +1595,16 @@ function applyProjectData(data) {
     nextGroupId = data.nextGroupId || groups.length + 1;
     activeGroupId = data.activeGroupId || groups[0]?.id;
   }
+  if (data.ossatureConfig) {
+    ossatureConfig = { ...ossatureConfig, ...data.ossatureConfig };
+    document.getElementById('ossEntaxeMax').value = ossatureConfig.entaxeMax || 600;
+    document.getElementById('ossPrixOmega').value = ossatureConfig.prixOmega || '';
+    document.getElementById('ossPrixZed').value = ossatureConfig.prixZed || '';
+  }
+  if (data.devisConfig) {
+    devisConfig = { ...devisConfig, ...data.devisConfig };
+    document.getElementById('devisPrixMO').value = devisConfig.prixMO || '';
+  }
   allResults = null;
   document.getElementById('summaryCard').style.display = 'none';
   document.getElementById('orderCard').style.display = 'none';
@@ -1464,6 +1612,8 @@ function applyProjectData(data) {
     '<div class="card placeholder"><div class="icon">&#9670;</div><div class="text">Projet charg\u00e9 \u2014 clique sur <span style="color:var(--accent);font-weight:700;">&#9654; OPTIMISER TOUT</span></div></div>';
   renderGroupTabs();
   renderActiveGroup();
+  // Reset section to panneaux
+  switchSection('panneaux');
 }
 
 function setSaveStatus(s) {
@@ -1664,6 +1814,382 @@ document.addEventListener('keydown', (e) => {
 ['newStockW','newStockH'].forEach(id => {
   document.getElementById(id)?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addStock(); });
 });
+
+// ============================================================
+// SECTION NAVIGATION
+// ============================================================
+function switchSection(name) {
+  activeSection = name;
+  document.querySelectorAll('.section-tab').forEach(t => t.classList.toggle('active', t.textContent.trim().toLowerCase() === name));
+  document.querySelectorAll('.section-content').forEach(s => s.classList.remove('active'));
+  const sectionEl = document.getElementById('section' + name.charAt(0).toUpperCase() + name.slice(1));
+  if (sectionEl) sectionEl.classList.add('active');
+  if (name === 'ossature') renderOssature();
+  if (name === 'devis') renderDevis();
+}
+
+// ============================================================
+// OSSATURE CALCULATION
+// ============================================================
+function calcOssature() {
+  const entaxeMax = ossatureConfig.entaxeMax || 600;
+  const results = [];
+
+  for (const g of groups) {
+    const groupData = { group: g, subsections: [] };
+    for (const sub of g.subsections) {
+      const subData = { subsection: sub, pieces: [], totalOmegaML: 0, totalZedML: 0 };
+      // Count total panels in this subsection to calculate omega
+      const totalPanelsInSub = sub.pieces.reduce((s, p) => s + p.qty, 0);
+      // Omegas = total panels + 1 (one at each junction + ends)
+      const totalOmegas = totalPanelsInSub > 0 ? totalPanelsInSub + 1 : 0;
+
+      for (const p of sub.pieces) {
+        // Number of zed per panel = intermediate supports
+        const nbZed = Math.max(0, Math.ceil(p.w / entaxeMax) - 1);
+        subData.pieces.push({
+          ...p,
+          nbZedPerPanel: nbZed,
+          totalZed: nbZed * p.qty,
+          zedML: nbZed * p.qty * p.h / 1000,
+        });
+        subData.totalZedML += nbZed * p.qty * p.h / 1000;
+      }
+
+      // Calculate omega ML: each omega has the height of the panels it separates
+      // Simplified: we use avg height, but more accurately we sum individual panel heights
+      // For each panel, it contributes 1 omega (left side) of its height
+      // Plus 1 extra omega (right side of last panel)
+      let omegaML = 0;
+      for (const p of sub.pieces) {
+        omegaML += p.qty * p.h / 1000; // each panel contributes 1 omega (left)
+      }
+      // Add 1 extra omega for the rightmost edge (use max height of all pieces)
+      if (sub.pieces.length > 0) {
+        const maxH = Math.max(...sub.pieces.map(p => p.h));
+        omegaML += maxH / 1000;
+      }
+      subData.totalOmegaML = omegaML;
+      subData.totalOmegas = totalOmegas;
+
+      groupData.subsections.push(subData);
+    }
+    results.push(groupData);
+  }
+  return results;
+}
+
+function renderOssature() {
+  const data = calcOssature();
+  const el = document.getElementById('ossatureContent');
+  const prixOmega = parseFloat(ossatureConfig.prixOmega) || 0;
+  const prixZed = parseFloat(ossatureConfig.prixZed) || 0;
+
+  if (groups.every(g => g.subsections.every(s => s.pieces.length === 0))) {
+    el.innerHTML = '<div class="card placeholder"><div class="icon">&#9670;</div><div class="text">Aucune pièce configurée.<br>Ajoute des pièces dans l\'onglet <span style="color:var(--accent);font-weight:700;">Panneaux</span>.</div></div>';
+    document.getElementById('ossatureSummaryCard').style.display = 'none';
+    return;
+  }
+
+  let html = '';
+  let grandOmegaML = 0, grandZedML = 0;
+
+  for (const gd of data) {
+    const g = gd.group;
+    html += `<div class="result-group-header" style="border-color:${g.color}44; background:${g.color}0a;">
+      <span class="dot" style="background:${g.color};"></span>
+      <span class="name">${g.name}</span>
+      <span class="info">${gd.subsections.length} facade${gd.subsections.length>1?'s':''}</span>
+    </div>`;
+
+    for (const sd of gd.subsections) {
+      const sub = sd.subsection;
+      const subIdx = g.subsections.indexOf(sub);
+      const subColor = PIECE_COLORS[subIdx % PIECE_COLORS.length];
+
+      if (sd.pieces.length === 0) continue;
+
+      html += `<div class="oss-card" style="border-left: 3px solid ${subColor};">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+          <span style="width:10px;height:10px;border-radius:50%;background:${subColor};display:inline-block;"></span>
+          <span style="font-weight:700;font-size:14px;">${sub.name}</span>
+          <span class="oss-badge omega">&#937; ${sd.totalOmegaML.toFixed(2)} ml</span>
+          <span class="oss-badge zed">Z ${sd.totalZedML.toFixed(2)} ml</span>
+        </div>
+        <table class="oss-table">
+          <tr><th>Pièce (L×H)</th><th>Qté</th><th>Zed/pièce</th><th>Total Zed</th><th>ML Zed</th></tr>`;
+
+      for (const pd of sd.pieces) {
+        html += `<tr>
+          <td class="mono">${pd.w} × ${pd.h} mm</td>
+          <td style="text-align:center;">${pd.qty}</td>
+          <td style="text-align:center;color:var(--yellow);">${pd.nbZedPerPanel}</td>
+          <td style="text-align:center;color:var(--yellow);font-weight:700;">${pd.totalZed}</td>
+          <td class="mono">${pd.zedML.toFixed(2)} ml</td>
+        </tr>`;
+      }
+
+      html += `<tr class="total-row">
+        <td colspan="2" style="text-align:right;color:var(--text3);">Totaux façade</td>
+        <td colspan="2" style="text-align:center;"><span class="oss-badge omega">&#937; ${sd.totalOmegas} = ${sd.totalOmegaML.toFixed(2)} ml</span></td>
+        <td><span class="oss-badge zed">Z ${sd.totalZedML.toFixed(2)} ml</span></td>
+      </tr>`;
+
+      if (prixOmega || prixZed) {
+        const coutOmega = sd.totalOmegaML * prixOmega;
+        const coutZed = sd.totalZedML * prixZed;
+        html += `<tr><td colspan="3"></td><td colspan="2" style="color:var(--yellow);font-weight:700;text-align:right;">
+          ${prixOmega ? '&#937; ' + coutOmega.toFixed(2) + ' €' : ''} ${prixZed ? '&nbsp; Z ' + coutZed.toFixed(2) + ' €' : ''}
+        </td></tr>`;
+      }
+
+      html += `</table></div>`;
+
+      grandOmegaML += sd.totalOmegaML;
+      grandZedML += sd.totalZedML;
+    }
+  }
+
+  el.innerHTML = html;
+
+  // Summary
+  const sumEl = document.getElementById('ossatureSummaryContent');
+  let sumHTML = '';
+  sumHTML += `<div class="summary-row"><span class="summary-label">Total Oméga</span><span class="summary-value" style="color:var(--accent);">${grandOmegaML.toFixed(2)} ml</span></div>`;
+  sumHTML += `<div class="summary-row"><span class="summary-label">Total Zed</span><span class="summary-value" style="color:var(--yellow);">${grandZedML.toFixed(2)} ml</span></div>`;
+  if (prixOmega) {
+    sumHTML += `<div class="summary-divider"></div>`;
+    sumHTML += `<div class="summary-row"><span class="summary-label">Coût Oméga</span><span class="summary-value" style="color:var(--accent);">${(grandOmegaML * prixOmega).toFixed(2)} €</span></div>`;
+  }
+  if (prixZed) {
+    sumHTML += `<div class="summary-row"><span class="summary-label">Coût Zed</span><span class="summary-value" style="color:var(--yellow);">${(grandZedML * prixZed).toFixed(2)} €</span></div>`;
+  }
+  if (prixOmega || prixZed) {
+    sumHTML += `<div class="summary-divider"></div>`;
+    sumHTML += `<div class="summary-row"><span class="summary-label">Total ossature</span><span class="summary-value" style="font-size:15px;">${(grandOmegaML * prixOmega + grandZedML * prixZed).toFixed(2)} €</span></div>`;
+  }
+  sumEl.innerHTML = sumHTML;
+  document.getElementById('ossatureSummaryCard').style.display = 'block';
+}
+
+// ============================================================
+// DEVIS
+// ============================================================
+function renderDevis() {
+  const el = document.getElementById('devisContent');
+  const prixMO = parseFloat(devisConfig.prixMO) || 0;
+  const prixOmega = parseFloat(ossatureConfig.prixOmega) || 0;
+  const prixZed = parseFloat(ossatureConfig.prixZed) || 0;
+
+  // Check if we have data
+  const hasPanels = allResults && groups.some(g => allResults[g.id] && allResults[g.id].panels && allResults[g.id].panels.length > 0);
+  const hasPieces = groups.some(g => g.subsections.some(s => s.pieces.length > 0));
+
+  if (!hasPieces) {
+    el.innerHTML = '<div class="card placeholder"><div class="icon">&#9670;</div><div class="text">Aucune donnée.<br>Configure d\'abord tes panneaux.</div></div>';
+    document.getElementById('devisTotalCard').style.display = 'none';
+    return;
+  }
+
+  let html = '';
+  let totalPanneauxHT = 0;
+  let totalOssatureHT = 0;
+  let totalMOHT = 0;
+  let totalSurfaceUtile = 0;
+
+  // ── 1. Section Panneaux ──
+  html += `<div class="oss-card"><div class="devis-section">
+    <div class="devis-section-title">1. Fourniture panneaux</div>
+    <table class="devis-table">
+      <tr><th>Type</th><th>Réf / Coloris</th><th>Format</th><th>Qté</th><th>Surface</th><th>Prix/m²</th><th>Total HT</th></tr>`;
+
+  if (hasPanels) {
+    for (const g of groups) {
+      const result = allResults[g.id];
+      if (!result || !result.panels || !result.panels.length) continue;
+      const gStockCount = {};
+      result.panels.forEach(p => { gStockCount[p.stock.label] = (gStockCount[p.stock.label]||0)+1; });
+      for (const [label, count] of Object.entries(gStockCount)) {
+        const dims = label.split('\u00d7').map(Number);
+        const area = dims[0]*dims[1]*count/1e6;
+        const prix = g.prixM2 ? parseFloat(g.prixM2) : 0;
+        const total = prix * area;
+        totalPanneauxHT += total;
+        html += `<tr>
+          <td style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:${g.color};display:inline-block;"></span>${g.name}</td>
+          <td style="font-size:11px;color:var(--text3);">${g.reference||'—'}${g.coloris?' / '+g.coloris:''}</td>
+          <td class="mono">${label} mm</td>
+          <td style="text-align:center;font-weight:700;">× ${count}</td>
+          <td>${area.toFixed(2)} m²</td>
+          <td>${prix ? prix.toFixed(2)+' €' : '—'}</td>
+          <td style="color:var(--yellow);font-weight:700;">${total ? total.toFixed(2)+' €' : '—'}</td>
+        </tr>`;
+      }
+    }
+  } else {
+    html += `<tr><td colspan="7" style="color:var(--text4);text-align:center;">Lance l'optimisation pour voir les panneaux</td></tr>`;
+  }
+
+  html += `<tr style="font-weight:700;"><td colspan="6" style="text-align:right;color:var(--text3);">Sous-total panneaux</td><td style="color:var(--yellow);">${totalPanneauxHT ? totalPanneauxHT.toFixed(2)+' €' : '—'}</td></tr>`;
+  html += `</table></div></div>`;
+
+  // ── 2. Section Ossature ──
+  const ossData = calcOssature();
+  let grandOmegaML = 0, grandZedML = 0;
+  for (const gd of ossData) {
+    for (const sd of gd.subsections) {
+      grandOmegaML += sd.totalOmegaML;
+      grandZedML += sd.totalZedML;
+    }
+  }
+  const coutOmega = grandOmegaML * prixOmega;
+  const coutZed = grandZedML * prixZed;
+  totalOssatureHT = coutOmega + coutZed;
+
+  html += `<div class="oss-card"><div class="devis-section">
+    <div class="devis-section-title">2. Ossature</div>
+    <table class="devis-table">
+      <tr><th>Élément</th><th>Quantité</th><th>Prix/ml</th><th>Total HT</th></tr>
+      <tr>
+        <td><span class="oss-badge omega">Oméga (&#937;)</span></td>
+        <td class="mono">${grandOmegaML.toFixed(2)} ml</td>
+        <td>${prixOmega ? prixOmega.toFixed(2)+' €' : '—'}</td>
+        <td style="color:var(--yellow);font-weight:700;">${coutOmega ? coutOmega.toFixed(2)+' €' : '—'}</td>
+      </tr>
+      <tr>
+        <td><span class="oss-badge zed">Zed (Z)</span></td>
+        <td class="mono">${grandZedML.toFixed(2)} ml</td>
+        <td>${prixZed ? prixZed.toFixed(2)+' €' : '—'}</td>
+        <td style="color:var(--yellow);font-weight:700;">${coutZed ? coutZed.toFixed(2)+' €' : '—'}</td>
+      </tr>
+      <tr style="font-weight:700;"><td colspan="3" style="text-align:right;color:var(--text3);">Sous-total ossature</td><td style="color:var(--yellow);">${totalOssatureHT ? totalOssatureHT.toFixed(2)+' €' : '—'}</td></tr>
+    </table>
+  </div></div>`;
+
+  // ── 3. Section Main d'œuvre ──
+  // Calculate total surface utile from pieces
+  for (const g of groups) {
+    for (const sub of g.subsections) {
+      for (const p of sub.pieces) {
+        totalSurfaceUtile += p.w * p.h * p.qty / 1e6;
+      }
+    }
+  }
+  totalMOHT = totalSurfaceUtile * prixMO;
+
+  html += `<div class="oss-card"><div class="devis-section">
+    <div class="devis-section-title">3. Main d'&#339;uvre</div>
+    <table class="devis-table">
+      <tr><th>Désignation</th><th>Surface</th><th>Prix/m²</th><th>Total HT</th></tr>
+      <tr>
+        <td>Pose panneaux + ossature</td>
+        <td class="mono">${totalSurfaceUtile.toFixed(2)} m²</td>
+        <td>${prixMO ? prixMO.toFixed(2)+' €' : '<input class="devis-input" type="number" placeholder="€/m²" oninput="devisConfig.prixMO=this.value;document.getElementById(\'devisPrixMO\').value=this.value;renderDevis();scheduleSave();">'}</td>
+        <td style="color:var(--yellow);font-weight:700;">${totalMOHT ? totalMOHT.toFixed(2)+' €' : '—'}</td>
+      </tr>
+      <tr style="font-weight:700;"><td colspan="3" style="text-align:right;color:var(--text3);">Sous-total main d'œuvre</td><td style="color:var(--yellow);">${totalMOHT ? totalMOHT.toFixed(2)+' €' : '—'}</td></tr>
+    </table>
+  </div></div>`;
+
+  // ── GRAND TOTAL ──
+  const grandTotal = totalPanneauxHT + totalOssatureHT + totalMOHT;
+  html += `<div class="oss-card" style="border-color:var(--accent)44;">
+    <table class="devis-table">
+      <tr class="grand-total">
+        <td colspan="3" style="text-align:right;">TOTAL GÉNÉRAL HT</td>
+        <td>${grandTotal ? grandTotal.toFixed(2)+' €' : '—'}</td>
+      </tr>
+    </table>
+  </div>`;
+
+  el.innerHTML = html;
+
+  // Total card in sidebar
+  const totalEl = document.getElementById('devisTotalContent');
+  let tHTML = '';
+  tHTML += `<div class="summary-row"><span class="summary-label">Panneaux</span><span class="summary-value">${totalPanneauxHT ? totalPanneauxHT.toFixed(2)+' €' : '—'}</span></div>`;
+  tHTML += `<div class="summary-row"><span class="summary-label">Ossature</span><span class="summary-value">${totalOssatureHT ? totalOssatureHT.toFixed(2)+' €' : '—'}</span></div>`;
+  tHTML += `<div class="summary-row"><span class="summary-label">Main d'œuvre</span><span class="summary-value">${totalMOHT ? totalMOHT.toFixed(2)+' €' : '—'}</span></div>`;
+  tHTML += `<div class="summary-divider"></div>`;
+  tHTML += `<div class="summary-row"><span class="summary-label" style="font-weight:800;">TOTAL HT</span><span class="summary-value" style="font-size:16px;color:var(--accent);">${grandTotal ? grandTotal.toFixed(2)+' €' : '—'}</span></div>`;
+  totalEl.innerHTML = tHTML;
+  document.getElementById('devisTotalCard').style.display = 'block';
+}
+
+function exportDevisPDF() {
+  const nom = chantier.nom || 'Devis';
+  const date = chantier.date || new Date().toISOString().slice(0,10);
+  const prixOmega = parseFloat(ossatureConfig.prixOmega) || 0;
+  const prixZed = parseFloat(ossatureConfig.prixZed) || 0;
+  const prixMO = parseFloat(devisConfig.prixMO) || 0;
+
+  let body = `<div style="border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:20px;display:flex;justify-content:space-between;">
+    <div><div style="font-size:22px;font-weight:800;">&#9670; DEVIS</div><div style="font-size:16px;font-weight:600;margin-top:4px;">${nom}</div></div>
+    <div style="text-align:right;font-size:13px;color:#555;"><div>Date : ${date}</div></div>
+  </div>`;
+
+  // Panneaux
+  body += `<h3 style="margin:16px 0 8px;">1. Fourniture panneaux</h3>`;
+  body += `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+    <tr style="background:#f0f0f0;"><th style="border:1px solid #ccc;padding:6px;">Type</th><th style="border:1px solid #ccc;padding:6px;">Réf / Coloris</th><th style="border:1px solid #ccc;padding:6px;">Format</th><th style="border:1px solid #ccc;padding:6px;">Qté</th><th style="border:1px solid #ccc;padding:6px;">Surface</th><th style="border:1px solid #ccc;padding:6px;">Prix/m²</th><th style="border:1px solid #ccc;padding:6px;">Total HT</th></tr>`;
+  let totalPanneaux = 0;
+  if (allResults) {
+    for (const g of groups) {
+      const result = allResults[g.id];
+      if (!result || !result.panels || !result.panels.length) continue;
+      const gStockCount = {};
+      result.panels.forEach(p => { gStockCount[p.stock.label] = (gStockCount[p.stock.label]||0)+1; });
+      for (const [label, count] of Object.entries(gStockCount)) {
+        const dims = label.split('\u00d7').map(Number);
+        const area = dims[0]*dims[1]*count/1e6;
+        const prix = g.prixM2 ? parseFloat(g.prixM2) : 0;
+        const total = prix * area;
+        totalPanneaux += total;
+        body += `<tr><td style="border:1px solid #ccc;padding:6px;">${g.name}</td><td style="border:1px solid #ccc;padding:6px;">${g.reference||'—'}${g.coloris?' / '+g.coloris:''}</td><td style="border:1px solid #ccc;padding:6px;font-family:monospace;">${label} mm</td><td style="border:1px solid #ccc;padding:6px;text-align:center;">×${count}</td><td style="border:1px solid #ccc;padding:6px;">${area.toFixed(2)} m²</td><td style="border:1px solid #ccc;padding:6px;">${prix?prix.toFixed(2)+' €':'—'}</td><td style="border:1px solid #ccc;padding:6px;font-weight:700;">${total?total.toFixed(2)+' €':'—'}</td></tr>`;
+      }
+    }
+  }
+  body += `<tr style="font-weight:700;background:#f9f9f9;"><td colspan="6" style="border:1px solid #ccc;padding:6px;text-align:right;">Sous-total</td><td style="border:1px solid #ccc;padding:6px;">${totalPanneaux?totalPanneaux.toFixed(2)+' €':'—'}</td></tr></table>`;
+
+  // Ossature
+  const ossData = calcOssature();
+  let grandOmegaML = 0, grandZedML = 0;
+  for (const gd of ossData) { for (const sd of gd.subsections) { grandOmegaML += sd.totalOmegaML; grandZedML += sd.totalZedML; } }
+  const cOmega = grandOmegaML * prixOmega, cZed = grandZedML * prixZed;
+  const totalOss = cOmega + cZed;
+
+  body += `<h3 style="margin:16px 0 8px;">2. Ossature</h3>`;
+  body += `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+    <tr style="background:#f0f0f0;"><th style="border:1px solid #ccc;padding:6px;">Élément</th><th style="border:1px solid #ccc;padding:6px;">Quantité</th><th style="border:1px solid #ccc;padding:6px;">Prix/ml</th><th style="border:1px solid #ccc;padding:6px;">Total HT</th></tr>
+    <tr><td style="border:1px solid #ccc;padding:6px;">Oméga (&#937;)</td><td style="border:1px solid #ccc;padding:6px;">${grandOmegaML.toFixed(2)} ml</td><td style="border:1px solid #ccc;padding:6px;">${prixOmega?prixOmega.toFixed(2)+' €':'—'}</td><td style="border:1px solid #ccc;padding:6px;font-weight:700;">${cOmega?cOmega.toFixed(2)+' €':'—'}</td></tr>
+    <tr><td style="border:1px solid #ccc;padding:6px;">Zed (Z)</td><td style="border:1px solid #ccc;padding:6px;">${grandZedML.toFixed(2)} ml</td><td style="border:1px solid #ccc;padding:6px;">${prixZed?prixZed.toFixed(2)+' €':'—'}</td><td style="border:1px solid #ccc;padding:6px;font-weight:700;">${cZed?cZed.toFixed(2)+' €':'—'}</td></tr>
+    <tr style="font-weight:700;background:#f9f9f9;"><td colspan="3" style="border:1px solid #ccc;padding:6px;text-align:right;">Sous-total</td><td style="border:1px solid #ccc;padding:6px;">${totalOss?totalOss.toFixed(2)+' €':'—'}</td></tr>
+  </table>`;
+
+  // Main d'œuvre
+  let totalSurf = 0;
+  for (const g of groups) { for (const sub of g.subsections) { for (const p of sub.pieces) { totalSurf += p.w*p.h*p.qty/1e6; } } }
+  const totalMO = totalSurf * prixMO;
+
+  body += `<h3 style="margin:16px 0 8px;">3. Main d'œuvre</h3>`;
+  body += `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+    <tr style="background:#f0f0f0;"><th style="border:1px solid #ccc;padding:6px;">Désignation</th><th style="border:1px solid #ccc;padding:6px;">Surface</th><th style="border:1px solid #ccc;padding:6px;">Prix/m²</th><th style="border:1px solid #ccc;padding:6px;">Total HT</th></tr>
+    <tr><td style="border:1px solid #ccc;padding:6px;">Pose panneaux + ossature</td><td style="border:1px solid #ccc;padding:6px;">${totalSurf.toFixed(2)} m²</td><td style="border:1px solid #ccc;padding:6px;">${prixMO?prixMO.toFixed(2)+' €':'—'}</td><td style="border:1px solid #ccc;padding:6px;font-weight:700;">${totalMO?totalMO.toFixed(2)+' €':'—'}</td></tr>
+    <tr style="font-weight:700;background:#f9f9f9;"><td colspan="3" style="border:1px solid #ccc;padding:6px;text-align:right;">Sous-total</td><td style="border:1px solid #ccc;padding:6px;">${totalMO?totalMO.toFixed(2)+' €':'—'}</td></tr>
+  </table>`;
+
+  // Grand total
+  const grandTotal = totalPanneaux + totalOss + totalMO;
+  body += `<div style="margin-top:20px;padding:12px;border:2px solid #333;border-radius:6px;font-size:18px;font-weight:800;display:flex;justify-content:space-between;">
+    <span>TOTAL GÉNÉRAL HT</span><span>${grandTotal ? grandTotal.toFixed(2)+' €' : '—'}</span>
+  </div>`;
+
+  const fullHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Devis — ${nom}</title>
+  <style>body{font-family:'Segoe UI',sans-serif;padding:15mm;color:#111;font-size:13px;}@media print{body{padding:10mm;}}</style>
+  </head><body>${body}<script>window.onload=()=>window.print();<\/script></body></html>`;
+  const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
+  window.open(URL.createObjectURL(blob), '_blank');
+}
 
 // ============================================================
 // INIT
