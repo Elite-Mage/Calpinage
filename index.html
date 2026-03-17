@@ -1923,15 +1923,18 @@ function splitLongCuts(cuts, stockLengths) {
   const expandedCuts = [];
   const splits = [];
   for (const cut of cuts) {
-    if (cut <= maxStock) {
-      expandedCuts.push(cut);
+    const len = cut.len ?? cut;
+    const ref = cut.ref ?? '';
+    if (len <= maxStock) {
+      expandedCuts.push({ len, ref });
     } else {
       const pieces = [];
-      let rem = cut;
-      while (rem > maxStock) { pieces.push(maxStock); rem -= maxStock; }
+      let rem = len;
+      let part = 1;
+      while (rem > maxStock) { pieces.push(maxStock); rem -= maxStock; part++; }
       if (rem > 0) pieces.push(rem);
-      expandedCuts.push(...pieces);
-      splits.push({ original: cut, pieces });
+      expandedCuts.push(...pieces.map((l, i) => ({ len: l, ref: `${ref}/${i+1}` })));
+      splits.push({ original: len, ref, pieces });
     }
   }
   return { expandedCuts, splits };
@@ -1941,32 +1944,30 @@ function splitLongCuts(cuts, stockLengths) {
 // 1D BIN PACKING — First Fit Decreasing
 // ============================================================
 function binPack1D(cuts, stockLengths, kerf) {
-  // cuts = array of lengths needed (mm)
+  // cuts = array of {len, ref} objects
   // stockLengths = available bar lengths (mm), sorted ascending
-  // Returns { bars: [{stock, cuts, remaining}], totalStock, totalUsed, waste }
+  // Returns { bars: [{stock, cuts:[{len,ref}], remaining, usedLen}], totalStock, totalUsed, waste, unplaced }
   if (!cuts.length || !stockLengths.length) return { bars: [], totalStock: 0, totalUsed: 0, waste: 0, unplaced: cuts };
-  const sorted = [...cuts].sort((a,b) => b - a); // largest first
+  const sorted = [...cuts].sort((a,b) => b.len - a.len); // largest first
   const stocks = [...stockLengths].sort((a,b) => a - b);
   const bars = [];
   const unplaced = [];
 
   for (const cut of sorted) {
-    // Try to fit in existing bar
     let placed = false;
     for (const bar of bars) {
-      if (bar.remaining >= cut) {
+      if (bar.remaining >= cut.len) {
         bar.cuts.push(cut);
-        bar.remaining -= cut + kerf;
-        bar.usedLen += cut;
+        bar.remaining -= cut.len + kerf;
+        bar.usedLen += cut.len;
         placed = true;
         break;
       }
     }
     if (!placed) {
-      // Open new bar — pick smallest stock that fits
-      const stock = stocks.find(s => s >= cut);
+      const stock = stocks.find(s => s >= cut.len);
       if (!stock) { unplaced.push(cut); continue; }
-      const bar = { stock, cuts: [cut], remaining: stock - cut - kerf, usedLen: cut };
+      const bar = { stock, cuts: [cut], remaining: stock - cut.len - kerf, usedLen: cut.len };
       bars.push(bar);
     }
   }
@@ -1990,35 +1991,37 @@ function calcOssature() {
       const totalPanelsInSub = sub.pieces.reduce((s, p) => s + p.qty, 0);
       const totalOmegas = totalPanelsInSub > 0 ? totalPanelsInSub + 1 : 0;
 
+      let panelNum = 1;
       for (const p of sub.pieces) {
         const nbZed = Math.max(0, Math.ceil(p.w / entaxeMax) - 1);
+        const firstPanelOfType = panelNum;
         subData.pieces.push({
           ...p,
           nbZedPerPanel: nbZed,
           totalZed: nbZed * p.qty,
           zedML: nbZed * p.qty * p.h / 1000,
+          firstPanelNum: firstPanelOfType,
         });
         subData.totalZedML += nbZed * p.qty * p.h / 1000;
-        // Collect individual zed cuts (each zed = panel height)
         for (let q = 0; q < p.qty; q++) {
+          const pn = panelNum++;
+          // Omega: left edge of this panel (= right edge of previous, or facade start)
+          const omRef = pn === 1 ? `◀ P1` : `P${pn-1}/P${pn}`;
+          subData.omegaCuts.push({ len: p.h, ref: omRef });
+          // Zed cuts for this panel
           for (let z = 0; z < nbZed; z++) {
-            subData.zedCuts.push(p.h);
+            subData.zedCuts.push({ len: p.h, ref: `P${pn}` });
           }
         }
       }
 
-      // Omega cuts: 1 per panel (left side) + 1 extra (right end)
+      // Omega closing cut: right edge of last panel
       let omegaML = 0;
-      for (const p of sub.pieces) {
-        omegaML += p.qty * p.h / 1000;
-        for (let q = 0; q < p.qty; q++) {
-          subData.omegaCuts.push(p.h);
-        }
-      }
+      for (const p of sub.pieces) omegaML += p.qty * p.h / 1000;
       if (sub.pieces.length > 0) {
         const maxH = Math.max(...sub.pieces.map(p => p.h));
         omegaML += maxH / 1000;
-        subData.omegaCuts.push(maxH);
+        subData.omegaCuts.push({ len: maxH, ref: `P${panelNum-1} ▶` });
       }
       subData.totalOmegaML = omegaML;
       subData.totalOmegas = totalOmegas;
@@ -2132,12 +2135,12 @@ function renderOssature() {
       html += `<tr>
         <td style="font-weight:700;">&#937;-${i+1}</td>
         <td class="mono">${bar.stock} mm</td>
-        <td class="mono" style="font-size:11px;">${bar.cuts.map(c => c + ' mm').join(' + ')}</td>
+        <td class="mono" style="font-size:11px;">${bar.cuts.map(c => `${c.len}mm <span style="color:var(--text4);font-size:10px;">(${c.ref})</span>`).join(' + ')}</td>
         <td style="${chute > bar.stock*0.3 ? 'color:var(--red)' : chute > bar.stock*0.15 ? 'color:var(--yellow)' : 'color:var(--green)'};font-weight:700;">${chute} mm (${(chute/bar.stock*100).toFixed(1)}%)</td>
       </tr>`;
     });
     if (omegaPack.unplaced.length) {
-      html += `<tr><td colspan="4" style="color:var(--red);font-weight:700;">&#9888; ${omegaPack.unplaced.length} coupe(s) impossible(s) — aucun stock assez long : ${omegaPack.unplaced.map(c => c+'mm').join(', ')}</td></tr>`;
+      html += `<tr><td colspan="4" style="color:var(--red);font-weight:700;">&#9888; ${omegaPack.unplaced.length} coupe(s) impossible(s) : ${omegaPack.unplaced.map(c => `${c.len}mm (${c.ref})`).join(', ')}</td></tr>`;
     }
     html += `</table></div>`;
   }
@@ -2165,12 +2168,12 @@ function renderOssature() {
       html += `<tr>
         <td style="font-weight:700;">Z-${i+1}</td>
         <td class="mono">${bar.stock} mm</td>
-        <td class="mono" style="font-size:11px;">${bar.cuts.map(c => c + ' mm').join(' + ')}</td>
+        <td class="mono" style="font-size:11px;">${bar.cuts.map(c => `${c.len}mm <span style="color:var(--text4);font-size:10px;">(${c.ref})</span>`).join(' + ')}</td>
         <td style="${chute > bar.stock*0.3 ? 'color:var(--red)' : chute > bar.stock*0.15 ? 'color:var(--yellow)' : 'color:var(--green)'};font-weight:700;">${chute} mm (${(chute/bar.stock*100).toFixed(1)}%)</td>
       </tr>`;
     });
     if (zedPack.unplaced.length) {
-      html += `<tr><td colspan="4" style="color:var(--red);font-weight:700;">&#9888; ${zedPack.unplaced.length} coupe(s) impossible(s) : ${zedPack.unplaced.map(c => c+'mm').join(', ')}</td></tr>`;
+      html += `<tr><td colspan="4" style="color:var(--red);font-weight:700;">&#9888; ${zedPack.unplaced.length} coupe(s) impossible(s) : ${zedPack.unplaced.map(c => `${c.len}mm (${c.ref})`).join(', ')}</td></tr>`;
     }
     html += `</table></div>`;
   }
