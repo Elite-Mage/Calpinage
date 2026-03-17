@@ -79,17 +79,18 @@
   body {
     font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     background: var(--bg); color: var(--text); min-height: 100vh;
-    padding: 20px; line-height: 1.5;
+    padding: 20px; line-height: 1.5; overflow: hidden;
   }
+  #appScreen { flex-direction: column; height: calc(100vh - 40px); overflow: hidden; }
   .mono { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; }
 
   header { border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; }
   header h1 { font-size: 22px; font-weight: 800; letter-spacing: 3px; color: var(--accent); }
   header p { font-size: 11px; color: var(--text4); letter-spacing: 2px; margin-top: 2px; }
 
-  .layout { display: flex; gap: 20px; align-items: flex-start; }
-  .sidebar { flex: 0 0 360px; display: flex; flex-direction: column; gap: 14px; position: sticky; top: 20px; }
-  .main { flex: 1; min-width: 400px; display: flex; flex-direction: column; gap: 16px; }
+  .layout { display: flex; gap: 20px; align-items: stretch; overflow: hidden; flex: 1; }
+  .sidebar { flex: 0 0 360px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
+  .main { flex: 1; min-width: 400px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
 
   .card { background: var(--card); border-radius: var(--radius); padding: 16px; border: 1px solid var(--border); }
   .card-title { font-size: 10px; letter-spacing: 2.5px; color: var(--accent); margin-bottom: 12px; font-weight: 700; text-transform: uppercase; }
@@ -289,9 +290,11 @@
   .result-subsection-header .sinfo { font-size: 11px; color: var(--text3); margin-left: auto; }
 
   @media (max-width: 900px) {
-    .layout { flex-direction: column; }
-    .sidebar { flex: none; width: 100%; position: static; }
-    .main { min-width: 0; }
+    body { overflow: auto; }
+    #appScreen { height: auto; overflow: visible; }
+    .layout { flex-direction: column; overflow: visible; }
+    .sidebar { flex: none; width: 100%; overflow-y: visible; }
+    .main { min-width: 0; overflow-y: visible; }
   }
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
@@ -352,7 +355,6 @@
         <input class="home-new-input" id="newProjectName" placeholder="Nom du nouveau chantier…">
         <button class="btn-home-create" onclick="createProject()">+ Nouveau</button>
         <label class="home-import-label">&#128193; JSON<input type="file" accept=".json" style="display:none" onchange="importProjectHome(this)"></label>
-        <button class="home-import-label" onclick="downloadBeauchamp()" style="cursor:pointer;">&#11015; Beauchamp</button>
       </div>
     </div>
   </div>
@@ -1573,7 +1575,7 @@ async function openProject(id) {
     setSaveStatus('saved');
     if (useApi) connectWS(id);
     document.getElementById('homeScreen').style.display = 'none';
-    document.getElementById('appScreen').style.display = 'block';
+    document.getElementById('appScreen').style.display = 'flex';
   } catch(e) {
     alert('Impossible d\'ouvrir le projet : ' + e.message);
   }
