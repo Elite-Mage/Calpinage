@@ -813,10 +813,11 @@ function expandPieces(pcs) {
   return result;
 }
 
-function allFittingStocks(activeStocks, pw, ph) {
-  const fits = [];
+function allFittingStocks(activeStocks, pw, ph, kerf) {
+  const fits = [], w = pw - kerf, h = ph - kerf;
   for (const s of activeStocks) {
-    if ((s.w >= pw && s.h >= ph) || (s.w >= ph && s.h >= pw)) fits.push(s);
+    if (((s.w >= pw || s.w === w) && (s.h >= ph || s.h === h)) ||
+        ((s.w >= ph || s.w === h) && (s.h >= pw || s.h === w))) fits.push(s);
   }
   return fits.sort((a, b) => a.w * a.h - b.w * b.h);
 }
@@ -840,30 +841,35 @@ function splitMaxRectLong(rect, pw, ph) {
   return rects;
 }
 
-function heuristicBestAreaFit(freeRects, pw, ph) {
+function fitsInRect(rw, rh, pw, ph, kerf) {
+  const w = pw - kerf, h = ph - kerf;
+  return (rw >= pw || rw === w) && (rh >= ph || rh === h);
+}
+function heuristicBestAreaFit(freeRects, pw, ph, kerf) {
   let bestIdx = -1, bestW = Infinity, bestR = false;
+  const w = pw-kerf, h = ph-kerf;
   for (let i = 0; i < freeRects.length; i++) {
     const r = freeRects[i];
-    if (r.w >= pw && r.h >= ph) { const w = r.w*r.h - pw*ph; if (w < bestW) { bestW=w; bestIdx=i; bestR=false; } }
-    if (r.w >= ph && r.h >= pw) { const w = r.w*r.h - pw*ph; if (w < bestW) { bestW=w; bestIdx=i; bestR=true; } }
+    if (fitsInRect(r.w, r.h, pw, ph, kerf)) { const a = r.w*r.h - w*h; if (a < bestW) { bestW=a; bestIdx=i; bestR=false; } }
+    if (fitsInRect(r.w, r.h, ph, pw, kerf)) { const a = r.w*r.h - w*h; if (a < bestW) { bestW=a; bestIdx=i; bestR=true; } }
   }
   return { idx: bestIdx, rotated: bestR };
 }
-function heuristicBestShortSideFit(freeRects, pw, ph) {
+function heuristicBestShortSideFit(freeRects, pw, ph, kerf) {
   let bestIdx = -1, bestS = Infinity, bestR = false;
   for (let i = 0; i < freeRects.length; i++) {
     const r = freeRects[i];
-    if (r.w >= pw && r.h >= ph) { const s = Math.min(r.w-pw, r.h-ph); if (s < bestS) { bestS=s; bestIdx=i; bestR=false; } }
-    if (r.w >= ph && r.h >= pw) { const s = Math.min(r.w-ph, r.h-pw); if (s < bestS) { bestS=s; bestIdx=i; bestR=true; } }
+    if (fitsInRect(r.w, r.h, pw, ph, kerf)) { const s = Math.min(r.w-pw, r.h-ph); if (s < bestS) { bestS=s; bestIdx=i; bestR=false; } }
+    if (fitsInRect(r.w, r.h, ph, pw, kerf)) { const s = Math.min(r.w-ph, r.h-pw); if (s < bestS) { bestS=s; bestIdx=i; bestR=true; } }
   }
   return { idx: bestIdx, rotated: bestR };
 }
-function heuristicBottomLeft(freeRects, pw, ph) {
+function heuristicBottomLeft(freeRects, pw, ph, kerf) {
   let bestIdx = -1, bestY = Infinity, bestX = Infinity, bestR = false;
   for (let i = 0; i < freeRects.length; i++) {
     const r = freeRects[i];
-    if (r.w >= pw && r.h >= ph) { if (r.y < bestY || (r.y===bestY && r.x < bestX)) { bestY=r.y; bestX=r.x; bestIdx=i; bestR=false; } }
-    if (r.w >= ph && r.h >= pw) { if (r.y < bestY || (r.y===bestY && r.x < bestX)) { bestY=r.y; bestX=r.x; bestIdx=i; bestR=true; } }
+    if (fitsInRect(r.w, r.h, pw, ph, kerf)) { if (r.y < bestY || (r.y===bestY && r.x < bestX)) { bestY=r.y; bestX=r.x; bestIdx=i; bestR=false; } }
+    if (fitsInRect(r.w, r.h, ph, pw, kerf)) { if (r.y < bestY || (r.y===bestY && r.x < bestX)) { bestY=r.y; bestX=r.x; bestIdx=i; bestR=true; } }
   }
   return { idx: bestIdx, rotated: bestR };
 }
@@ -882,7 +888,9 @@ function placePiece(panel, piece, rectIdx, rotated, kerf, splitFn) {
   const r = panel.freeRects[rectIdx];
   const fw = rotated ? piece.h : piece.w, fh = rotated ? piece.w : piece.h;
   panel.placements.push({ ...piece, w: fw, h: fh, x: r.x, y: r.y, pieceNum: panel.placements.length+1, rotated });
-  panel.freeRects.splice(rectIdx, 1, ...splitFn(r, fw+kerf, fh+kerf));
+  const usedW = fw + (fw < r.w ? kerf : 0);
+  const usedH = fh + (fh < r.h ? kerf : 0);
+  panel.freeRects.splice(rectIdx, 1, ...splitFn(r, usedW, usedH));
 }
 
 function packAttempt(activeStocks, expanded, kerf, sortFn, hFn, sFn, stockPref) {
@@ -892,11 +900,11 @@ function packAttempt(activeStocks, expanded, kerf, sortFn, hFn, sFn, stockPref) 
     const pw = piece.w+kerf, ph = piece.h+kerf;
     let placed = false;
     for (const panel of panels) {
-      const { idx, rotated } = hFn(panel.freeRects, pw, ph);
+      const { idx, rotated } = hFn(panel.freeRects, pw, ph, kerf);
       if (idx !== -1) { placePiece(panel, piece, idx, rotated, kerf, sFn); placed = true; break; }
     }
     if (!placed) {
-      const fits = allFittingStocks(activeStocks, pw, ph);
+      const fits = allFittingStocks(activeStocks, pw, ph, kerf);
       if (!fits.length) { unplaced.push(piece); continue; }
       let stock;
       if (stockPref === 'largest') stock = fits[fits.length-1];
@@ -904,7 +912,7 @@ function packAttempt(activeStocks, expanded, kerf, sortFn, hFn, sFn, stockPref) 
       else stock = fits[0];
       const panel = { stock: {...stock, label: `${stock.w}\u00d7${stock.h}`}, idx: panels.length+1, placements: [], freeRects: [{x:0,y:0,w:stock.w,h:stock.h}] };
       panels.push(panel);
-      const { idx, rotated } = hFn(panel.freeRects, pw, ph);
+      const { idx, rotated } = hFn(panel.freeRects, pw, ph, kerf);
       if (idx !== -1) placePiece(panel, piece, idx, rotated, kerf, sFn);
       else unplaced.push(piece);
     }
