@@ -352,6 +352,7 @@
         <input class="home-new-input" id="newProjectName" placeholder="Nom du nouveau chantier…">
         <button class="btn-home-create" onclick="createProject()">+ Nouveau</button>
         <label class="home-import-label">&#128193; JSON<input type="file" accept=".json" style="display:none" onchange="importProjectHome(this)"></label>
+        <button class="home-import-label" onclick="downloadBeauchamp()" style="cursor:pointer;">&#11015; Beauchamp</button>
       </div>
     </div>
   </div>
@@ -435,8 +436,8 @@
     <div class="card">
       <div class="card-title">Projet / Chantier</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn-project" onclick="exportProject()">&#128190; Sauvegarder JSON</button>
-        <label class="btn-project" style="display:inline-block;cursor:pointer;">&#128193; Charger JSON<input type="file" accept=".json" style="display:none" onchange="importProject(this)"></label>
+        <button class="btn-project" onclick="exportProject()">&#128190; Exporter</button>
+        <label class="btn-project" style="display:inline-block;cursor:pointer;">&#128193; Importer<input type="file" accept=".json" style="display:none" onchange="importProject(this)"></label>
       </div>
     </div>
   </div>
@@ -812,10 +813,11 @@ function expandPieces(pcs) {
   return result;
 }
 
-function allFittingStocks(activeStocks, pw, ph) {
-  const fits = [];
+function allFittingStocks(activeStocks, pw, ph, kerf) {
+  const fits = [], w = pw - kerf, h = ph - kerf;
   for (const s of activeStocks) {
-    if ((s.w >= pw && s.h >= ph) || (s.w >= ph && s.h >= pw)) fits.push(s);
+    if (((s.w >= pw || s.w === w) && (s.h >= ph || s.h === h)) ||
+        ((s.w >= ph || s.w === h) && (s.h >= pw || s.h === w))) fits.push(s);
   }
   return fits.sort((a, b) => a.w * a.h - b.w * b.h);
 }
@@ -839,30 +841,35 @@ function splitMaxRectLong(rect, pw, ph) {
   return rects;
 }
 
-function heuristicBestAreaFit(freeRects, pw, ph) {
+function fitsInRect(rw, rh, pw, ph, kerf) {
+  const w = pw - kerf, h = ph - kerf;
+  return (rw >= pw || rw === w) && (rh >= ph || rh === h);
+}
+function heuristicBestAreaFit(freeRects, pw, ph, kerf) {
   let bestIdx = -1, bestW = Infinity, bestR = false;
+  const w = pw-kerf, h = ph-kerf;
   for (let i = 0; i < freeRects.length; i++) {
     const r = freeRects[i];
-    if (r.w >= pw && r.h >= ph) { const w = r.w*r.h - pw*ph; if (w < bestW) { bestW=w; bestIdx=i; bestR=false; } }
-    if (r.w >= ph && r.h >= pw) { const w = r.w*r.h - pw*ph; if (w < bestW) { bestW=w; bestIdx=i; bestR=true; } }
+    if (fitsInRect(r.w, r.h, pw, ph, kerf)) { const a = r.w*r.h - w*h; if (a < bestW) { bestW=a; bestIdx=i; bestR=false; } }
+    if (fitsInRect(r.w, r.h, ph, pw, kerf)) { const a = r.w*r.h - w*h; if (a < bestW) { bestW=a; bestIdx=i; bestR=true; } }
   }
   return { idx: bestIdx, rotated: bestR };
 }
-function heuristicBestShortSideFit(freeRects, pw, ph) {
+function heuristicBestShortSideFit(freeRects, pw, ph, kerf) {
   let bestIdx = -1, bestS = Infinity, bestR = false;
   for (let i = 0; i < freeRects.length; i++) {
     const r = freeRects[i];
-    if (r.w >= pw && r.h >= ph) { const s = Math.min(r.w-pw, r.h-ph); if (s < bestS) { bestS=s; bestIdx=i; bestR=false; } }
-    if (r.w >= ph && r.h >= pw) { const s = Math.min(r.w-ph, r.h-pw); if (s < bestS) { bestS=s; bestIdx=i; bestR=true; } }
+    if (fitsInRect(r.w, r.h, pw, ph, kerf)) { const s = Math.min(r.w-pw, r.h-ph); if (s < bestS) { bestS=s; bestIdx=i; bestR=false; } }
+    if (fitsInRect(r.w, r.h, ph, pw, kerf)) { const s = Math.min(r.w-ph, r.h-pw); if (s < bestS) { bestS=s; bestIdx=i; bestR=true; } }
   }
   return { idx: bestIdx, rotated: bestR };
 }
-function heuristicBottomLeft(freeRects, pw, ph) {
+function heuristicBottomLeft(freeRects, pw, ph, kerf) {
   let bestIdx = -1, bestY = Infinity, bestX = Infinity, bestR = false;
   for (let i = 0; i < freeRects.length; i++) {
     const r = freeRects[i];
-    if (r.w >= pw && r.h >= ph) { if (r.y < bestY || (r.y===bestY && r.x < bestX)) { bestY=r.y; bestX=r.x; bestIdx=i; bestR=false; } }
-    if (r.w >= ph && r.h >= pw) { if (r.y < bestY || (r.y===bestY && r.x < bestX)) { bestY=r.y; bestX=r.x; bestIdx=i; bestR=true; } }
+    if (fitsInRect(r.w, r.h, pw, ph, kerf)) { if (r.y < bestY || (r.y===bestY && r.x < bestX)) { bestY=r.y; bestX=r.x; bestIdx=i; bestR=false; } }
+    if (fitsInRect(r.w, r.h, ph, pw, kerf)) { if (r.y < bestY || (r.y===bestY && r.x < bestX)) { bestY=r.y; bestX=r.x; bestIdx=i; bestR=true; } }
   }
   return { idx: bestIdx, rotated: bestR };
 }
@@ -881,7 +888,9 @@ function placePiece(panel, piece, rectIdx, rotated, kerf, splitFn) {
   const r = panel.freeRects[rectIdx];
   const fw = rotated ? piece.h : piece.w, fh = rotated ? piece.w : piece.h;
   panel.placements.push({ ...piece, w: fw, h: fh, x: r.x, y: r.y, pieceNum: panel.placements.length+1, rotated });
-  panel.freeRects.splice(rectIdx, 1, ...splitFn(r, fw+kerf, fh+kerf));
+  const usedW = fw + (fw < r.w ? kerf : 0);
+  const usedH = fh + (fh < r.h ? kerf : 0);
+  panel.freeRects.splice(rectIdx, 1, ...splitFn(r, usedW, usedH));
 }
 
 function packAttempt(activeStocks, expanded, kerf, sortFn, hFn, sFn, stockPref) {
@@ -891,11 +900,11 @@ function packAttempt(activeStocks, expanded, kerf, sortFn, hFn, sFn, stockPref) 
     const pw = piece.w+kerf, ph = piece.h+kerf;
     let placed = false;
     for (const panel of panels) {
-      const { idx, rotated } = hFn(panel.freeRects, pw, ph);
+      const { idx, rotated } = hFn(panel.freeRects, pw, ph, kerf);
       if (idx !== -1) { placePiece(panel, piece, idx, rotated, kerf, sFn); placed = true; break; }
     }
     if (!placed) {
-      const fits = allFittingStocks(activeStocks, pw, ph);
+      const fits = allFittingStocks(activeStocks, pw, ph, kerf);
       if (!fits.length) { unplaced.push(piece); continue; }
       let stock;
       if (stockPref === 'largest') stock = fits[fits.length-1];
@@ -903,7 +912,7 @@ function packAttempt(activeStocks, expanded, kerf, sortFn, hFn, sFn, stockPref) 
       else stock = fits[0];
       const panel = { stock: {...stock, label: `${stock.w}\u00d7${stock.h}`}, idx: panels.length+1, placements: [], freeRects: [{x:0,y:0,w:stock.w,h:stock.h}] };
       panels.push(panel);
-      const { idx, rotated } = hFn(panel.freeRects, pw, ph);
+      const { idx, rotated } = hFn(panel.freeRects, pw, ph, kerf);
       if (idx !== -1) placePiece(panel, piece, idx, rotated, kerf, sFn);
       else unplaced.push(piece);
     }
@@ -1321,6 +1330,15 @@ function exportExcel() {
 // ============================================================
 // SAVE / LOAD PROJECT
 // ============================================================
+function downloadBeauchamp() {
+  const data = {"version":"6.0","chantier":{"nom":"Calpinage Beauchamp","date":"2026-03-17"},"stockPanels":[{"id":1,"w":3650,"h":1860,"active":true},{"id":2,"w":2550,"h":1860,"active":true}],"nextStockId":3,"groups":[{"id":1,"name":"Type 1","color":"#fbd38d","reference":"","coloris":"","epaisseur":18,"prixM2":"","subsections":[{"id":1,"name":"Poste Bardage","pieces":[{"id":1,"w":3650,"h":1083,"qty":2},{"id":2,"w":3650,"h":1078,"qty":1},{"id":3,"w":3650,"h":1037,"qty":2},{"id":4,"w":3650,"h":1028.5,"qty":2},{"id":5,"w":3650,"h":983.5,"qty":2},{"id":6,"w":3650,"h":981,"qty":2},{"id":7,"w":3650,"h":933.5,"qty":2},{"id":8,"w":3650,"h":877,"qty":2},{"id":9,"w":3650,"h":876,"qty":1},{"id":10,"w":3650,"h":867,"qty":27},{"id":11,"w":3650,"h":833,"qty":4},{"id":12,"w":3650,"h":822.3,"qty":10},{"id":13,"w":3650,"h":821,"qty":2},{"id":14,"w":3650,"h":778,"qty":2},{"id":15,"w":3650,"h":777,"qty":2},{"id":16,"w":3650,"h":776,"qty":1},{"id":17,"w":3650,"h":650.5,"qty":2},{"id":18,"w":3650,"h":620,"qty":1},{"id":19,"w":3650,"h":542,"qty":1},{"id":20,"w":3650,"h":491,"qty":1},{"id":21,"w":3650,"h":445,"qty":1},{"id":22,"w":3650,"h":296,"qty":2}],"nextPieceId":23}],"nextSubsectionId":2,"activeSubsectionId":1},{"id":2,"name":"Type 2","color":"#fd9a51","reference":"","coloris":"","epaisseur":18,"prixM2":"","subsections":[{"id":1,"name":"Poste Bardage","pieces":[{"id":1,"w":2550,"h":1083,"qty":2},{"id":2,"w":2550,"h":1078,"qty":1},{"id":3,"w":2550,"h":1037,"qty":2},{"id":4,"w":2550,"h":1028.5,"qty":2},{"id":5,"w":2550,"h":983.5,"qty":2},{"id":6,"w":2550,"h":981,"qty":2},{"id":7,"w":2550,"h":933.5,"qty":2},{"id":8,"w":2550,"h":877,"qty":2},{"id":9,"w":2550,"h":876,"qty":1},{"id":10,"w":2550,"h":867,"qty":27},{"id":11,"w":2550,"h":833,"qty":4},{"id":12,"w":2550,"h":822.3,"qty":10},{"id":13,"w":2550,"h":821,"qty":2},{"id":14,"w":2550,"h":778,"qty":2},{"id":15,"w":2550,"h":777,"qty":2},{"id":16,"w":2550,"h":776,"qty":1},{"id":17,"w":2550,"h":650.5,"qty":2},{"id":18,"w":2550,"h":620,"qty":1},{"id":19,"w":2550,"h":542,"qty":1},{"id":20,"w":2550,"h":491,"qty":1},{"id":21,"w":2550,"h":445,"qty":1},{"id":22,"w":2550,"h":296,"qty":2}],"nextPieceId":23}],"nextSubsectionId":2,"activeSubsectionId":1}],"nextGroupId":3,"activeGroupId":1};
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'calpinage_beauchamp.json';
+  link.click();
+}
+
 function exportProject() {
   const data = { version: '6.0', ...getProjectData() };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
