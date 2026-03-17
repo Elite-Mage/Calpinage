@@ -6,9 +6,10 @@
   },
   "stockPanels": [
     { "id": 1, "w": 3650, "h": 1860, "active": true },
-    { "id": 2, "w": 2550, "h": 1860, "active": true }
+    { "id": 2, "w": 2550, "h": 1860, "active": true },
+    { "id": 3, "w": 4270, "h": 2130, "active": true }
   ],
-  "nextStockId": 3,
+  "nextStockId": 4,
   "groups": [
     {
       "id": 1,
@@ -21,7 +22,7 @@
       "subsections": [
         {
           "id": 1,
-          "name": "Poste Bardage",
+          "name": "Panneaux plein",
           "pieces": [
             { "id": 1,  "w": 3650, "h": 1083,   "qty": 2  },
             { "id": 2,  "w": 3650, "h": 1078,   "qty": 1  },
@@ -47,9 +48,32 @@
             { "id": 22, "w": 3650, "h": 296,    "qty": 2  }
           ],
           "nextPieceId": 23
+        },
+        {
+          "id": 2,
+          "name": "Panneaux dessous et dessus de fenêtre",
+          "pieces": [
+            { "id": 1, "w": 1134, "h": 1008, "qty": 1  },
+            { "id": 2, "w": 1134, "h": 492,  "qty": 1  },
+            { "id": 3, "w": 984,  "h": 1008, "qty": 13 },
+            { "id": 4, "w": 984,  "h": 822,  "qty": 13 },
+            { "id": 5, "w": 788,  "h": 1008, "qty": 12 },
+            { "id": 6, "w": 788,  "h": 822,  "qty": 12 }
+          ],
+          "nextPieceId": 7
+        },
+        {
+          "id": 3,
+          "name": "Bandeau Haut",
+          "pieces": [
+            { "id": 1, "w": 1064, "h": 4268, "qty": 10 },
+            { "id": 2, "w": 1064, "h": 4267, "qty": 4  },
+            { "id": 3, "w": 1064, "h": 4075, "qty": 6  }
+          ],
+          "nextPieceId": 4
         }
       ],
-      "nextSubsectionId": 2,
+      "nextSubsectionId": 4,
       "activeSubsectionId": 1
     },
     {
@@ -63,7 +87,7 @@
       "subsections": [
         {
           "id": 1,
-          "name": "Poste Bardage",
+          "name": "Panneaux plein",
           "pieces": [
             { "id": 1,  "w": 2550, "h": 1083,   "qty": 2  },
             { "id": 2,  "w": 2550, "h": 1078,   "qty": 1  },
@@ -89,9 +113,18 @@
             { "id": 22, "w": 2550, "h": 296,    "qty": 2  }
           ],
           "nextPieceId": 23
+        },
+        {
+          "id": 2,
+          "name": "Panneaux dessous et dessus de fenêtre",
+          "pieces": [
+            { "id": 1, "w": 984, "h": 750, "qty": 13 },
+            { "id": 2, "w": 788, "h": 750, "qty": 12 }
+          ],
+          "nextPieceId": 3
         }
       ],
-      "nextSubsectionId": 2,
+      "nextSubsectionId": 3,
       "activeSubsectionId": 1
     }
   ],
