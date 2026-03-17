@@ -304,7 +304,7 @@
     .sidebar { flex: none; width: 100%; overflow-y: visible; }
     .main { min-width: 0; overflow-y: visible; }
     .section-content.active { display: block; }
-    #sectionPanneaux { overflow: visible !important; }
+    #sectionPanneaux, #sectionOssature, #sectionFixation, #sectionDevis { overflow: visible !important; }
     .oss-config { flex-direction: column; gap: 8px; }
     .oss-config input { width: 100%; }
     .supplier-grid { grid-template-columns: 1fr; }
@@ -312,6 +312,19 @@
     .group-tabs { gap: 4px; }
     .group-tab { padding: 6px 10px; font-size: 12px; }
     .panel-svg { width: 100% !important; height: auto !important; }
+    /* Tables scrollables horizontalement */
+    .oss-table, .devis-table, .order-table {
+      display: block; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    }
+    .oss-table th, .oss-table td,
+    .devis-table th, .devis-table td { font-size: 11px; padding: 5px 6px; white-space: nowrap; }
+    /* Oss-card header badges en colonne sur très petit écran */
+    .oss-card > div:first-child { flex-wrap: wrap; }
+    /* Result group header compact */
+    .result-group-header { padding: 8px 12px; }
+    .result-group-header .name { font-size: 14px; }
+    /* Summary rows */
+    .summary-row { font-size: 12px; }
   }
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
