@@ -233,6 +233,44 @@
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--text4); border-radius: 3px; }
+
+  /* CHANTIER */
+  .chantier-inputs { display: flex; gap: 8px; align-items: center; }
+  .chantier-inputs input {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 6px 10px; border-radius: 8px; font-size: 13px; font-family: inherit;
+  }
+  .chantier-inputs input:focus { outline: none; border-color: var(--accent); }
+  #chantierNom { min-width: 200px; }
+
+  /* PROJECT BUTTONS */
+  .btn-project {
+    background: transparent; border: 1px solid var(--border); color: var(--text3);
+    padding: 6px 12px; border-radius: 8px; font-size: 11px; cursor: pointer;
+    letter-spacing: 1px; font-family: inherit; transition: all 0.15s;
+  }
+  .btn-project:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* SUPPLIER FIELDS */
+  .supplier-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .supplier-field label { font-size: 10px; color: var(--text4); letter-spacing: 1px; display: block; margin-bottom: 3px; text-transform: uppercase; }
+  .supplier-field input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 5px 8px; border-radius: 6px; font-size: 12px; font-family: inherit;
+  }
+  .supplier-field input:focus { outline: none; border-color: var(--accent); }
+
+  /* PRINT */
+  @media print {
+    body { background: white !important; color: black !important; padding: 10mm; }
+    .pdf-header { border-bottom: 2px solid #333; padding-bottom: 8px; margin-bottom: 16px; }
+    .pdf-group-title { font-size: 16px; font-weight: 800; margin: 20px 0 8px; padding: 6px 10px; border-left: 4px solid; }
+    .pdf-panel { page-break-inside: avoid; margin-bottom: 20px; }
+    .pdf-order-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    .pdf-order-table th, .pdf-order-table td { border: 1px solid #ccc; padding: 6px 10px; font-size: 12px; }
+    .pdf-order-table th { background: #f0f0f0; font-weight: 700; }
+    .pdf-page-break { page-break-before: always; }
+  }
 </style>
 </head>
 <body>
@@ -242,7 +280,11 @@
     <h1 class="mono">&#9670; CALEPINAGE PANNEAUX</h1>
     <p>OPTIMISEUR DE DECOUPE &mdash; MULTI-COULEURS &mdash; MULTI-FACADES</p>
   </div>
-  <div style="font-size:11px;color:var(--text4);">v4.0</div>
+  <div class="chantier-inputs">
+    <input id="chantierNom" placeholder="Nom du chantier..." oninput="chantier.nom=this.value">
+    <input type="date" id="chantierDate" oninput="chantier.date=this.value">
+  </div>
+  <div style="font-size:11px;color:var(--text4);">v5.0</div>
 </header>
 
 <div class="layout">
@@ -290,9 +332,21 @@
     <div class="card" id="orderCard" style="display:none;">
       <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
         <span>Bon de commande</span>
-        <button class="btn-export" onclick="exportCSV()">&#128196; CSV</button>
+        <div style="display:flex;gap:6px;">
+          <button class="btn-export" onclick="exportCSV()">&#128196; CSV</button>
+          <button class="btn-export" onclick="exportPDF()">&#128247; PDF</button>
+        </div>
       </div>
       <table class="order-table" id="orderTable"></table>
+    </div>
+
+    <!-- PROJECT SAVE/LOAD -->
+    <div class="card">
+      <div class="card-title">Projet / Chantier</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn-project" onclick="exportProject()">&#128190; Sauvegarder JSON</button>
+        <label class="btn-project" style="display:inline-block;cursor:pointer;">&#128193; Charger JSON<input type="file" accept=".json" style="display:none" onchange="importProject(this)"></label>
+      </div>
     </div>
   </div>
 
@@ -335,11 +389,17 @@ let stockPanels = [
 ];
 let nextStockId = 5;
 
+let chantier = { nom: '', date: new Date().toISOString().slice(0,10) };
+
 let groups = [
   {
     id: 1,
     name: 'Type 1',
     color: GROUP_COLORS[0],
+    reference: '',
+    coloris: '',
+    epaisseur: 18,
+    prixM2: '',
     subsections: [
       {
         id: 1,
@@ -492,6 +552,26 @@ function renderActiveGroup() {
         <div style="font-size:10px;color:var(--text4);letter-spacing:1px;margin-bottom:6px;">COULEUR DU TYPE</div>
         <div class="color-picker-row">${colorSwatches}</div>
       </div>
+      <!-- Supplier fields -->
+      <div style="font-size:10px;color:var(--text4);letter-spacing:1px;margin-bottom:6px;">INFOS FOURNISSEUR</div>
+      <div class="supplier-grid">
+        <div class="supplier-field">
+          <label>Ref. fournisseur</label>
+          <input value="${g.reference||''}" placeholder="ex: ALU-123" oninput="updateGroupSupplier(${g.id},'reference',this.value)">
+        </div>
+        <div class="supplier-field">
+          <label>Coloris</label>
+          <input value="${g.coloris||''}" placeholder="ex: RAL 9010" oninput="updateGroupSupplier(${g.id},'coloris',this.value)">
+        </div>
+        <div class="supplier-field">
+          <label>Epaisseur (mm)</label>
+          <input type="number" value="${g.epaisseur||18}" min="1" step="1" oninput="updateGroupSupplier(${g.id},'epaisseur',this.value)">
+        </div>
+        <div class="supplier-field">
+          <label>Prix / m&sup2; (€)</label>
+          <input type="number" value="${g.prixM2||''}" placeholder="ex: 45.00" min="0" step="0.01" oninput="updateGroupSupplier(${g.id},'prixM2',this.value)">
+        </div>
+      </div>
       <!-- Subsection tabs -->
       <div class="subsection-zone">
         <div class="subsection-label">&#9679; Facades</div>
@@ -532,6 +612,10 @@ function addGroup() {
     id: nextGroupId,
     name: `Type ${nextGroupId}`,
     color: availColor,
+    reference: '',
+    coloris: '',
+    epaisseur: 18,
+    prixM2: '',
     subsections: [{ id: 1, name: 'Facade 1', pieces: [], nextPieceId: 1 }],
     nextSubsectionId: 2,
     activeSubsectionId: 1,
@@ -553,6 +637,10 @@ function removeGroup(id) {
 function renameGroup(id, name) {
   const g = getGroup(id);
   if (g) { g.name = name || `Type ${id}`; renderGroupTabs(); }
+}
+function updateGroupSupplier(id, field, value) {
+  const g = getGroup(id);
+  if (g) g[field] = value;
 }
 
 function setGroupColor(id, color) {
@@ -822,7 +910,7 @@ function renderAllResults() {
       });
     });
 
-    orderByGroup.push({ name: g.name, color: g.color, stockCount: gStockCount, totalPanels: result.panels.length, subStats, subsections: g.subsections });
+    orderByGroup.push({ name: g.name, color: g.color, reference: g.reference||'', coloris: g.coloris||'', epaisseur: g.epaisseur||18, prixM2: g.prixM2||'', stockCount: gStockCount, totalPanels: result.panels.length, subStats, subsections: g.subsections });
 
     // Group header
     html += `<div class="result-group-header" style="border-color:${g.color}44; background:${g.color}0a;">
@@ -884,23 +972,30 @@ function renderAllResults() {
   document.getElementById('summaryCard').style.display = 'block';
 
   // Order table
-  let tableHTML = `<tr><th>TYPE</th><th>FORMAT</th><th>QTE</th><th>SURFACE</th></tr>`;
+  let tableHTML = `<tr><th>TYPE</th><th>REF / COLORIS</th><th>EP.</th><th>FORMAT</th><th>QTE</th><th>SURFACE</th><th>PRIX EST.</th></tr>`;
+  let grandTotalPrice = 0;
+  let hasPrice = false;
   for (const og of orderByGroup) {
     for (const [label, count] of Object.entries(og.stockCount)) {
       const dims = label.split('\u00d7').map(Number);
-      const area = (dims[0]*dims[1]*count/1e6).toFixed(2);
+      const area = (dims[0]*dims[1]*count/1e6);
+      const prix = og.prixM2 ? (parseFloat(og.prixM2) * area).toFixed(2) : '';
+      if (prix) { grandTotalPrice += parseFloat(prix); hasPrice = true; }
       tableHTML += `<tr>
         <td style="display:flex;align-items:center;gap:6px;">
           <span style="width:8px;height:8px;border-radius:50%;background:${og.color};display:inline-block;"></span>
           ${og.name}
         </td>
+        <td style="font-size:11px;color:var(--text3);">${og.reference || '—'}${og.coloris ? ' / ' + og.coloris : ''}</td>
+        <td style="text-align:center;font-size:12px;">${og.epaisseur} mm</td>
         <td class="mono">${label} mm</td>
         <td style="text-align:center;color:${og.color};font-weight:700;">&times; ${count}</td>
-        <td>${area} m&sup2;</td>
+        <td>${area.toFixed(2)} m&sup2;</td>
+        <td style="color:var(--yellow);">${prix ? prix + ' €' : '—'}</td>
       </tr>`;
     }
   }
-  tableHTML += `<tr><td></td><td>TOTAL</td><td style="text-align:center;">${grandTotalPanels}</td><td>${(grandTotalStock/1e6).toFixed(2)} m&sup2;</td></tr>`;
+  tableHTML += `<tr><td colspan="4" style="text-align:right;color:var(--text3);">TOTAL</td><td style="text-align:center;">${grandTotalPanels}</td><td>${(grandTotalStock/1e6).toFixed(2)} m&sup2;</td><td style="color:var(--yellow);font-weight:700;">${hasPrice ? grandTotalPrice.toFixed(2)+' €' : '—'}</td></tr>`;
   document.getElementById('orderTable').innerHTML = tableHTML;
   document.getElementById('orderCard').style.display = 'block';
 }
@@ -975,21 +1070,188 @@ function renderPanelCard(panel, colorMap, group, subsectionColorMap) {
 // ============================================================
 function exportCSV() {
   if (!allResults) return;
-  let csv = 'Type;Facade;Panneau;Format;Ref;Piece L;Piece H;Rotation;Position X;Position Y\n';
+  const nom = chantier.nom || 'Chantier';
+  const date = chantier.date || new Date().toISOString().slice(0,10);
+  let csv = `Chantier;${nom};Date;${date}\n`;
+  csv += 'Type;Ref.Fourn.;Coloris;Ep.(mm);Facade;Panneau;Format;Ref.Piece;Piece L;Piece H;Rotation;Pos X;Pos Y\n';
   for (const g of groups) {
     const result = allResults[g.id];
     if (!result) continue;
     for (const panel of result.panels) {
       for (const p of panel.placements) {
-        csv += `${g.name};${p.subsectionName||''};${panel.idx};${panel.stock.label};${panel.idx}.${p.pieceNum};${p.w};${p.h};${p.rotated?'Oui':'Non'};${p.x};${p.y}\n`;
+        csv += `${g.name};${g.reference||''};${g.coloris||''};${g.epaisseur||18};${p.subsectionName||''};${panel.idx};${panel.stock.label};${panel.idx}.${p.pieceNum};${p.w};${p.h};${p.rotated?'Oui':'Non'};${p.x};${p.y}\n`;
       }
     }
   }
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob(['\uFEFF'+csv], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = `calepinage_${new Date().toISOString().slice(0,10)}.csv`;
+  link.download = `${nom.replace(/[^a-zA-Z0-9]/g,'_') || 'calepinage'}_${date}.csv`;
   link.click();
+}
+
+// ============================================================
+// EXPORT PDF
+// ============================================================
+function buildPanelSVG(panel, colorMap, group) {
+  const maxW = 500, maxH = 260;
+  const scale = Math.min(maxW / panel.stock.w, maxH / panel.stock.h);
+  const svgW = Math.round(panel.stock.w * scale);
+  const svgH = Math.round(panel.stock.h * scale);
+  const kerf = getKerf();
+  let svg = `<rect x="0" y="0" width="${svgW}" height="${svgH}" fill="#e8eaf0" rx="4"/>`;
+  for (let x=500;x<panel.stock.w;x+=500) svg+=`<line x1="${x*scale}" y1="0" x2="${x*scale}" y2="${svgH}" stroke="#ccc"/>`;
+  for (let y=500;y<panel.stock.h;y+=500) svg+=`<line x1="0" y1="${y*scale}" x2="${svgW}" y2="${y*scale}" stroke="#ccc"/>`;
+  for (const p of panel.placements) {
+    const col = colorMap[p.pieceTypeIdx] || '#4fd1c5';
+    const px=p.x*scale+1, py=p.y*scale+1, pw=p.w*scale-2, ph=p.h*scale-2;
+    const fs=Math.max(8,Math.min(14,Math.min(pw,ph)/3.5));
+    svg+=`<rect x="${px}" y="${py}" width="${pw}" height="${ph}" fill="${col}" fill-opacity="0.35" stroke="${col}" stroke-width="1.5" rx="2"/>`;
+    if (pw>32&&ph>16) {
+      svg+=`<text x="${px+pw/2}" y="${py+ph/2}" text-anchor="middle" dominant-baseline="middle" fill="#222" font-size="${fs*1.1}" font-weight="800" font-family="monospace">${panel.idx}.${p.pieceNum}</text>`;
+      if (ph>28) svg+=`<text x="${px+pw/2}" y="${py+ph/2+fs}" text-anchor="middle" fill="#444" font-size="${fs*0.75}" font-family="monospace">${p.w}\u00d7${p.h}</text>`;
+    }
+    if (kerf>0) {
+      const kpx=Math.max(1,kerf*scale);
+      if (p.x+p.w+kerf<=panel.stock.w) svg+=`<rect x="${(p.x+p.w)*scale}" y="${p.y*scale}" width="${kpx}" height="${p.h*scale}" fill="#e53e3e" fill-opacity="0.25"/>`;
+      if (p.y+p.h+kerf<=panel.stock.h) svg+=`<rect x="${p.x*scale}" y="${(p.y+p.h)*scale}" width="${p.w*scale}" height="${kpx}" fill="#e53e3e" fill-opacity="0.25"/>`;
+    }
+  }
+  svg+=`<rect x="0" y="0" width="${svgW}" height="${svgH}" fill="none" stroke="#666" stroke-width="1.5" rx="4"/>`;
+  svg+=`<text x="${svgW/2}" y="${svgH+14}" text-anchor="middle" fill="#555" font-size="10" font-family="monospace">${panel.stock.w} mm</text>`;
+  svg+=`<text x="-${svgH/2}" y="-6" text-anchor="middle" fill="#555" font-size="10" font-family="monospace" transform="rotate(-90)">${panel.stock.h} mm</text>`;
+  return `<svg width="${svgW}" height="${svgH+18}" viewBox="-18 -2 ${svgW+22} ${svgH+20}">${svg}</svg>`;
+}
+
+function exportPDF() {
+  if (!allResults) { alert('Lance d\'abord l\'optimisation.'); return; }
+  const nom = chantier.nom || 'Calepinage';
+  const date = chantier.date || new Date().toISOString().slice(0,10);
+  let body = `
+  <div style="border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-end;">
+    <div>
+      <div style="font-size:22px;font-weight:800;letter-spacing:2px;">\u25c6 CALEPINAGE PANNEAUX</div>
+      <div style="font-size:16px;font-weight:600;margin-top:4px;">${nom}</div>
+    </div>
+    <div style="text-align:right;font-size:13px;color:#555;">
+      <div>Date : ${date}</div>
+      <div>Trait de scie : ${getKerf()} mm</div>
+    </div>
+  </div>`;
+
+  for (const g of groups) {
+    const result = allResults[g.id];
+    if (!result || !result.panels.length) continue;
+    const groupTotalStock = result.panels.reduce((s,p)=>s+p.stock.w*p.stock.h,0);
+    const groupTotalUsed = result.panels.reduce((s,p)=>s+p.placements.reduce((ss,pl)=>ss+pl.w*pl.h,0),0);
+    const waste = groupTotalStock ? ((1-groupTotalUsed/groupTotalStock)*100).toFixed(1) : '0.0';
+    const supplierInfo = [g.reference, g.coloris, g.epaisseur ? g.epaisseur+'mm' : ''].filter(Boolean).join(' / ');
+    body += `<div style="page-break-inside:avoid;">
+      <div style="font-size:15px;font-weight:800;border-left:5px solid ${g.color};padding:6px 12px;background:#f8f8f8;margin:18px 0 10px;">
+        ${g.name}${supplierInfo ? ' — '+supplierInfo : ''} &nbsp;<span style="font-weight:400;font-size:12px;color:#666;">${result.panels.length} panneau${result.panels.length>1?'x':''} &mdash; chute ${waste}%</span>
+      </div>`;
+    for (const panel of result.panels) {
+      const svgHtml = buildPanelSVG(panel, result.colorMap, g);
+      const legend = panel.placements.map(p => {
+        const col = result.colorMap[p.pieceTypeIdx]||'#666';
+        return `<span style="border:1.5px solid ${col};color:${col};padding:2px 7px;border-radius:4px;font-size:10px;margin:2px;display:inline-block;">${panel.idx}.${p.pieceNum}${p.subsectionName?' ['+p.subsectionName+']':''} — ${p.w}\u00d7${p.h}${p.rotated?' \u21bb':''}</span>`;
+      }).join('');
+      const usedArea = panel.placements.reduce((s,p)=>s+p.w*p.h,0);
+      const pw = ((1-usedArea/(panel.stock.w*panel.stock.h))*100).toFixed(1);
+      body += `<div style="page-break-inside:avoid;margin-bottom:16px;border:1px solid #ddd;border-left:4px solid ${g.color};padding:10px;border-radius:6px;">
+        <div style="font-size:12px;font-weight:700;margin-bottom:6px;">Panneau ${panel.idx} &mdash; <span style="font-family:monospace;">${panel.stock.label} mm</span> &mdash; chute ${pw}%</div>
+        ${svgHtml}
+        <div style="margin-top:8px;line-height:1.8;">${legend}</div>
+      </div>`;
+    }
+    body += `</div>`;
+  }
+
+  // Bon de commande
+  body += `<div style="page-break-before:always;margin-top:30px;">
+    <div style="font-size:18px;font-weight:800;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:14px;">BON DE COMMANDE</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+      <tr style="background:#f0f0f0;"><th style="border:1px solid #ccc;padding:7px;text-align:left;">TYPE</th><th style="border:1px solid #ccc;padding:7px;">REF. FOURNISSEUR</th><th style="border:1px solid #ccc;padding:7px;">COLORIS</th><th style="border:1px solid #ccc;padding:7px;">EP. (mm)</th><th style="border:1px solid #ccc;padding:7px;">FORMAT</th><th style="border:1px solid #ccc;padding:7px;">QTE</th><th style="border:1px solid #ccc;padding:7px;">SURFACE</th><th style="border:1px solid #ccc;padding:7px;">PRIX EST.</th></tr>`;
+
+  let totalPanels = 0, totalArea = 0, totalPrix = 0, hasPrix = false;
+  for (const g of groups) {
+    const result = allResults[g.id];
+    if (!result || !result.panels.length) continue;
+    const gStockCount = {};
+    result.panels.forEach(p => { gStockCount[p.stock.label] = (gStockCount[p.stock.label]||0)+1; });
+    for (const [label, count] of Object.entries(gStockCount)) {
+      const dims = label.split('\u00d7').map(Number);
+      const area = dims[0]*dims[1]*count/1e6;
+      const prix = g.prixM2 ? (parseFloat(g.prixM2)*area).toFixed(2) : '';
+      if (prix) { totalPrix += parseFloat(prix); hasPrix = true; }
+      totalPanels += count; totalArea += area;
+      body += `<tr><td style="border:1px solid #ccc;padding:6px;"><b>${g.name}</b></td><td style="border:1px solid #ccc;padding:6px;font-family:monospace;">${g.reference||'—'}</td><td style="border:1px solid #ccc;padding:6px;">${g.coloris||'—'}</td><td style="border:1px solid #ccc;padding:6px;text-align:center;">${g.epaisseur||18}</td><td style="border:1px solid #ccc;padding:6px;font-family:monospace;">${label} mm</td><td style="border:1px solid #ccc;padding:6px;text-align:center;font-weight:700;">&times;${count}</td><td style="border:1px solid #ccc;padding:6px;">${area.toFixed(2)} m\u00b2</td><td style="border:1px solid #ccc;padding:6px;font-weight:700;">${prix ? prix+' \u20ac' : '—'}</td></tr>`;
+    }
+  }
+  body += `<tr style="background:#f0f0f0;font-weight:700;"><td colspan="5" style="border:1px solid #ccc;padding:7px;text-align:right;">TOTAL</td><td style="border:1px solid #ccc;padding:7px;text-align:center;">&times;${totalPanels}</td><td style="border:1px solid #ccc;padding:7px;">${totalArea.toFixed(2)} m\u00b2</td><td style="border:1px solid #ccc;padding:7px;">${hasPrix ? totalPrix.toFixed(2)+' \u20ac' : '—'}</td></tr>`;
+  body += `</table></div>`;
+
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Calepinage — ${nom}</title>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; padding: 15mm; color: #111; font-size: 13px; }
+    @media print { body { padding: 10mm; } }
+  </style>
+  </head><body>${body}<script>window.onload=()=>window.print();<\/script></body></html>`);
+  win.document.close();
+}
+
+// ============================================================
+// SAVE / LOAD PROJECT
+// ============================================================
+function exportProject() {
+  const data = {
+    version: '5.0',
+    chantier,
+    stockPanels,
+    nextStockId,
+    groups,
+    nextGroupId,
+    activeGroupId,
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  const nom = chantier.nom ? chantier.nom.replace(/[^a-zA-Z0-9]/g,'_') : 'chantier';
+  link.download = `${nom}_${chantier.date || new Date().toISOString().slice(0,10)}.json`;
+  link.click();
+}
+
+function importProject(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (data.chantier) {
+        chantier = data.chantier;
+        document.getElementById('chantierNom').value = chantier.nom || '';
+        document.getElementById('chantierDate').value = chantier.date || '';
+      }
+      if (data.stockPanels) { stockPanels = data.stockPanels; nextStockId = data.nextStockId || stockPanels.length + 1; renderStock(); }
+      if (data.groups) {
+        groups = data.groups;
+        nextGroupId = data.nextGroupId || groups.length + 1;
+        activeGroupId = data.activeGroupId || groups[0]?.id;
+      }
+      allResults = null;
+      document.getElementById('summaryCard').style.display = 'none';
+      document.getElementById('orderCard').style.display = 'none';
+      document.getElementById('mainContent').innerHTML = '<div class="card placeholder"><div class="icon">&#9670;</div><div class="text">Projet charg\u00e9 — clique sur <span style="color:var(--accent);font-weight:700;">&#9654; OPTIMISER TOUT</span></div></div>';
+      renderGroupTabs();
+      renderActiveGroup();
+    } catch(err) {
+      alert('Fichier invalide : ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  input.value = '';
 }
 
 // ============================================================
@@ -1005,6 +1267,7 @@ document.addEventListener('keydown', (e) => {
 // ============================================================
 // INIT
 // ============================================================
+document.getElementById('chantierDate').value = chantier.date;
 renderStock();
 renderGroupTabs();
 renderActiveGroup();
