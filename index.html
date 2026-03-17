@@ -290,11 +290,28 @@
   .result-subsection-header .sinfo { font-size: 11px; color: var(--text3); margin-left: auto; }
 
   @media (max-width: 900px) {
-    body { overflow: auto; }
+    body { overflow: auto; padding: 10px; }
     #appScreen { height: auto; overflow: visible; }
+    header { flex-direction: column; align-items: flex-start; gap: 10px; padding-bottom: 12px; margin-bottom: 14px; }
+    header h1 { font-size: 16px; letter-spacing: 1px; }
+    header p { font-size: 10px; }
+    .chantier-inputs { flex-wrap: wrap; width: 100%; }
+    .chantier-inputs input { flex: 1; min-width: 0; }
+    #chantierNom { min-width: 0; }
+    .section-tabs { flex-wrap: wrap; }
+    .section-tab { padding: 8px 12px; font-size: 11px; letter-spacing: 0.5px; }
     .layout { flex-direction: column; overflow: visible; }
     .sidebar { flex: none; width: 100%; overflow-y: visible; }
     .main { min-width: 0; overflow-y: visible; }
+    .section-content.active { display: block; }
+    #sectionPanneaux { overflow: visible !important; }
+    .oss-config { flex-direction: column; gap: 8px; }
+    .oss-config input { width: 100%; }
+    .supplier-grid { grid-template-columns: 1fr; }
+    .devis-input { width: 80px; }
+    .group-tabs { gap: 4px; }
+    .group-tab { padding: 6px 10px; font-size: 12px; }
+    .panel-svg { width: 100% !important; height: auto !important; }
   }
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
