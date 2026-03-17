@@ -816,8 +816,8 @@ function expandPieces(pcs) {
 function allFittingStocks(activeStocks, pw, ph, kerf) {
   const fits = [], w = pw - kerf, h = ph - kerf;
   for (const s of activeStocks) {
-    if (((s.w >= pw || s.w === w) && (s.h >= ph || s.h === h)) ||
-        ((s.w >= ph || s.w === h) && (s.h >= pw || s.h === w))) fits.push(s);
+    if (((s.w >= pw || s.w >= w) && (s.h >= ph || s.h >= h)) ||
+        ((s.w >= ph || s.w >= h) && (s.h >= pw || s.h >= w))) fits.push(s);
   }
   return fits.sort((a, b) => a.w * a.h - b.w * b.h);
 }
@@ -843,7 +843,7 @@ function splitMaxRectLong(rect, pw, ph) {
 
 function fitsInRect(rw, rh, pw, ph, kerf) {
   const w = pw - kerf, h = ph - kerf;
-  return (rw >= pw || rw === w) && (rh >= ph || rh === h);
+  return (rw >= pw || rw >= w) && (rh >= ph || rh >= h);
 }
 function heuristicBestAreaFit(freeRects, pw, ph, kerf) {
   let bestIdx = -1, bestW = Infinity, bestR = false;
