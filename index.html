@@ -431,6 +431,7 @@
 <div class="section-tabs">
   <button class="section-tab active" onclick="switchSection('panneaux')">Panneaux</button>
   <button class="section-tab" onclick="switchSection('ossature')">Ossature</button>
+  <button class="section-tab" onclick="switchSection('fixation')">Fixation</button>
   <button class="section-tab" onclick="switchSection('devis')">Devis</button>
 </div>
 <div style="height:16px;"></div>
@@ -579,6 +580,37 @@
 </div>
 </div><!-- /sectionOssature -->
 
+<!-- ═══ SECTION: FIXATION ═══ -->
+<div id="sectionFixation" class="section-content" style="flex:1;overflow:hidden;">
+<div class="layout">
+  <div class="sidebar">
+    <div class="card">
+      <div class="card-title">Configuration fixation</div>
+      <div class="oss-config">
+        <div>
+          <label>Prix / fixation (€/u)</label>
+          <input type="number" id="fixationPrix" value="" placeholder="0.00" min="0" step="0.01" oninput="fixationConfig.prixFixation=this.value; renderFixation(); scheduleSave();">
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--text4);margin-top:8px;">Intervalle max : <strong id="fixationIntervalleDisplay">600</strong> mm<br><span style="font-size:11px;">(depuis config ossature)</span></div>
+    </div>
+    <div class="card card-accent" id="fixationSummaryCard" style="display:none;">
+      <div class="card-title">Résumé fixation</div>
+      <div id="fixationSummaryContent"></div>
+    </div>
+  </div>
+  <div class="main" id="fixationContent">
+    <div class="card placeholder">
+      <div class="icon">&#9670;</div>
+      <div class="text">
+        Configure tes panneaux dans l'onglet <span style="color:var(--accent);font-weight:700;">Panneaux</span> d'abord,<br>
+        puis reviens ici pour le décompte des fixations.
+      </div>
+    </div>
+  </div>
+</div>
+</div><!-- /sectionFixation -->
+
 <!-- ═══ SECTION: DEVIS ═══ -->
 <div id="sectionDevis" class="section-content" style="flex:1;overflow:hidden;">
 <div class="layout">
@@ -679,6 +711,7 @@ let allResults = null;
 let activeSection = 'panneaux'; // 'panneaux' | 'ossature' | 'devis'
 let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [] };
 let devisConfig = { prixMO: '' };
+let fixationConfig = { prixFixation: '' };
 
 // ============================================================
 // STOCK
@@ -1605,6 +1638,7 @@ function getProjectData() {
     activeGroupId,
     ossatureConfig,
     devisConfig,
+    fixationConfig,
   };
 }
 
@@ -1633,6 +1667,10 @@ function applyProjectData(data) {
   if (data.devisConfig) {
     devisConfig = { ...devisConfig, ...data.devisConfig };
     document.getElementById('devisPrixMO').value = devisConfig.prixMO || '';
+  }
+  if (data.fixationConfig) {
+    fixationConfig = { ...fixationConfig, ...data.fixationConfig };
+    document.getElementById('fixationPrix').value = fixationConfig.prixFixation || '';
   }
   allResults = null;
   document.getElementById('summaryCard').style.display = 'none';
@@ -1854,6 +1892,7 @@ function switchSection(name) {
   const sectionEl = document.getElementById('section' + name.charAt(0).toUpperCase() + name.slice(1));
   if (sectionEl) sectionEl.classList.add('active');
   if (name === 'ossature') renderOssature();
+  if (name === 'fixation') renderFixation();
   if (name === 'devis') renderDevis();
 }
 
@@ -1917,6 +1956,8 @@ function removeZedStock(i) {
 // SPLIT OVERLENGTH CUTS — découpe les coupes > stock max en tronçons
 // Retourne { expandedCuts, splits: [{original, pieces}] }
 // ============================================================
+const MIN_OSS_PIECE = 500; // mm — aucune pièce d'ossature ne peut être < 500 mm
+
 function splitLongCuts(cuts, stockLengths) {
   if (!stockLengths.length) return { expandedCuts: cuts, splits: [] };
   const maxStock = Math.max(...stockLengths);
@@ -1930,8 +1971,14 @@ function splitLongCuts(cuts, stockLengths) {
     } else {
       const pieces = [];
       let rem = len;
-      let part = 1;
-      while (rem > maxStock) { pieces.push(maxStock); rem -= maxStock; part++; }
+      while (rem > maxStock) {
+        // Si en prenant maxStock le reste serait < MIN_OSS_PIECE, on prend moins
+        // pour laisser exactement MIN_OSS_PIECE en dernier tronçon
+        let take = maxStock;
+        if (rem - take > 0 && rem - take < MIN_OSS_PIECE) take = rem - MIN_OSS_PIECE;
+        pieces.push(take);
+        rem -= take;
+      }
       if (rem > 0) pieces.push(rem);
       expandedCuts.push(...pieces.map((l, i) => ({ len: l, ref: `${ref}/${i+1}` })));
       splits.push({ original: len, ref, pieces });
@@ -2214,6 +2261,159 @@ function renderOssature() {
 }
 
 // ============================================================
+// FIXATION
+// ============================================================
+function calcFixation() {
+  const data = calcOssature();
+  const entaxeMax = ossatureConfig.entaxeMax || 600;
+  const result = [];
+  let grandTotalOmega = 0, grandTotalZed = 0;
+
+  for (const gd of data) {
+    const g = gd.group;
+    const groupFixData = { group: g, subsections: [] };
+    for (const sd of gd.subsections) {
+      if (sd.pieces.length === 0) continue;
+      let subOmegaFixings = 0, subZedFixings = 0;
+      const omegaRows = [];
+      const zedRows = [];
+
+      for (const cut of sd.omegaCuts) {
+        const nbRows = Math.ceil(cut.len / entaxeMax);
+        const fixings = nbRows * 2; // 2 par rangée (2 panneaux)
+        subOmegaFixings += fixings;
+        omegaRows.push({ ref: cut.ref, len: cut.len, nbRows, fixings });
+      }
+      for (const cut of sd.zedCuts) {
+        const nbRows = Math.ceil(cut.len / entaxeMax);
+        const fixings = nbRows * 1; // 1 par rangée
+        subZedFixings += fixings;
+        zedRows.push({ ref: cut.ref, len: cut.len, nbRows, fixings });
+      }
+
+      grandTotalOmega += subOmegaFixings;
+      grandTotalZed += subZedFixings;
+      groupFixData.subsections.push({
+        subsection: sd.subsection,
+        omegaRows, zedRows,
+        subOmegaFixings, subZedFixings,
+        subTotal: subOmegaFixings + subZedFixings,
+      });
+    }
+    result.push(groupFixData);
+  }
+  return { result, grandTotalOmega, grandTotalZed, grandTotal: grandTotalOmega + grandTotalZed };
+}
+
+function renderFixation() {
+  const entaxeMax = ossatureConfig.entaxeMax || 600;
+  const el = document.getElementById('fixationContent');
+  const intervalleEl = document.getElementById('fixationIntervalleDisplay');
+  if (intervalleEl) intervalleEl.textContent = entaxeMax;
+
+  if (groups.every(g => g.subsections.every(s => s.pieces.length === 0))) {
+    el.innerHTML = '<div class="card placeholder"><div class="icon">&#9670;</div><div class="text">Aucune pièce configurée.<br>Ajoute des pièces dans l\'onglet <span style="color:var(--accent);font-weight:700;">Panneaux</span>.</div></div>';
+    document.getElementById('fixationSummaryCard').style.display = 'none';
+    return;
+  }
+
+  const { result, grandTotalOmega, grandTotalZed, grandTotal } = calcFixation();
+  const prixFixation = parseFloat(fixationConfig.prixFixation) || 0;
+  let html = '';
+
+  for (const gd of result) {
+    const g = gd.group;
+    if (!gd.subsections.length) continue;
+    html += `<div class="result-group-header" style="border-color:${g.color}44; background:${g.color}0a;">
+      <span class="dot" style="background:${g.color};"></span>
+      <span class="name">${g.name}</span>
+      <span class="info">${gd.subsections.length} facade${gd.subsections.length>1?'s':''}</span>
+    </div>`;
+
+    for (const sd of gd.subsections) {
+      const sub = sd.subsection;
+      const subIdx = g.subsections.indexOf(sub);
+      const subColor = PIECE_COLORS[subIdx % PIECE_COLORS.length];
+
+      html += `<div class="oss-card" style="border-left: 3px solid ${subColor};">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+          <span style="width:10px;height:10px;border-radius:50%;background:${subColor};display:inline-block;"></span>
+          <span style="font-weight:700;font-size:14px;">${sub.name}</span>
+          <span class="oss-badge omega">&#937; ${sd.subOmegaFixings} fixations</span>
+          <span class="oss-badge zed">Z ${sd.subZedFixings} fixations</span>
+          <span style="font-size:12px;font-weight:700;color:var(--accent);">Total : ${sd.subTotal} pts</span>
+        </div>
+        <table class="oss-table">
+          <tr>
+            <th>Élément</th><th>Réf</th><th>Longueur</th>
+            <th>Rangées (/ ${entaxeMax}mm)</th><th>Fix./rangée</th><th>Total fixations</th>
+          </tr>`;
+
+      for (const row of sd.omegaRows) {
+        html += `<tr>
+          <td><span class="oss-badge omega">&#937; Oméga</span></td>
+          <td class="mono" style="font-size:11px;color:var(--text3);">${row.ref}</td>
+          <td class="mono">${row.len} mm</td>
+          <td style="text-align:center;">${row.nbRows}</td>
+          <td style="text-align:center;">× 2</td>
+          <td style="text-align:center;font-weight:700;color:var(--accent);">${row.fixings}</td>
+        </tr>`;
+      }
+      for (const row of sd.zedRows) {
+        html += `<tr>
+          <td><span class="oss-badge zed">Z Zed</span></td>
+          <td class="mono" style="font-size:11px;color:var(--text3);">${row.ref}</td>
+          <td class="mono">${row.len} mm</td>
+          <td style="text-align:center;">${row.nbRows}</td>
+          <td style="text-align:center;">× 1</td>
+          <td style="text-align:center;font-weight:700;color:var(--yellow);">${row.fixings}</td>
+        </tr>`;
+      }
+
+      html += `<tr class="total-row">
+        <td colspan="5" style="text-align:right;color:var(--text3);">Sous-total façade</td>
+        <td style="text-align:center;font-weight:700;">${sd.subTotal} fixations</td>
+      </tr>`;
+      html += `</table></div>`;
+    }
+  }
+
+  // Totaux globaux
+  html += `<div class="oss-card" style="border-color:var(--accent)44;">
+    <table class="oss-table">
+      <tr><th colspan="2" style="font-size:13px;">TOTAL FIXATIONS CHANTIER</th></tr>
+      <tr>
+        <td><span class="oss-badge omega">&#937; Oméga (2/rangée)</span></td>
+        <td style="font-weight:700;color:var(--accent);">${grandTotalOmega} fixations</td>
+      </tr>
+      <tr>
+        <td><span class="oss-badge zed">Z Zed (1/rangée)</span></td>
+        <td style="font-weight:700;color:var(--yellow);">${grandTotalZed} fixations</td>
+      </tr>
+      <tr class="total-row">
+        <td style="font-weight:800;font-size:14px;">TOTAL</td>
+        <td style="font-weight:800;font-size:14px;color:var(--accent);">${grandTotal} fixations${prixFixation ? ` — ${(grandTotal * prixFixation).toFixed(2)} €` : ''}</td>
+      </tr>
+    </table>
+  </div>`;
+
+  el.innerHTML = html;
+
+  // Sidebar summary
+  const sumEl = document.getElementById('fixationSummaryContent');
+  let sumHTML = '';
+  sumHTML += `<div class="summary-row"><span class="summary-label">Fix. Oméga (×2)</span><span class="summary-value" style="color:var(--accent);">${grandTotalOmega}</span></div>`;
+  sumHTML += `<div class="summary-row"><span class="summary-label">Fix. Zed (×1)</span><span class="summary-value" style="color:var(--yellow);">${grandTotalZed}</span></div>`;
+  sumHTML += `<div class="summary-divider"></div>`;
+  sumHTML += `<div class="summary-row"><span class="summary-label" style="font-weight:800;">Total</span><span class="summary-value" style="font-size:15px;color:var(--accent);">${grandTotal} pts</span></div>`;
+  if (prixFixation) {
+    sumHTML += `<div class="summary-row"><span class="summary-label">Coût fixations</span><span class="summary-value">${(grandTotal * prixFixation).toFixed(2)} €</span></div>`;
+  }
+  sumEl.innerHTML = sumHTML;
+  document.getElementById('fixationSummaryCard').style.display = 'block';
+}
+
+// ============================================================
 // DEVIS
 // ============================================================
 function renderDevis() {
@@ -2329,7 +2529,31 @@ function renderDevis() {
     </table>
   </div></div>`;
 
-  // ── 3. Section Main d'œuvre ──
+  // ── 3. Section Fixation ──
+  const fixData = calcFixation();
+  const prixFixation = parseFloat(fixationConfig.prixFixation) || 0;
+  const totalFixations = fixData.grandTotal;
+  const totalFixationHT = totalFixations * prixFixation;
+
+  html += `<div class="oss-card"><div class="devis-section">
+    <div class="devis-section-title">3. Fixation</div>
+    <table class="devis-table">
+      <tr><th>Élément</th><th>Quantité</th><th>Prix/u</th><th>Total HT</th></tr>
+      <tr>
+        <td><span class="oss-badge omega">&#937; Oméga</span> fixations (×2/rangée)</td>
+        <td class="mono">${fixData.grandTotalOmega} pts</td>
+        <td rowspan="2">${prixFixation ? prixFixation.toFixed(2)+' €' : '<input class="devis-input" type="number" placeholder="€/u" oninput="fixationConfig.prixFixation=this.value;document.getElementById(\'fixationPrix\').value=this.value;renderDevis();scheduleSave();">'}</td>
+        <td rowspan="2" style="color:var(--yellow);font-weight:700;">${totalFixationHT ? totalFixationHT.toFixed(2)+' €' : '—'}</td>
+      </tr>
+      <tr>
+        <td><span class="oss-badge zed">Z Zed</span> fixations (×1/rangée)</td>
+        <td class="mono">${fixData.grandTotalZed} pts</td>
+      </tr>
+      <tr style="font-weight:700;"><td colspan="2" style="text-align:right;color:var(--text3);">Total : ${totalFixations} fixations</td><td colspan="2" style="color:var(--yellow);">${totalFixationHT ? totalFixationHT.toFixed(2)+' €' : '—'}</td></tr>
+    </table>
+  </div></div>`;
+
+  // ── 4. Section Main d'œuvre ──
   // Calculate total surface utile from pieces
   for (const g of groups) {
     for (const sub of g.subsections) {
@@ -2341,7 +2565,7 @@ function renderDevis() {
   totalMOHT = totalSurfaceUtile * prixMO;
 
   html += `<div class="oss-card"><div class="devis-section">
-    <div class="devis-section-title">3. Main d'&#339;uvre</div>
+    <div class="devis-section-title">4. Main d'&#339;uvre</div>
     <table class="devis-table">
       <tr><th>Désignation</th><th>Surface</th><th>Prix/m²</th><th>Total HT</th></tr>
       <tr>
@@ -2355,7 +2579,7 @@ function renderDevis() {
   </div></div>`;
 
   // ── GRAND TOTAL ──
-  const grandTotal = totalPanneauxHT + totalOssatureHT + totalMOHT;
+  const grandTotal = totalPanneauxHT + totalOssatureHT + totalFixationHT + totalMOHT;
   html += `<div class="oss-card" style="border-color:var(--accent)44;">
     <table class="devis-table">
       <tr class="grand-total">
@@ -2372,6 +2596,7 @@ function renderDevis() {
   let tHTML = '';
   tHTML += `<div class="summary-row"><span class="summary-label">Panneaux</span><span class="summary-value">${totalPanneauxHT ? totalPanneauxHT.toFixed(2)+' €' : '—'}</span></div>`;
   tHTML += `<div class="summary-row"><span class="summary-label">Ossature</span><span class="summary-value">${totalOssatureHT ? totalOssatureHT.toFixed(2)+' €' : '—'}</span></div>`;
+  tHTML += `<div class="summary-row"><span class="summary-label">Fixation (${totalFixations} pts)</span><span class="summary-value">${totalFixationHT ? totalFixationHT.toFixed(2)+' €' : '—'}</span></div>`;
   tHTML += `<div class="summary-row"><span class="summary-label">Main d'œuvre</span><span class="summary-value">${totalMOHT ? totalMOHT.toFixed(2)+' €' : '—'}</span></div>`;
   tHTML += `<div class="summary-divider"></div>`;
   tHTML += `<div class="summary-row"><span class="summary-label" style="font-weight:800;">TOTAL HT</span><span class="summary-value" style="font-size:16px;color:var(--accent);">${grandTotal ? grandTotal.toFixed(2)+' €' : '—'}</span></div>`;
@@ -2437,12 +2662,26 @@ function exportDevisPDF() {
     <tr style="font-weight:700;background:#f9f9f9;"><td colspan="4" style="border:1px solid #ccc;padding:6px;text-align:right;">Sous-total</td><td style="border:1px solid #ccc;padding:6px;">${totalOss?totalOss.toFixed(2)+' €':'—'}</td></tr>
   </table>`;
 
+  // Fixation
+  const pdfFixData = calcFixation();
+  const pdfPrixFix = parseFloat(fixationConfig.prixFixation) || 0;
+  const pdfTotalFix = pdfFixData.grandTotal;
+  const pdfCoutFix = pdfTotalFix * pdfPrixFix;
+
+  body += `<h3 style="margin:16px 0 8px;">3. Fixation</h3>`;
+  body += `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+    <tr style="background:#f0f0f0;"><th style="border:1px solid #ccc;padding:6px;">Élément</th><th style="border:1px solid #ccc;padding:6px;">Quantité</th><th style="border:1px solid #ccc;padding:6px;">Prix/u</th><th style="border:1px solid #ccc;padding:6px;">Total HT</th></tr>
+    <tr><td style="border:1px solid #ccc;padding:6px;">Oméga (×2/rangée)</td><td style="border:1px solid #ccc;padding:6px;">${pdfFixData.grandTotalOmega} pts</td><td rowspan="2" style="border:1px solid #ccc;padding:6px;">${pdfPrixFix?pdfPrixFix.toFixed(2)+' €':'—'}</td><td rowspan="2" style="border:1px solid #ccc;padding:6px;font-weight:700;">${pdfCoutFix?pdfCoutFix.toFixed(2)+' €':'—'}</td></tr>
+    <tr><td style="border:1px solid #ccc;padding:6px;">Zed (×1/rangée)</td><td style="border:1px solid #ccc;padding:6px;">${pdfFixData.grandTotalZed} pts</td></tr>
+    <tr style="font-weight:700;background:#f9f9f9;"><td colspan="2" style="border:1px solid #ccc;padding:6px;text-align:right;">Total : ${pdfTotalFix} fixations</td><td colspan="2" style="border:1px solid #ccc;padding:6px;">${pdfCoutFix?pdfCoutFix.toFixed(2)+' €':'—'}</td></tr>
+  </table>`;
+
   // Main d'œuvre
   let totalSurf = 0;
   for (const g of groups) { for (const sub of g.subsections) { for (const p of sub.pieces) { totalSurf += p.w*p.h*p.qty/1e6; } } }
   const totalMO = totalSurf * prixMO;
 
-  body += `<h3 style="margin:16px 0 8px;">3. Main d'œuvre</h3>`;
+  body += `<h3 style="margin:16px 0 8px;">4. Main d'œuvre</h3>`;
   body += `<table style="width:100%;border-collapse:collapse;font-size:12px;">
     <tr style="background:#f0f0f0;"><th style="border:1px solid #ccc;padding:6px;">Désignation</th><th style="border:1px solid #ccc;padding:6px;">Surface</th><th style="border:1px solid #ccc;padding:6px;">Prix/m²</th><th style="border:1px solid #ccc;padding:6px;">Total HT</th></tr>
     <tr><td style="border:1px solid #ccc;padding:6px;">Pose panneaux + ossature</td><td style="border:1px solid #ccc;padding:6px;">${totalSurf.toFixed(2)} m²</td><td style="border:1px solid #ccc;padding:6px;">${prixMO?prixMO.toFixed(2)+' €':'—'}</td><td style="border:1px solid #ccc;padding:6px;font-weight:700;">${totalMO?totalMO.toFixed(2)+' €':'—'}</td></tr>
@@ -2450,7 +2689,7 @@ function exportDevisPDF() {
   </table>`;
 
   // Grand total
-  const grandTotal = totalPanneaux + totalOss + totalMO;
+  const grandTotal = totalPanneaux + totalOss + pdfCoutFix + totalMO;
   body += `<div style="margin-top:20px;padding:12px;border:2px solid #333;border-radius:6px;font-size:18px;font-weight:800;display:flex;justify-content:space-between;">
     <span>TOTAL GÉNÉRAL HT</span><span>${grandTotal ? grandTotal.toFixed(2)+' €' : '—'}</span>
   </div>`;
