@@ -5,6 +5,69 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Calepinage Panneaux - Optimiseur Multi-Couleurs</title>
 <style>
+  /* ── HOME SCREEN ─────────────────────────────────────────────── */
+  #homeScreen {
+    position: fixed; inset: 0; z-index: 100;
+    background: var(--bg); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; padding: 40px 20px;
+  }
+  .home-logo { font-size: 28px; font-weight: 900; letter-spacing: 4px; color: var(--accent); margin-bottom: 6px; }
+  .home-sub  { font-size: 11px; color: var(--text4); letter-spacing: 2px; margin-bottom: 40px; }
+  .home-box  { width: 100%; max-width: 560px; }
+  .home-title { font-size: 10px; letter-spacing: 2.5px; color: var(--accent); font-weight: 700;
+                text-transform: uppercase; margin-bottom: 12px; }
+  .project-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px;
+                  max-height: 340px; overflow-y: auto; }
+  .project-row {
+    display: flex; align-items: center; gap: 10px; background: var(--card);
+    border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px;
+    cursor: pointer; transition: border-color 0.15s;
+  }
+  .project-row:hover { border-color: var(--accent); }
+  .project-row-name { flex: 1; font-size: 14px; font-weight: 700; }
+  .project-row-date { font-size: 11px; color: var(--text4); }
+  .project-row-del {
+    background: none; border: none; color: var(--text4); font-size: 18px;
+    cursor: pointer; padding: 0 4px; line-height: 1; transition: color 0.15s;
+  }
+  .project-row-del:hover { color: var(--red); }
+  .home-new-row { display: flex; gap: 8px; }
+  .home-new-input {
+    flex: 1; background: var(--bg); border: 1px solid var(--text4); border-radius: 8px;
+    color: var(--text); padding: 10px 14px; font-size: 14px; font-family: inherit;
+  }
+  .home-new-input:focus { outline: none; border-color: var(--accent); }
+  .home-new-input::placeholder { color: var(--text4); }
+  .btn-home-create {
+    background: var(--accent); border: none; border-radius: 8px; color: var(--bg);
+    font-weight: 800; cursor: pointer; padding: 10px 18px; font-size: 14px;
+    letter-spacing: 1px; transition: opacity 0.15s; font-family: inherit;
+  }
+  .btn-home-create:hover { opacity: 0.85; }
+  .home-import-label {
+    display: inline-block; cursor: pointer; background: transparent;
+    border: 1px solid var(--border); color: var(--text3); border-radius: 8px;
+    padding: 10px 14px; font-size: 12px; transition: all 0.15s; font-family: inherit;
+  }
+  .home-import-label:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── COLLAB BADGE ────────────────────────────────────────────── */
+  #collabBadge {
+    display: flex; align-items: center; gap: 6px; font-size: 11px;
+    color: var(--text3); padding: 4px 10px; border-radius: 6px;
+    background: var(--card); border: 1px solid var(--border);
+  }
+  #collabDot { width: 7px; height: 7px; border-radius: 50%; background: var(--text4); }
+  #collabDot.live { background: var(--green); }
+
+  /* ── AUTO-SAVE INDICATOR ─────────────────────────────────────── */
+  #saveStatus {
+    font-size: 11px; color: var(--text4); letter-spacing: 1px; transition: color 0.3s;
+  }
+  #saveStatus.saving { color: var(--yellow); }
+  #saveStatus.saved  { color: var(--green); }
+</style>
+<style>
   :root {
     --bg: #0d1117; --card: #161b27; --border: #2d3555;
     --accent: #4fd1c5; --accent2: #38b2ac;
@@ -275,6 +338,28 @@
 </head>
 <body>
 
+<!-- ═══════════════════════ HOME SCREEN ═══════════════════════ -->
+<div id="homeScreen">
+  <div class="mono home-logo">&#9670; CALEPINAGE</div>
+  <div class="home-sub">OPTIMISEUR DE DECOUPE &mdash; MULTI-FACADES</div>
+  <div class="home-box">
+    <div class="home-title">Mes chantiers</div>
+    <div class="project-list" id="projectList">
+      <div style="color:var(--text4);font-size:13px;text-align:center;padding:20px;">Chargement…</div>
+    </div>
+    <div style="margin-bottom:10px;">
+      <div class="home-new-row">
+        <input class="home-new-input" id="newProjectName" placeholder="Nom du nouveau chantier…">
+        <button class="btn-home-create" onclick="createProject()">+ Nouveau</button>
+        <label class="home-import-label">&#128193; JSON<input type="file" accept=".json" style="display:none" onchange="importProjectHome(this)"></label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ APP SCREEN ════════════════════════ -->
+<div id="appScreen" style="display:none;">
+
 <header>
   <div>
     <h1 class="mono">&#9670; CALEPINAGE PANNEAUX</h1>
@@ -284,7 +369,12 @@
     <input id="chantierNom" placeholder="Nom du chantier..." oninput="chantier.nom=this.value">
     <input type="date" id="chantierDate" oninput="chantier.date=this.value">
   </div>
-  <div style="font-size:11px;color:var(--text4);">v5.0</div>
+  <div style="display:flex;align-items:center;gap:10px;">
+    <span id="saveStatus">—</span>
+    <div id="collabBadge"><span id="collabDot"></span><span id="collabCount">0</span> connecté(s)</div>
+    <button class="btn-project" onclick="backToHome()">&#8592; Chantiers</button>
+    <div style="font-size:11px;color:var(--text4);">v6.0</div>
+  </div>
 </header>
 
 <div class="layout">
@@ -1205,15 +1295,7 @@ function exportPDF() {
 // SAVE / LOAD PROJECT
 // ============================================================
 function exportProject() {
-  const data = {
-    version: '5.0',
-    chantier,
-    stockPanels,
-    nextStockId,
-    groups,
-    nextGroupId,
-    activeGroupId,
-  };
+  const data = { version: '6.0', ...getProjectData() };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
@@ -1225,34 +1307,250 @@ function exportProject() {
 function importProject(input) {
   const file = input.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (e) => {
+  input.value = '';
+  file.text().then(text => {
     try {
-      const data = JSON.parse(e.target.result);
-      if (data.chantier) {
-        chantier = data.chantier;
-        document.getElementById('chantierNom').value = chantier.nom || '';
-        document.getElementById('chantierDate').value = chantier.date || '';
-      }
-      if (data.stockPanels) { stockPanels = data.stockPanels; nextStockId = data.nextStockId || stockPanels.length + 1; renderStock(); }
-      if (data.groups) {
-        groups = data.groups;
-        nextGroupId = data.nextGroupId || groups.length + 1;
-        activeGroupId = data.activeGroupId || groups[0]?.id;
-      }
-      allResults = null;
-      document.getElementById('summaryCard').style.display = 'none';
-      document.getElementById('orderCard').style.display = 'none';
-      document.getElementById('mainContent').innerHTML = '<div class="card placeholder"><div class="icon">&#9670;</div><div class="text">Projet charg\u00e9 — clique sur <span style="color:var(--accent);font-weight:700;">&#9654; OPTIMISER TOUT</span></div></div>';
-      renderGroupTabs();
-      renderActiveGroup();
+      applyProjectData(JSON.parse(text));
+      scheduleSave();
     } catch(err) {
       alert('Fichier invalide : ' + err.message);
     }
-  };
-  reader.readAsText(file);
-  input.value = '';
+  });
 }
+
+// ============================================================
+// PROJECT MANAGEMENT (API + WebSocket + auto-save)
+// ============================================================
+let currentProjectId = null;
+let saveTimer = null;
+let ws = null;
+let ignoreNextPatch = false; // prevent echo loops
+
+// ── API helpers ──────────────────────────────────────────────
+async function apiFetch(url, opts = {}) {
+  const res = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+function getProjectData() {
+  return {
+    chantier,
+    stockPanels,
+    nextStockId,
+    groups,
+    nextGroupId,
+    activeGroupId,
+  };
+}
+
+function applyProjectData(data) {
+  if (!data) return;
+  if (data.chantier) {
+    chantier = data.chantier;
+    document.getElementById('chantierNom').value = chantier.nom || '';
+    document.getElementById('chantierDate').value = chantier.date || '';
+  }
+  if (data.stockPanels) { stockPanels = data.stockPanels; nextStockId = data.nextStockId || stockPanels.length + 1; renderStock(); }
+  if (data.groups) {
+    groups = data.groups;
+    nextGroupId = data.nextGroupId || groups.length + 1;
+    activeGroupId = data.activeGroupId || groups[0]?.id;
+  }
+  allResults = null;
+  document.getElementById('summaryCard').style.display = 'none';
+  document.getElementById('orderCard').style.display = 'none';
+  document.getElementById('mainContent').innerHTML =
+    '<div class="card placeholder"><div class="icon">&#9670;</div><div class="text">Projet charg\u00e9 \u2014 clique sur <span style="color:var(--accent);font-weight:700;">&#9654; OPTIMISER TOUT</span></div></div>';
+  renderGroupTabs();
+  renderActiveGroup();
+}
+
+function setSaveStatus(s) {
+  const el = document.getElementById('saveStatus');
+  el.className = s;
+  el.textContent = s === 'saving' ? 'Sauvegarde…' : s === 'saved' ? 'Sauvegardé ✓' : '—';
+}
+
+// ── Auto-save with debounce ───────────────────────────────────
+function scheduleSave() {
+  if (!currentProjectId) return;
+  clearTimeout(saveTimer);
+  setSaveStatus('saving');
+  saveTimer = setTimeout(doSave, 1200);
+}
+
+async function doSave() {
+  if (!currentProjectId) return;
+  const name = chantier.nom || 'Sans titre';
+  try {
+    await apiFetch(`/api/projects/${currentProjectId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name, data: getProjectData() }),
+    });
+    setSaveStatus('saved');
+  } catch (e) {
+    console.error('Save failed', e);
+    setSaveStatus('');
+  }
+}
+
+// ── WebSocket collab ─────────────────────────────────────────
+function connectWS(projectId) {
+  if (ws) ws.close();
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}`);
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'join', projectId }));
+    document.getElementById('collabDot').classList.add('live');
+  };
+  ws.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'viewers') {
+      document.getElementById('collabCount').textContent = msg.count;
+    }
+    if (msg.type === 'saved') {
+      // Another user just saved — reload data silently
+      apiFetch(`/api/projects/${projectId}`)
+        .then(p => { ignoreNextPatch = true; applyProjectData(p.data); setSaveStatus('saved'); })
+        .catch(() => {});
+    }
+  };
+  ws.onclose = () => {
+    document.getElementById('collabDot').classList.remove('live');
+    document.getElementById('collabCount').textContent = '0';
+  };
+}
+
+function disconnectWS() {
+  if (ws) { ws.close(); ws = null; }
+}
+
+// ── Home screen ───────────────────────────────────────────────
+async function loadProjectList() {
+  const list = document.getElementById('projectList');
+  try {
+    const projects = await apiFetch('/api/projects');
+    if (!projects.length) {
+      list.innerHTML = '<div style="color:var(--text4);font-size:13px;text-align:center;padding:20px;">Aucun chantier — crée-en un ci-dessous.</div>';
+      return;
+    }
+    list.innerHTML = projects.map(p => `
+      <div class="project-row" onclick="openProject('${p.id}')">
+        <span class="project-row-name">${p.name || 'Sans titre'}</span>
+        <span class="project-row-date">${p.updated_at ? p.updated_at.slice(0,10) : ''}</span>
+        <button class="project-row-del" onclick="deleteProject(event,'${p.id}')">×</button>
+      </div>
+    `).join('');
+  } catch(e) {
+    list.innerHTML = '<div style="color:var(--red);font-size:12px;text-align:center;padding:20px;">Impossible de charger les projets.</div>';
+  }
+}
+
+async function createProject() {
+  const name = document.getElementById('newProjectName').value.trim() || 'Nouveau chantier';
+  const p = await apiFetch('/api/projects', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+  document.getElementById('newProjectName').value = '';
+  openProject(p.id);
+}
+
+async function openProject(id) {
+  const p = await apiFetch(`/api/projects/${id}`);
+  currentProjectId = id;
+  if (p.data && Object.keys(p.data).length) {
+    applyProjectData(p.data);
+  } else {
+    // Fresh project: set chantier name from project
+    chantier.nom = p.name;
+    document.getElementById('chantierNom').value = p.name;
+    renderStock();
+    renderGroupTabs();
+    renderActiveGroup();
+  }
+  setSaveStatus('saved');
+  connectWS(id);
+  document.getElementById('homeScreen').style.display = 'none';
+  document.getElementById('appScreen').style.display = 'block';
+}
+
+async function deleteProject(e, id) {
+  e.stopPropagation();
+  if (!confirm('Supprimer ce chantier ?')) return;
+  await apiFetch(`/api/projects/${id}`, { method: 'DELETE' });
+  loadProjectList();
+}
+
+function backToHome() {
+  if (currentProjectId) doSave();
+  disconnectWS();
+  currentProjectId = null;
+  document.getElementById('appScreen').style.display = 'none';
+  document.getElementById('homeScreen').style.display = 'flex';
+  loadProjectList();
+}
+
+async function importProjectHome(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+  const text = await file.text();
+  const data = JSON.parse(text);
+  const name = data.chantier?.nom || file.name.replace('.json','');
+  const p = await apiFetch('/api/projects', {
+    method: 'POST',
+    body: JSON.stringify({ name, data }),
+  });
+  openProject(p.id);
+}
+
+// ── Patch all mutating functions to trigger auto-save ─────────
+const _origFns = [
+  'toggleStock','addStock','removeStock',
+  'addGroup','removeGroup','renameGroup','setGroupColor','updateGroupSupplier',
+  'addSubsection','removeSubsection','renameSubsection','selectSubsection',
+  'addPiece','removePiece','changeQty',
+];
+// We hook scheduleSave after each mutating action by wrapping
+(function patchForSave() {
+  const origToggleStock = toggleStock;
+  toggleStock = (...a) => { origToggleStock(...a); scheduleSave(); };
+  const origAddStock = addStock;
+  addStock = (...a) => { origAddStock(...a); scheduleSave(); };
+  const origRemoveStock = removeStock;
+  removeStock = (...a) => { origRemoveStock(...a); scheduleSave(); };
+  const origAddGroup = addGroup;
+  addGroup = (...a) => { origAddGroup(...a); scheduleSave(); };
+  const origRemoveGroup = removeGroup;
+  removeGroup = (...a) => { origRemoveGroup(...a); scheduleSave(); };
+  const origRenameGroup = renameGroup;
+  renameGroup = (...a) => { origRenameGroup(...a); scheduleSave(); };
+  const origSetGroupColor = setGroupColor;
+  setGroupColor = (...a) => { origSetGroupColor(...a); scheduleSave(); };
+  const origUpdateGroupSupplier = updateGroupSupplier;
+  updateGroupSupplier = (...a) => { origUpdateGroupSupplier(...a); scheduleSave(); };
+  const origAddSubsection = addSubsection;
+  addSubsection = (...a) => { origAddSubsection(...a); scheduleSave(); };
+  const origRemoveSubsection = removeSubsection;
+  removeSubsection = (...a) => { origRemoveSubsection(...a); scheduleSave(); };
+  const origRenameSubsection = renameSubsection;
+  renameSubsection = (...a) => { origRenameSubsection(...a); scheduleSave(); };
+  const origAddPiece = addPiece;
+  addPiece = (...a) => { origAddPiece(...a); scheduleSave(); };
+  const origRemovePiece = removePiece;
+  removePiece = (...a) => { origRemovePiece(...a); scheduleSave(); };
+  const origChangeQty = changeQty;
+  changeQty = (...a) => { origChangeQty(...a); scheduleSave(); };
+})();
+
+// Patch chantier inputs
+document.getElementById('chantierNom').addEventListener('input', scheduleSave);
+document.getElementById('chantierDate').addEventListener('input', scheduleSave);
 
 // ============================================================
 // KEYBOARD
@@ -1271,6 +1569,9 @@ document.getElementById('chantierDate').value = chantier.date;
 renderStock();
 renderGroupTabs();
 renderActiveGroup();
+// Show home screen on load
+loadProjectList();
 </script>
+</div><!-- #appScreen -->
 </body>
 </html>
