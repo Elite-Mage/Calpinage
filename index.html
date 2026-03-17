@@ -536,7 +536,7 @@
       <div class="card-title">Oméga &#937; &mdash; Longueurs fournisseur</div>
       <div id="omegaStockList"></div>
       <div class="add-row" style="margin-top:8px;">
-        <input type="number" id="newOmegaLen" placeholder="Longueur (mm)" min="1">
+        <input type="number" id="newOmegaLen" placeholder="Longueur (m) ex: 3 ou 4" min="0.1" step="0.1">
         <button class="btn-add" onclick="addOmegaStock()">+</button>
       </div>
       <div class="oss-config" style="margin-top:10px;">
@@ -551,7 +551,7 @@
       <div class="card-title">Zed Z &mdash; Longueurs fournisseur</div>
       <div id="zedStockList"></div>
       <div class="add-row" style="margin-top:8px;">
-        <input type="number" id="newZedLen" placeholder="Longueur (mm)" min="1">
+        <input type="number" id="newZedLen" placeholder="Longueur (m) ex: 3 ou 4" min="0.1" step="0.1">
         <button class="btn-add" onclick="addZedStock()">+</button>
       </div>
       <div class="oss-config" style="margin-top:10px;">
@@ -1868,7 +1868,7 @@ function renderOmegaStockList() {
   }
   el.innerHTML = ossatureConfig.omegaStocks.map((len, i) =>
     `<div class="stock-row" style="margin-bottom:4px;">
-      <span class="stock-label mono">${len} mm <span style="color:var(--text4);font-size:11px;">(${(len/1000).toFixed(2)} m)</span></span>
+      <span class="stock-label mono">${(len/1000).toFixed(2)} m <span style="color:var(--text4);font-size:11px;">(${len} mm)</span></span>
       <button class="piece-remove" onclick="removeOmegaStock(${i})">&times;</button>
     </div>`
   ).join('');
@@ -1881,25 +1881,25 @@ function renderZedStockList() {
   }
   el.innerHTML = ossatureConfig.zedStocks.map((len, i) =>
     `<div class="stock-row" style="margin-bottom:4px;">
-      <span class="stock-label mono">${len} mm <span style="color:var(--text4);font-size:11px;">(${(len/1000).toFixed(2)} m)</span></span>
+      <span class="stock-label mono">${(len/1000).toFixed(2)} m <span style="color:var(--text4);font-size:11px;">(${len} mm)</span></span>
       <button class="piece-remove" onclick="removeZedStock(${i})">&times;</button>
     </div>`
   ).join('');
 }
 function addOmegaStock() {
-  const v = parseInt(document.getElementById('newOmegaLen').value);
+  const v = parseFloat(document.getElementById('newOmegaLen').value);
   if (!v || v <= 0) return;
   if (!ossatureConfig.omegaStocks) ossatureConfig.omegaStocks = [];
-  ossatureConfig.omegaStocks.push(v);
+  ossatureConfig.omegaStocks.push(Math.round(v * 1000)); // store in mm
   ossatureConfig.omegaStocks.sort((a,b) => a - b);
   document.getElementById('newOmegaLen').value = '';
   renderOmegaStockList(); renderOssature(); scheduleSave();
 }
 function addZedStock() {
-  const v = parseInt(document.getElementById('newZedLen').value);
+  const v = parseFloat(document.getElementById('newZedLen').value);
   if (!v || v <= 0) return;
   if (!ossatureConfig.zedStocks) ossatureConfig.zedStocks = [];
-  ossatureConfig.zedStocks.push(v);
+  ossatureConfig.zedStocks.push(Math.round(v * 1000)); // store in mm
   ossatureConfig.zedStocks.sort((a,b) => a - b);
   document.getElementById('newZedLen').value = '';
   renderZedStockList(); renderOssature(); scheduleSave();
