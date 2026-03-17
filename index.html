@@ -424,6 +424,7 @@
         <span>Bon de commande</span>
         <div style="display:flex;gap:6px;">
           <button class="btn-export" onclick="exportCSV()">&#128196; CSV</button>
+          <button class="btn-export" onclick="exportExcel()">&#128202; Excel</button>
           <button class="btn-export" onclick="exportPDF()">&#128247; PDF</button>
         </div>
       </div>
@@ -1281,14 +1282,40 @@ function exportPDF() {
   body += `<tr style="background:#f0f0f0;font-weight:700;"><td colspan="5" style="border:1px solid #ccc;padding:7px;text-align:right;">TOTAL</td><td style="border:1px solid #ccc;padding:7px;text-align:center;">&times;${totalPanels}</td><td style="border:1px solid #ccc;padding:7px;">${totalArea.toFixed(2)} m\u00b2</td><td style="border:1px solid #ccc;padding:7px;">${hasPrix ? totalPrix.toFixed(2)+' \u20ac' : '—'}</td></tr>`;
   body += `</table></div>`;
 
-  const win = window.open('', '_blank');
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Calepinage — ${nom}</title>
+  const fullHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Calepinage \u2014 ${nom}</title>
   <style>
     body { font-family: 'Segoe UI', sans-serif; padding: 15mm; color: #111; font-size: 13px; }
     @media print { body { padding: 10mm; } }
   </style>
-  </head><body>${body}<script>window.onload=()=>window.print();<\/script></body></html>`);
-  win.document.close();
+  </head><body>${body}<script>window.onload=()=>window.print();<\/script></body></html>`;
+  const pdfBlob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
+  const pdfUrl = URL.createObjectURL(pdfBlob);
+  window.open(pdfUrl, '_blank');
+}
+
+// ============================================================
+// EXPORT EXCEL
+// ============================================================
+function exportExcel() {
+  if (!allResults) return;
+  const nom = chantier.nom || 'Chantier';
+  const date = chantier.date || new Date().toISOString().slice(0,10);
+  let rows = '<tr><th>Type</th><th>Ref.Fourn.</th><th>Coloris</th><th>Ep.(mm)</th><th>Facade</th><th>Panneau</th><th>Format</th><th>Ref.Piece</th><th>Piece L</th><th>Piece H</th><th>Rotation</th><th>Pos X</th><th>Pos Y</th></tr>';
+  for (const g of groups) {
+    const result = allResults[g.id];
+    if (!result) continue;
+    for (const panel of result.panels) {
+      for (const p of panel.placements) {
+        rows += `<tr><td>${g.name}</td><td>${g.reference||''}</td><td>${g.coloris||''}</td><td>${g.epaisseur||18}</td><td>${p.subsectionName||''}</td><td>${panel.idx}</td><td>${panel.stock.label}</td><td>${panel.idx}.${p.pieceNum}</td><td>${p.w}</td><td>${p.h}</td><td>${p.rotated?'Oui':'Non'}</td><td>${p.x}</td><td>${p.y}</td></tr>`;
+      }
+    }
+  }
+  const xlsHtml = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"></head><body><table>${rows}</table></body></html>`;
+  const blob = new Blob(['\uFEFF' + xlsHtml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `${nom.replace(/[^a-zA-Z0-9]/g,'_') || 'calepinage'}_${date}.xls`;
+  link.click();
 }
 
 // ============================================================
