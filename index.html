@@ -2364,6 +2364,7 @@ function parseDxfClientSide(text, fileName) {
   const rects = [];
   const rectsSpatial = [];
 
+  let _dupCount = 0;
   function addRect(xmin, xmax, ymin, ymax, colorAci, layerName) {
     const rawW = xmax - xmin, rawH = ymax - ymin;
     if (rawW < 10 || rawH < 10) return;
@@ -2373,6 +2374,14 @@ function parseDxfClientSide(text, fileName) {
     let color = colorAci;
     if (!color || color === 256) {
       color = (layerName && layerColors[layerName]) || 256;
+    }
+    // Dédoublonnage spatial : ignorer si un rectangle quasi-identique existe déjà
+    const TOL = 5; // tolérance 5mm
+    for (const existing of rectsSpatial) {
+      if (Math.abs(existing.xmin - xmin) < TOL && Math.abs(existing.xmax - xmax) < TOL &&
+          Math.abs(existing.ymin - ymin) < TOL && Math.abs(existing.ymax - ymax) < TOL) {
+        _dupCount++; return; // doublon
+      }
     }
     rects.push({ xcenter, w, h, color });
     rectsSpatial.push({ xmin, xmax, ymin, ymax, color });
@@ -2403,6 +2412,7 @@ function parseDxfClientSide(text, fileName) {
   console.log('[DXF Parser] LWPOLYLINE rectangles:', entities.filter(e => e.type === 'LWPOLYLINE' && e.vertices.length >= 3).length);
   console.log('[DXF Parser] POLYLINE rectangles:', entities.filter(e => e.type === 'POLYLINE' && e.vertices.length >= 3).length);
   console.log('[DXF Parser] LINE rectangles assemblés:', lineRects.length);
+  console.log('[DXF Parser] Doublons spatiaux filtrés:', _dupCount);
   console.log('[DXF Parser] Total rectangles extraits:', rects.length);
   console.log('[DXF Parser] Couleurs calques:', JSON.stringify(layerColors));
   console.log('[DXF Parser] Rectangles par couleur:', rects.reduce((acc, r) => { acc[r.color] = (acc[r.color] || 0) + 1; return acc; }, {}));
