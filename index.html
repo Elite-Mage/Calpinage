@@ -612,6 +612,10 @@
           <label>Trait de scie oss. (mm)</label>
           <input type="number" id="ossKerf" value="0" min="0" max="10" step="0.5" oninput="ossatureConfig.kerf=+this.value; renderOssature(); scheduleSave();">
         </div>
+        <div>
+          <label>Hauteur ossature (mm)</label>
+          <input type="number" id="ossHauteur" value="0" min="0" max="10000" step="10" placeholder="auto" oninput="ossatureConfig.hauteurOssature=+this.value; renderOssature(); scheduleSave();" title="Hauteur des montants verticaux (0 = auto depuis panneaux)">
+        </div>
       </div>
     </div>
     <!-- OMEGA STOCK -->
@@ -812,7 +816,7 @@ let nextGroupId = 3;
 let activeGroupId = 1;
 let allResults = null;
 let activeSection = 'panneaux'; // 'panneaux' | 'ossature' | 'devis'
-let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [] };
+let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0 };
 let devisConfig = { prixMO: '' };
 let fixationConfig = { prixFixation: '' };
 
@@ -1872,11 +1876,12 @@ function applyProjectData(data) {
     activeGroupId = data.activeGroupId || groups[0]?.id;
   }
   if (data.ossatureConfig) {
-    ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], ...data.ossatureConfig };
+    ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, ...data.ossatureConfig };
     document.getElementById('ossEntaxeMax').value = ossatureConfig.entaxeMax || 600;
     document.getElementById('ossKerf').value = ossatureConfig.kerf || 0;
     document.getElementById('ossPrixOmega').value = ossatureConfig.prixOmega || '';
     document.getElementById('ossPrixZed').value = ossatureConfig.prixZed || '';
+    document.getElementById('ossHauteur').value = ossatureConfig.hauteurOssature || '';
     renderOmegaStockList();
     renderZedStockList();
   }
@@ -2065,7 +2070,43 @@ function parseDxfClientSide(text, fileName) {
   const entities = [];
   let i = 0;
 
-  // Find ENTITIES section
+  // ── Parse TABLES section to get layer colors ──
+  const layerColors = {}; // layerName -> ACI color
+  let ti = 0;
+  while (ti < lines.length && lines[ti].trim() !== 'TABLES') ti++;
+  if (ti < lines.length) {
+    ti++;
+    let inLayerTable = false, currentLayerName = null, currentLayerColor = null;
+    let tgc = null;
+    while (ti < lines.length) {
+      const tl = lines[ti].trim();
+      if (tgc === null) { tgc = parseInt(tl, 10); ti++; continue; }
+      if (tgc === 0 && tl === 'ENDSEC') break;
+      if (tgc === 0 && tl === 'TABLE') { inLayerTable = false; }
+      if (tgc === 2 && tl === 'LAYER') { inLayerTable = true; }
+      if (inLayerTable) {
+        if (tgc === 0 && tl === 'LAYER') {
+          if (currentLayerName && currentLayerColor !== null) {
+            layerColors[currentLayerName] = Math.abs(currentLayerColor);
+          }
+          currentLayerName = null;
+          currentLayerColor = null;
+        }
+        if (tgc === 2) currentLayerName = tl;
+        if (tgc === 62) currentLayerColor = parseInt(tl, 10);
+        if (tgc === 0 && tl === 'ENDTAB') {
+          if (currentLayerName && currentLayerColor !== null) {
+            layerColors[currentLayerName] = Math.abs(currentLayerColor);
+          }
+          inLayerTable = false;
+        }
+      }
+      tgc = null;
+      ti++;
+    }
+  }
+
+  // ── Find ENTITIES section ──
   while (i < lines.length && lines[i].trim() !== 'ENTITIES') i++;
   i++;
 
@@ -2092,6 +2133,7 @@ function parseDxfClientSide(text, fileName) {
     } else if (currentEntity) {
       if (currentType === 'LWPOLYLINE') {
         if (groupCode === 62) currentEntity.props.color = parseInt(value, 10);
+        if (groupCode === 8) currentEntity.props.layer = value;
         if (groupCode === 10) currentEntity._lastX = parseFloat(value);
         if (groupCode === 20) {
           currentEntity.vertices.push([currentEntity._lastX, parseFloat(value)]);
@@ -2137,7 +2179,11 @@ function parseDxfClientSide(text, fileName) {
     const w = Math.round(Math.max(rawW, rawH));
     const h = Math.round(Math.min(rawW, rawH));
     const xcenter = (xmin + xmax) / 2;
-    const colorAci = e.props.color || 256;
+    // Résolution couleur : entité explicite > couleur du calque (BYLAYER)
+    let colorAci = e.props.color;
+    if (!colorAci || colorAci === 256) {
+      colorAci = (e.props.layer && layerColors[e.props.layer]) || 256;
+    }
     rects.push({ xcenter, w, h, color: colorAci });
     rectsSpatial.push({ xmin, xmax, ymin, ymax, color: colorAci });
   }
@@ -2256,30 +2302,23 @@ function parseDxfClientSide(text, fileName) {
       let omegaMM = 0, zedMM = 0;
       for (let ci = 0; ci < sortedCols.length; ci++) {
         const col = sortedCols[ci].sort((a, b) => a.ymin - b.ymin);
-        // Entraxe ZEDs
+        // Entraxe ZEDs (supports intermédiaires basés sur la largeur du panneau)
         for (const p of col) {
           const pw = Math.round(p.xmax - p.xmin);
           const ph = Math.round(p.ymax - p.ymin);
           const nz = Math.max(0, Math.ceil(pw / entraxeMax) - 1);
           zedMM += nz * ph;
         }
+        // OMEGA à chaque jonction de colonne (bord gauche de la 1ère colonne)
         if (ci === 0) { for (const p of col) omegaMM += Math.round(p.ymax - p.ymin); }
+        // OMEGA entre colonnes adjacentes : montant oméga sur toute la hauteur
+        // (pas seulement la zone de chevauchement — le montant court sur toute la hauteur)
         if (ci < sortedCols.length - 1) {
-          const next = sortedCols[ci + 1].sort((a, b) => a.ymin - b.ymin);
           for (const p of col) {
-            let ov = 0;
-            for (const np of next) { const s = Math.max(p.ymin, np.ymin), e = Math.min(p.ymax, np.ymax); if (e > s) ov += e - s; }
-            const nov = (p.ymax - p.ymin) - ov;
-            if (ov > 0) omegaMM += Math.round(ov);
-            if (nov > 10) zedMM += Math.round(nov);
-          }
-          for (const np of next) {
-            let ov = 0;
-            for (const p of col) { const s = Math.max(np.ymin, p.ymin), e = Math.min(np.ymax, p.ymax); if (e > s) ov += e - s; }
-            const nov = (np.ymax - np.ymin) - ov;
-            if (nov > 10) zedMM += Math.round(nov);
+            omegaMM += Math.round(p.ymax - p.ymin);
           }
         } else {
+          // Bord droit de la dernière colonne
           for (const p of col) omegaMM += Math.round(p.ymax - p.ymin);
         }
       }
@@ -2641,6 +2680,7 @@ function binPack1D(cuts, stockLengths, kerf) {
 // ============================================================
 function calcOssature() {
   const entaxeMax = ossatureConfig.entaxeMax || 600;
+  const hOss = ossatureConfig.hauteurOssature || 0; // 0 = auto (use panel dimensions)
   const results = [];
 
   // Détecte si un sous-type est "plein" (panneaux pleine hauteur)
@@ -2652,6 +2692,28 @@ function calcOssature() {
   function isOpeningSubtype(stName) {
     const n = stName.toLowerCase();
     return n.includes('fen') || n.includes('porte') || n.includes('spéc') || n.includes('spec');
+  }
+  function isBandeauSubtype(stName) {
+    return stName.toLowerCase().includes('bandeau');
+  }
+
+  // ── Orientation des dimensions ──
+  // En import DXF : w = max(rawW, rawH) = dimension la plus grande
+  //                  h = min(rawW, rawH) = dimension la plus petite
+  // Pour les panneaux Plein (3650 de haut × 867 de large) :
+  //   p.w = 3650 (hauteur verticale sur façade)
+  //   p.h = 867  (largeur horizontale sur façade)
+  // Pour Bandeau Haut (1064 de haut × 4268 de large) :
+  //   p.w = 4268 (largeur horizontale, car plus grand)
+  //   p.h = 1064 (hauteur verticale)
+  function getOssH(p, stName) {
+    // Hauteur verticale du montant (longueur de coupe Oméga/Zed)
+    if (hOss > 0 && !isBandeauSubtype(stName) && isPleinSubtype(stName)) return hOss;
+    return isBandeauSubtype(stName) ? p.h : p.w;
+  }
+  function getOssW(p, stName) {
+    // Largeur horizontale du panneau (pour calcul entraxe Zed)
+    return isBandeauSubtype(stName) ? p.w : p.h;
   }
 
   for (const g of groups) {
@@ -2668,7 +2730,9 @@ function calcOssature() {
         const totalInSubtype = st.pieces.reduce((s, p) => s + p.qty, 0);
 
         for (const p of st.pieces) {
-          const nbZed = Math.max(0, Math.ceil(p.w / entaxeMax) - 1);
+          const ossH = getOssH(p, st.name);
+          const ossW = getOssW(p, st.name);
+          const nbZed = Math.max(0, Math.ceil(ossW / entaxeMax) - 1);
           subData.pieces.push({
             ...p,
             subtypeName: st.name,
@@ -2676,7 +2740,7 @@ function calcOssature() {
             isOpening,
             nbZedPerPanel: nbZed,
             totalZed: nbZed * p.qty,
-            zedML: nbZed * p.qty * p.h / 1000,
+            zedML: nbZed * p.qty * ossH / 1000,
             firstPanelNum: panelNum,
           });
 
@@ -2685,47 +2749,44 @@ function calcOssature() {
             for (let q = 0; q < p.qty; q++) {
               const pn = panelNum++;
               const omRef = `P${pn} [${st.name}]`;
-              subData.omegaCuts.push({ len: p.h, ref: omRef });
+              subData.omegaCuts.push({ len: ossH, ref: omRef });
             }
-            subData.totalOmegaML += p.qty * p.h / 1000;
+            subData.totalOmegaML += p.qty * ossH / 1000;
           } else if (isOpening) {
-            // Panneaux ouverture : oméga aux jonctions internes, zed aux bords
+            // Panneaux ouverture : oméga aux jonctions internes + bords
             for (let q = 0; q < p.qty; q++) {
               const pn = panelNum++;
               if (q > 0) {
-                // Jonction interne linteau → oméga
-                subData.omegaCuts.push({ len: p.h, ref: `P${pn-1}/P${pn} [linteau]` });
-                subData.totalOmegaML += p.h / 1000;
+                subData.omegaCuts.push({ len: ossH, ref: `P${pn-1}/P${pn} [linteau]` });
+                subData.totalOmegaML += ossH / 1000;
               }
             }
-            // 2 zeds aux bords d'ouverture (extrémités du groupe)
-            subData.zedCuts.push({ len: p.h, ref: `◀ ouv. [${st.name}]` });
-            subData.zedCuts.push({ len: p.h, ref: `ouv. ▶ [${st.name}]` });
-            subData.totalZedML += 2 * p.h / 1000;
+            // Bords d'ouverture → OMEGA (pas ZED : l'oméga clippe le panneau adjacent)
+            subData.omegaCuts.push({ len: ossH, ref: `◀ ouv. [${st.name}]` });
+            subData.omegaCuts.push({ len: ossH, ref: `ouv. ▶ [${st.name}]` });
+            subData.totalOmegaML += 2 * ossH / 1000;
           } else {
-            // Autres sous-types : traiter comme plein par défaut
             for (let q = 0; q < p.qty; q++) {
               const pn = panelNum++;
-              subData.omegaCuts.push({ len: p.h, ref: `P${pn}` });
+              subData.omegaCuts.push({ len: ossH, ref: `P${pn}` });
             }
-            subData.totalOmegaML += p.qty * p.h / 1000;
+            subData.totalOmegaML += p.qty * ossH / 1000;
           }
 
-          // Zed d'entraxe (horizontal support) pour tous les types
+          // Zed d'entraxe (support intermédiaire horizontal) pour tous les types
           for (let q = 0; q < p.qty; q++) {
             for (let z = 0; z < nbZed; z++) {
-              subData.zedCuts.push({ len: p.h, ref: `P${panelNum - p.qty + q} [entraxe]` });
+              subData.zedCuts.push({ len: ossH, ref: `P${panelNum - p.qty + q} [entraxe]` });
             }
           }
-          subData.totalZedML += nbZed * p.qty * p.h / 1000;
+          subData.totalZedML += nbZed * p.qty * ossH / 1000;
         }
 
         // Oméga de fermeture pour les sous-types plein
-        // (bord droit du dernier panneau plein = 1 oméga supplémentaire)
         if (isPlein && totalInSubtype > 0) {
-          const maxH = Math.max(...st.pieces.map(p => p.h));
-          subData.omegaCuts.push({ len: maxH, ref: `bord [${st.name}]` });
-          subData.totalOmegaML += maxH / 1000;
+          const maxOssH = Math.max(...st.pieces.map(p => getOssH(p, st.name)));
+          subData.omegaCuts.push({ len: maxOssH, ref: `bord [${st.name}]` });
+          subData.totalOmegaML += maxOssH / 1000;
         }
       }
 
@@ -2734,6 +2795,40 @@ function calcOssature() {
     }
     results.push(groupData);
   }
+
+  // ── Dédoublonnage cross-groupe pour les façades partagées ──
+  // Quand plusieurs groupes (ex: Orange N1 + Marron RDC) couvrent la même façade,
+  // les profils oméga sont partagés physiquement. On ne compte les oméga "plein"
+  // que pour le groupe principal (celui avec le plus de panneaux plein sur cette façade).
+  if (groups.length > 1) {
+    const facadeIndex = {}; // nom façade normalisé -> [{groupIdx, subData}]
+    for (let gi = 0; gi < results.length; gi++) {
+      for (const sd of results[gi].subsections) {
+        const key = sd.subsection.name.toLowerCase().trim();
+        if (!facadeIndex[key]) facadeIndex[key] = [];
+        facadeIndex[key].push({ groupIdx: gi, subData: sd });
+      }
+    }
+    for (const entries of Object.values(facadeIndex)) {
+      if (entries.length <= 1) continue;
+      // Compter les oméga "plein" (hors ouvertures) de chaque groupe
+      entries.sort((a, b) => {
+        const aPlein = a.subData.omegaCuts.filter(c => !c.ref.includes('ouv.') && !c.ref.includes('linteau')).length;
+        const bPlein = b.subData.omegaCuts.filter(c => !c.ref.includes('ouv.') && !c.ref.includes('linteau')).length;
+        return bPlein - aPlein;
+      });
+      // Retirer les oméga plein des groupes secondaires (garder oméga ouvertures)
+      for (let i = 1; i < entries.length; i++) {
+        const sd = entries[i].subData;
+        const keepCuts = sd.omegaCuts.filter(c => c.ref.includes('ouv.') || c.ref.includes('linteau'));
+        const keepML = keepCuts.reduce((sum, c) => sum + c.len / 1000, 0);
+        sd.omegaCuts = keepCuts;
+        sd.totalOmegaML = keepML;
+        sd.totalOmegas = keepCuts.length;
+      }
+    }
+  }
+
   return results;
 }
 
