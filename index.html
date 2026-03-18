@@ -58,6 +58,35 @@
   .home-import-dxf:hover { background: #4a9eff22; }
   .home-import-dxf.loading { opacity: 0.6; cursor: wait; pointer-events: none; }
 
+  /* ── MODAL IMPORT DWG ──────────────────────────────────────── */
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.6);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .modal-box {
+    background: var(--bg2, #1e1e2e); border: 1px solid var(--border, #333);
+    border-radius: 14px; padding: 28px 32px; max-width: 480px; width: 90%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5); text-align: center;
+  }
+  .modal-box h3 { margin: 0 0 6px; font-size: 18px; color: var(--text, #fff); }
+  .modal-box .modal-sub { color: var(--text3, #aaa); font-size: 13px; margin-bottom: 20px; }
+  .modal-box .modal-stats {
+    background: var(--bg, #15151e); border-radius: 8px; padding: 12px 16px;
+    margin-bottom: 20px; text-align: left; font-size: 12px; color: var(--text3, #aaa);
+    line-height: 1.8;
+  }
+  .modal-box .modal-stats strong { color: var(--text, #fff); }
+  .modal-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .modal-btns button {
+    border: none; border-radius: 8px; padding: 12px 20px; font-size: 13px;
+    font-weight: 700; cursor: pointer; font-family: inherit; transition: opacity 0.15s;
+  }
+  .modal-btns button:hover { opacity: 0.85; }
+  .btn-excel { background: #27ae60; color: #fff; }
+  .btn-json-dl { background: #3498db; color: #fff; }
+  .btn-import { background: var(--accent, #f4c542); color: #000; }
+  .btn-close-modal { background: transparent; border: 1px solid var(--border, #333) !important; color: var(--text3, #aaa); }
+
   /* ── COLLAB BADGE ────────────────────────────────────────────── */
   #collabBadge {
     display: flex; align-items: center; gap: 6px; font-size: 11px;
@@ -2006,7 +2035,7 @@ async function importDxfHome(input) {
   const label = document.getElementById('dxfImportLabel');
   const origText = label.childNodes[0].textContent;
   label.classList.add('loading');
-  label.childNodes[0].textContent = '⏳ Analyse…';
+  label.childNodes[0].textContent = '\u23F3 Analyse\u2026';
   try {
     const fd = new FormData();
     fd.append('file', file);
@@ -2016,15 +2045,99 @@ async function importDxfHome(input) {
       throw new Error(err.error || resp.statusText);
     }
     const data = await resp.json();
+    const excelUrl = data._excelUrl || null;
+    delete data._excelUrl;
     const name = data.chantier?.nom || file.name.replace(/\.(dxf|dwg)$/i, '');
-    const p = await storage.create(name, data);
-    openProject(p.id);
+
+    // Calcul des stats pour le résumé
+    let totalPieces = 0, totalGroups = data.groups?.length || 0, totalFacades = 0;
+    (data.groups || []).forEach(g => {
+      (g.subsections || []).forEach(ss => {
+        totalFacades++;
+        (ss.panelSubtypes || []).forEach(st => {
+          (st.pieces || []).forEach(p => { totalPieces += p.qty || 1; });
+        });
+      });
+    });
+
+    showDwgResultModal(name, data, excelUrl, { totalGroups, totalFacades, totalPieces });
   } catch(e) {
     alert('Erreur import DXF/DWG :\n' + e.message);
   } finally {
     label.classList.remove('loading');
     label.childNodes[0].textContent = origText;
   }
+}
+
+function showDwgResultModal(name, data, excelUrl, stats) {
+  // Supprimer un éventuel modal existant
+  const existing = document.getElementById('dwgModal');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'dwgModal';
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <h3>\u2705 Fichier analys\u00e9 avec succ\u00e8s</h3>
+      <div class="modal-sub">${name}</div>
+      <div class="modal-stats">
+        <strong>${stats.totalGroups}</strong> groupe(s) de panneaux<br>
+        <strong>${stats.totalFacades}</strong> fa\u00e7ade(s)<br>
+        <strong>${stats.totalPieces}</strong> pi\u00e8ce(s) au total
+      </div>
+      <div class="modal-btns">
+        ${excelUrl ? `<button class="btn-excel" onclick="dwgDownloadExcel()">&#128202; T\u00e9l\u00e9charger Excel</button>` : ''}
+        <button class="btn-json-dl" onclick="dwgDownloadJSON()">&#128196; T\u00e9l\u00e9charger JSON</button>
+        <button class="btn-import" onclick="dwgImportProject()">&#128640; Importer dans l'optimisation</button>
+      </div>
+      <div style="margin-top:14px;">
+        <button class="btn-close-modal" onclick="closeDwgModal()">Fermer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // Stocker les données temporairement
+  window._dwgImportData = { name, data, excelUrl };
+}
+
+function closeDwgModal() {
+  const m = document.getElementById('dwgModal');
+  if (m) m.remove();
+  delete window._dwgImportData;
+}
+
+function dwgDownloadExcel() {
+  if (!window._dwgImportData?.excelUrl) return;
+  const a = document.createElement('a');
+  a.href = window._dwgImportData.excelUrl;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function dwgDownloadJSON() {
+  if (!window._dwgImportData) return;
+  const { name, data } = window._dwgImportData;
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name + '.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function dwgImportProject() {
+  if (!window._dwgImportData) return;
+  const { name, data } = window._dwgImportData;
+  closeDwgModal();
+  const p = await storage.create(name, data);
+  openProject(p.id);
 }
 
 // ── Patch all mutating functions to trigger auto-save ─────────
