@@ -2683,12 +2683,10 @@ function calcOssature() {
   const hOss = ossatureConfig.hauteurOssature || 0; // 0 = auto (use panel dimensions)
   const results = [];
 
-  // Détecte si un sous-type est "plein" (panneaux pleine hauteur)
   function isPleinSubtype(stName) {
     const n = stName.toLowerCase();
     return n.includes('plein') || n.includes('bandeau');
   }
-  // Détecte si un sous-type est lié aux ouvertures (fenêtre/porte/pièce spéciale)
   function isOpeningSubtype(stName) {
     const n = stName.toLowerCase();
     return n.includes('fen') || n.includes('porte') || n.includes('spéc') || n.includes('spec');
@@ -2698,21 +2696,15 @@ function calcOssature() {
   }
 
   // ── Orientation des dimensions ──
-  // En import DXF : w = max(rawW, rawH) = dimension la plus grande
-  //                  h = min(rawW, rawH) = dimension la plus petite
-  // Pour les panneaux Plein (3650 de haut × 867 de large) :
-  //   p.w = 3650 (hauteur verticale sur façade)
-  //   p.h = 867  (largeur horizontale sur façade)
-  // Pour Bandeau Haut (1064 de haut × 4268 de large) :
-  //   p.w = 4268 (largeur horizontale, car plus grand)
-  //   p.h = 1064 (hauteur verticale)
+  // DXF : w = max(rawW, rawH) = plus grande dim, h = min = plus petite dim
+  // Plein (3650×867) : p.w=3650 (hauteur), p.h=867 (largeur)
+  // Bandeau (1064×4268) : p.w=4268 (largeur), p.h=1064 (hauteur)
+  // Ouverture (1580×984) : p.w=1580 (hauteur), p.h=984 (largeur)
   function getOssH(p, stName) {
-    // Hauteur verticale du montant (longueur de coupe Oméga/Zed)
-    if (hOss > 0 && !isBandeauSubtype(stName) && isPleinSubtype(stName)) return hOss;
+    if (hOss > 0 && isPleinSubtype(stName) && !isBandeauSubtype(stName)) return hOss;
     return isBandeauSubtype(stName) ? p.h : p.w;
   }
   function getOssW(p, stName) {
-    // Largeur horizontale du panneau (pour calcul entraxe Zed)
     return isBandeauSubtype(stName) ? p.w : p.h;
   }
 
@@ -2721,12 +2713,24 @@ function calcOssature() {
     for (const sub of g.subsections) {
       const subData = { subsection: sub, pieces: [], totalOmegaML: 0, totalZedML: 0, omegaCuts: [], zedCuts: [] };
 
+      // ── Déterminer la hauteur pleine façade pour cette sous-section ──
+      // C'est la hauteur des montants structurels (colonnes pleine hauteur)
+      let facadeFullH = hOss;
+      if (facadeFullH === 0) {
+        for (const st of sub.panelSubtypes) {
+          if (isPleinSubtype(st.name) && !isBandeauSubtype(st.name)) {
+            for (const p of st.pieces) facadeFullH = Math.max(facadeFullH, p.w);
+          }
+        }
+      }
+
       let panelNum = 1;
 
       for (const st of sub.panelSubtypes) {
         if (st.pieces.length === 0) continue;
         const isPlein = isPleinSubtype(st.name);
         const isOpening = isOpeningSubtype(st.name);
+        const isBandeau = isBandeauSubtype(st.name);
         const totalInSubtype = st.pieces.reduce((s, p) => s + p.qty, 0);
 
         for (const p of st.pieces) {
@@ -2745,35 +2749,44 @@ function calcOssature() {
           });
 
           if (isPlein) {
-            // Panneaux plein : oméga entre chaque panneau (jonction 8mm)
+            // ── Panneaux plein/bandeau ──
+            // 1 oméga par panneau à la hauteur du montant (ossH)
             for (let q = 0; q < p.qty; q++) {
               const pn = panelNum++;
-              const omRef = `P${pn} [${st.name}]`;
-              subData.omegaCuts.push({ len: ossH, ref: omRef });
+              subData.omegaCuts.push({ len: ossH, ref: `P${pn} [${st.name}]`, structural: !isBandeau });
             }
             subData.totalOmegaML += p.qty * ossH / 1000;
           } else if (isOpening) {
-            // Panneaux ouverture : oméga aux jonctions internes + bords
+            // ── Panneaux ouverture (fenêtre/porte/pièce spéciale) ──
+            // Chaque position de panneau nécessite :
+            //   1) Un montant structural pleine hauteur (même hauteur que les pleins)
+            //   2) Des omégas de zone à la hauteur de la pièce (pour fixation fenêtre)
             for (let q = 0; q < p.qty; q++) {
               const pn = panelNum++;
+              // Montant structural pleine hauteur
+              if (facadeFullH > 0) {
+                subData.omegaCuts.push({ len: facadeFullH, ref: `P${pn} [struct ${st.name}]`, structural: true });
+                subData.totalOmegaML += facadeFullH / 1000;
+              }
+              // Oméga de zone à la hauteur ouverture (fixation fenêtre)
+              subData.omegaCuts.push({ len: ossH, ref: `P${pn} [zone ${st.name}]`, structural: false });
+              subData.totalOmegaML += ossH / 1000;
+              // Jonctions internes entre pièces adjacentes
               if (q > 0) {
-                subData.omegaCuts.push({ len: ossH, ref: `P${pn-1}/P${pn} [linteau]` });
+                subData.omegaCuts.push({ len: ossH, ref: `P${pn-1}/P${pn} [linteau]`, structural: false });
                 subData.totalOmegaML += ossH / 1000;
               }
             }
-            // Bords d'ouverture → OMEGA (pas ZED : l'oméga clippe le panneau adjacent)
-            subData.omegaCuts.push({ len: ossH, ref: `◀ ouv. [${st.name}]` });
-            subData.omegaCuts.push({ len: ossH, ref: `ouv. ▶ [${st.name}]` });
-            subData.totalOmegaML += 2 * ossH / 1000;
           } else {
+            // ── Autres sous-types ──
             for (let q = 0; q < p.qty; q++) {
               const pn = panelNum++;
-              subData.omegaCuts.push({ len: ossH, ref: `P${pn}` });
+              subData.omegaCuts.push({ len: ossH, ref: `P${pn}`, structural: true });
             }
             subData.totalOmegaML += p.qty * ossH / 1000;
           }
 
-          // Zed d'entraxe (support intermédiaire horizontal) pour tous les types
+          // Zed d'entraxe pour tous les types
           for (let q = 0; q < p.qty; q++) {
             for (let z = 0; z < nbZed; z++) {
               subData.zedCuts.push({ len: ossH, ref: `P${panelNum - p.qty + q} [entraxe]` });
@@ -2782,11 +2795,16 @@ function calcOssature() {
           subData.totalZedML += nbZed * p.qty * ossH / 1000;
         }
 
-        // Oméga de fermeture pour les sous-types plein
+        // Oméga de fermeture (bord droit) pour plein et ouverture
         if (isPlein && totalInSubtype > 0) {
           const maxOssH = Math.max(...st.pieces.map(p => getOssH(p, st.name)));
-          subData.omegaCuts.push({ len: maxOssH, ref: `bord [${st.name}]` });
+          subData.omegaCuts.push({ len: maxOssH, ref: `bord [${st.name}]`, structural: !isBandeau });
           subData.totalOmegaML += maxOssH / 1000;
+        }
+        if (isOpening && totalInSubtype > 0 && facadeFullH > 0) {
+          // Fermeture structurelle pour les colonnes d'ouverture
+          subData.omegaCuts.push({ len: facadeFullH, ref: `bord struct [${st.name}]`, structural: true });
+          subData.totalOmegaML += facadeFullH / 1000;
         }
       }
 
@@ -2797,11 +2815,11 @@ function calcOssature() {
   }
 
   // ── Dédoublonnage cross-groupe pour les façades partagées ──
-  // Quand plusieurs groupes (ex: Orange N1 + Marron RDC) couvrent la même façade,
-  // les profils oméga sont partagés physiquement. On ne compte les oméga "plein"
-  // que pour le groupe principal (celui avec le plus de panneaux plein sur cette façade).
+  // Les montants structurels (pleine hauteur) sont partagés physiquement entre groupes.
+  // Pour chaque façade partagée : garder le MAX de montants structurels, pas la somme.
+  // Les omégas de zone (fenêtre, bandeau) sont conservés de tous les groupes.
   if (groups.length > 1) {
-    const facadeIndex = {}; // nom façade normalisé -> [{groupIdx, subData}]
+    const facadeIndex = {};
     for (let gi = 0; gi < results.length; gi++) {
       for (const sd of results[gi].subsections) {
         const key = sd.subsection.name.toLowerCase().trim();
@@ -2811,20 +2829,20 @@ function calcOssature() {
     }
     for (const entries of Object.values(facadeIndex)) {
       if (entries.length <= 1) continue;
-      // Compter les oméga "plein" (hors ouvertures) de chaque groupe
+      // Compter les montants STRUCTURELS par groupe
       entries.sort((a, b) => {
-        const aPlein = a.subData.omegaCuts.filter(c => !c.ref.includes('ouv.') && !c.ref.includes('linteau')).length;
-        const bPlein = b.subData.omegaCuts.filter(c => !c.ref.includes('ouv.') && !c.ref.includes('linteau')).length;
-        return bPlein - aPlein;
+        const aStruct = a.subData.omegaCuts.filter(c => c.structural).length;
+        const bStruct = b.subData.omegaCuts.filter(c => c.structural).length;
+        return bStruct - aStruct;
       });
-      // Retirer les oméga plein des groupes secondaires (garder oméga ouvertures)
+      // Garder structurels du groupe principal, retirer des secondaires
       for (let i = 1; i < entries.length; i++) {
         const sd = entries[i].subData;
-        const keepCuts = sd.omegaCuts.filter(c => c.ref.includes('ouv.') || c.ref.includes('linteau'));
-        const keepML = keepCuts.reduce((sum, c) => sum + c.len / 1000, 0);
-        sd.omegaCuts = keepCuts;
-        sd.totalOmegaML = keepML;
-        sd.totalOmegas = keepCuts.length;
+        const zoneCuts = sd.omegaCuts.filter(c => !c.structural);
+        const zoneML = zoneCuts.reduce((sum, c) => sum + c.len / 1000, 0);
+        sd.omegaCuts = zoneCuts;
+        sd.totalOmegaML = zoneML;
+        sd.totalOmegas = zoneCuts.length;
       }
     }
   }
