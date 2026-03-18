@@ -84,13 +84,20 @@ const upload = multer({
   },
 });
 
+// Dossier temporaire pour les fichiers Excel générés
+const EXCEL_TMP = path.join(os.tmpdir(), 'calpinage-excel');
+if (!fs.existsSync(EXCEL_TMP)) fs.mkdirSync(EXCEL_TMP, { recursive: true });
+
 app.post('/api/parse-dxf', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
 
   const tmpIn  = req.file.path;
   const script = path.join(__dirname, 'parse_dxf.py');
+  const baseName = path.basename(req.file.originalname, path.extname(req.file.originalname));
+  const excelId = uuidv4();
+  const excelPath = path.join(EXCEL_TMP, excelId + '.xlsx');
 
-  execFile('python3', [script, tmpIn], { timeout: 30000 }, (err, stdout, stderr) => {
+  execFile('python3', [script, tmpIn, '--excel', excelPath], { timeout: 30000 }, (err, stdout, stderr) => {
     fs.unlink(tmpIn, () => {});
     if (err) {
       console.error('[parse-dxf]', stderr);
@@ -98,12 +105,25 @@ app.post('/api/parse-dxf', upload.single('file'), (req, res) => {
     }
     try {
       const data = JSON.parse(stdout);
-      // Patch chantier.nom avec le nom original du fichier
-      data.chantier.nom = path.basename(req.file.originalname, path.extname(req.file.originalname));
+      data.chantier.nom = baseName;
+      // Inclure l'URL de téléchargement Excel dans la réponse
+      data._excelUrl = `/api/download-excel/${excelId}/${encodeURIComponent(baseName)}.xlsx`;
       res.json(data);
     } catch (e) {
       res.status(500).json({ error: 'Réponse invalide du parser : ' + e.message });
     }
+  });
+});
+
+// Téléchargement du fichier Excel généré
+app.get('/api/download-excel/:id/:filename', (req, res) => {
+  const filePath = path.join(EXCEL_TMP, req.params.id + '.xlsx');
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Fichier Excel introuvable ou expiré' });
+  }
+  res.download(filePath, req.params.filename, (err) => {
+    // Nettoyer le fichier après téléchargement (ou erreur)
+    fs.unlink(filePath, () => {});
   });
 });
 
