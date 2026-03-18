@@ -296,29 +296,112 @@ def parse_dxf_file(filepath):
     if not facade_labels:
         facade_labels = [(0.0, "Façade")]
 
-    # 2. Extrait tous les rectangles (LWPOLYLINE avec 4 points)
+    # 2. Construit un dict layer → couleur ACI pour résoudre BYLAYER
+    layer_colors = {}
+    for layer in doc.layers:
+        try:
+            c = layer.dxf.color
+            if c is not None:
+                layer_colors[layer.dxf.name] = abs(c)
+        except Exception:
+            pass
+
+    def resolve_color(entity):
+        """Résout la couleur ACI : entité > calque (BYLAYER)."""
+        color = entity.dxf.get("color", 256)
+        if color == 256:  # BYLAYER
+            layer_name = entity.dxf.get("layer", "0")
+            color = layer_colors.get(layer_name, 256)
+        return color
+
+    # 3. Extrait tous les rectangles (LWPOLYLINE + POLYLINE)
     rects = []
     rects_spatial = []  # Garde les positions complètes pour l'analyse ossature
-    for e in msp:
+
+    def add_rect_from_points(pts, entity):
+        """Extrait un rectangle depuis une liste de points et l'ajoute aux résultats."""
+        if len(pts) < 3:
+            return
+        xs = [float(p[0]) for p in pts]
+        ys = [float(p[1]) for p in pts]
+        raw_w = max(xs) - min(xs)
+        raw_h = max(ys) - min(ys)
+        if raw_w < 10 or raw_h < 10:
+            return  # ignore lignes dégénérées
+        w, h = normalize_rect(raw_w, raw_h)
+        xcenter = (min(xs) + max(xs)) / 2.0
+        color_aci = resolve_color(entity)
+        rects.append({"xcenter": xcenter, "w": w, "h": h, "color": color_aci})
+        rects_spatial.append({
+            "xmin": min(xs), "xmax": max(xs),
+            "ymin": min(ys), "ymax": max(ys),
+            "color": color_aci,
+        })
+
+    def process_entity(e, offset_x=0.0, offset_y=0.0, parent_color=None, parent_layer=None):
+        """Traite une entité DXF (supporte offset pour les INSERT/blocks)."""
         if e.dxftype() == "LWPOLYLINE":
-            pts = list(e.get_points())
-            if len(pts) < 3:
-                continue
-            xs = [float(p[0]) for p in pts]
-            ys = [float(p[1]) for p in pts]
-            raw_w = max(xs) - min(xs)
-            raw_h = max(ys) - min(ys)
-            if raw_w < 10 or raw_h < 10:
-                continue  # ignore lignes dégénérées
-            w, h = normalize_rect(raw_w, raw_h)
-            xcenter = (min(xs) + max(xs)) / 2.0
-            color_aci = e.dxf.get("color", 256)  # 256 = BYLAYER
-            rects.append({"xcenter": xcenter, "w": w, "h": h, "color": color_aci})
-            rects_spatial.append({
-                "xmin": min(xs), "xmax": max(xs),
-                "ymin": min(ys), "ymax": max(ys),
-                "color": color_aci,
-            })
+            pts = [(p[0] + offset_x, p[1] + offset_y) for p in e.get_points()]
+            if len(pts) >= 3:
+                xs = [float(p[0]) for p in pts]
+                ys = [float(p[1]) for p in pts]
+                raw_w = max(xs) - min(xs)
+                raw_h = max(ys) - min(ys)
+                if raw_w >= 10 and raw_h >= 10:
+                    w, h = normalize_rect(raw_w, raw_h)
+                    xcenter = (min(xs) + max(xs)) / 2.0
+                    color_aci = resolve_color(e)
+                    if color_aci == 0 and parent_color:  # BYBLOCK
+                        color_aci = parent_color
+                    if color_aci == 256 and parent_layer:
+                        color_aci = layer_colors.get(parent_layer, 256)
+                    rects.append({"xcenter": xcenter, "w": w, "h": h, "color": color_aci})
+                    rects_spatial.append({
+                        "xmin": min(xs), "xmax": max(xs),
+                        "ymin": min(ys), "ymax": max(ys),
+                        "color": color_aci,
+                    })
+        elif e.dxftype() == "POLYLINE":
+            try:
+                pts = [(v.dxf.location.x + offset_x, v.dxf.location.y + offset_y) for v in e.vertices]
+                if len(pts) >= 3:
+                    xs = [float(p[0]) for p in pts]
+                    ys = [float(p[1]) for p in pts]
+                    raw_w = max(xs) - min(xs)
+                    raw_h = max(ys) - min(ys)
+                    if raw_w >= 10 and raw_h >= 10:
+                        w, h = normalize_rect(raw_w, raw_h)
+                        xcenter = (min(xs) + max(xs)) / 2.0
+                        color_aci = resolve_color(e)
+                        if color_aci == 0 and parent_color:
+                            color_aci = parent_color
+                        if color_aci == 256 and parent_layer:
+                            color_aci = layer_colors.get(parent_layer, 256)
+                        rects.append({"xcenter": xcenter, "w": w, "h": h, "color": color_aci})
+                        rects_spatial.append({
+                            "xmin": min(xs), "xmax": max(xs),
+                            "ymin": min(ys), "ymax": max(ys),
+                            "color": color_aci,
+                        })
+            except Exception:
+                pass
+        elif e.dxftype() == "INSERT":
+            try:
+                block_name = e.dxf.name
+                block = doc.blocks.get(block_name)
+                if block is None:
+                    return
+                ins_x = float(e.dxf.get("insert", (0, 0, 0))[0]) + offset_x
+                ins_y = float(e.dxf.get("insert", (0, 0, 0))[1]) + offset_y
+                ins_color = resolve_color(e)
+                ins_layer = e.dxf.get("layer", "0")
+                for be in block:
+                    process_entity(be, ins_x, ins_y, ins_color, ins_layer)
+            except Exception:
+                pass
+
+    for e in msp:
+        process_entity(e)
 
     # 3. Assigne chaque rectangle à la façade la plus proche (par X)
     def nearest_facade(xcenter):
