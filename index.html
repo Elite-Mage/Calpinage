@@ -2045,6 +2045,271 @@ async function importProjectHome(input) {
   }
 }
 
+// ── Parser DXF côté client (fonctionne sur GitHub Pages sans serveur) ──
+
+const ACI_COLOR_MAP_JS = {
+  30: { name: 'Panneaux Orange (N1)',  color: '#fd9a51', stock_w: 3650, niveau: 'N1' },
+  25: { name: 'Panneaux Marron (RDC)', color: '#8B5E3C', stock_w: 2550, niveau: 'RDC' },
+  1:  { name: 'Panneaux Rouge',        color: '#e63946', stock_w: 3650, niveau: '' },
+  2:  { name: 'Panneaux Jaune',        color: '#f4d03f', stock_w: 3650, niveau: '' },
+  3:  { name: 'Panneaux Vert',         color: '#2ecc71', stock_w: 3650, niveau: '' },
+  4:  { name: 'Panneaux Cyan',         color: '#1abc9c', stock_w: 3650, niveau: '' },
+  5:  { name: 'Panneaux Bleu',         color: '#3498db', stock_w: 3650, niveau: '' },
+  6:  { name: 'Panneaux Magenta',      color: '#9b59b6', stock_w: 3650, niveau: '' },
+  7:  { name: 'Panneaux Blanc/Noir',   color: '#aaaaaa', stock_w: 3650, niveau: '' },
+};
+
+function parseDxfClientSide(text, fileName) {
+  // Parse DXF text format: extract LWPOLYLINE rectangles and TEXT labels
+  const lines = text.split(/\r?\n/);
+  const entities = [];
+  let i = 0;
+
+  // Find ENTITIES section
+  while (i < lines.length && lines[i].trim() !== 'ENTITIES') i++;
+  i++;
+
+  // Parse entities
+  let currentEntity = null;
+  let currentType = '';
+  let groupCode = null;
+
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    if (groupCode === null) {
+      groupCode = parseInt(line, 10);
+      i++;
+      continue;
+    }
+    const value = line;
+
+    if (groupCode === 0) {
+      // New entity or end of section
+      if (currentEntity) entities.push(currentEntity);
+      if (value === 'ENDSEC' || value === 'EOF') break;
+      currentType = value;
+      currentEntity = { type: currentType, props: {}, vertices: [] };
+    } else if (currentEntity) {
+      if (currentType === 'LWPOLYLINE') {
+        if (groupCode === 62) currentEntity.props.color = parseInt(value, 10);
+        if (groupCode === 10) currentEntity._lastX = parseFloat(value);
+        if (groupCode === 20) {
+          currentEntity.vertices.push([currentEntity._lastX, parseFloat(value)]);
+        }
+      } else if (currentType === 'TEXT' || currentType === 'MTEXT') {
+        if (groupCode === 10) currentEntity.props.x = parseFloat(value);
+        if (groupCode === 1) currentEntity.props.text = value;
+      }
+    }
+
+    groupCode = null;
+    i++;
+  }
+  if (currentEntity) entities.push(currentEntity);
+
+  // Extract facade labels
+  const facadeLabels = entities
+    .filter(e => (e.type === 'TEXT' || e.type === 'MTEXT') && e.props.text && e.props.x !== undefined)
+    .map(e => [e.props.x, e.props.text.trim()])
+    .sort((a, b) => a[0] - b[0]);
+
+  if (facadeLabels.length === 0) facadeLabels.push([0, 'Façade']);
+
+  function nearestFacade(xcenter) {
+    let best = facadeLabels[0];
+    for (const lbl of facadeLabels) {
+      if (Math.abs(lbl[0] - xcenter) < Math.abs(best[0] - xcenter)) best = lbl;
+    }
+    return best[1];
+  }
+
+  // Extract rectangles from LWPOLYLINE
+  const rects = [];
+  const rectsSpatial = [];
+  for (const e of entities) {
+    if (e.type !== 'LWPOLYLINE' || e.vertices.length < 3) continue;
+    const xs = e.vertices.map(v => v[0]);
+    const ys = e.vertices.map(v => v[1]);
+    const xmin = Math.min(...xs), xmax = Math.max(...xs);
+    const ymin = Math.min(...ys), ymax = Math.max(...ys);
+    const rawW = xmax - xmin, rawH = ymax - ymin;
+    if (rawW < 10 || rawH < 10) continue;
+    const w = Math.round(Math.max(rawW, rawH));
+    const h = Math.round(Math.min(rawW, rawH));
+    const xcenter = (xmin + xmax) / 2;
+    const colorAci = e.props.color || 256;
+    rects.push({ xcenter, w, h, color: colorAci });
+    rectsSpatial.push({ xmin, xmax, ymin, ymax, color: colorAci });
+  }
+
+  // Classify subtype
+  function classifySubtype(w, h, stockW) {
+    if (Math.abs(h - 1064) <= 8) return 'Bandeau Haut';
+    if (Math.abs(w - stockW) <= 15) return 'Plein';
+    return 'Pièce spéciale';
+  }
+
+  // Group by (color, facade) -> counter
+  const dataMap = {};
+  for (const r of rects) {
+    const facade = nearestFacade(r.xcenter);
+    const key = `${r.color}|${facade}`;
+    if (!dataMap[key]) dataMap[key] = { color: r.color, facade, dims: {} };
+    const dk = `${r.w}x${r.h}`;
+    dataMap[key].dims[dk] = (dataMap[key].dims[dk] || 0) + 1;
+  }
+
+  // Build groups
+  const colorGroups = {};
+  for (const entry of Object.values(dataMap)) {
+    if (!colorGroups[entry.color]) colorGroups[entry.color] = {};
+    colorGroups[entry.color][entry.facade] = entry.dims;
+  }
+
+  const groups = [];
+  let gid = 1;
+  for (const colorAci of Object.keys(colorGroups).map(Number).sort((a, b) => a - b)) {
+    const info = ACI_COLOR_MAP_JS[colorAci] || {
+      name: `Panneaux (ACI ${colorAci})`, color: '#888888', stock_w: 3650, niveau: ''
+    };
+    const stockW = info.stock_w;
+    const subsections = [];
+    let ssid = 1;
+    for (const facadeName of Object.keys(colorGroups[colorAci]).sort()) {
+      const dims = colorGroups[colorAci][facadeName];
+      const subtypePieces = {};
+      for (const [dk, qty] of Object.entries(dims)) {
+        const [w, h] = dk.split('x').map(Number);
+        const st = classifySubtype(w, h, stockW);
+        if (!subtypePieces[st]) subtypePieces[st] = [];
+        subtypePieces[st].push({ w, h, qty });
+      }
+      const panelSubtypes = [];
+      let stid = 1;
+      for (const stName of ['Bandeau Haut', 'Plein', 'Pièce spéciale']) {
+        const pieces = subtypePieces[stName];
+        if (!pieces || !pieces.length) continue;
+        panelSubtypes.push({
+          id: stid,
+          name: stName,
+          pieces: pieces.map((p, idx) => ({ id: idx + 1, w: p.w, h: p.h, qty: p.qty })),
+          nextPieceId: pieces.length + 1,
+        });
+        stid++;
+      }
+      if (panelSubtypes.length) {
+        subsections.push({
+          id: ssid, name: facadeName, panelSubtypes,
+          nextSubtypeId: stid, activeSubtypeId: 1,
+        });
+        ssid++;
+      }
+    }
+    if (subsections.length) {
+      groups.push({
+        id: gid, name: info.name, color: info.color,
+        reference: '', coloris: '', epaisseur: 18, prixM2: '',
+        subsections, nextSubsectionId: ssid, activeSubsectionId: 1,
+      });
+      gid++;
+    }
+  }
+
+  // Ossature calculation (same logic as parse_dxf.py)
+  function calcOssatureFacades(rSpatial, fLabels) {
+    const entraxeMax = 600;
+    const byFacade = {};
+    for (const r of rSpatial) {
+      const fn = nearestFacade((r.xmin + r.xmax) / 2);
+      if (!byFacade[fn]) byFacade[fn] = [];
+      byFacade[fn].push(r);
+    }
+    const result = {};
+    for (const fname of Object.keys(byFacade).sort()) {
+      const panels = byFacade[fname];
+      const columns = {};
+      for (const p of panels) {
+        const ck = Math.round(p.xmin / 10) * 10;
+        if (!columns[ck]) columns[ck] = [];
+        columns[ck].push(p);
+      }
+      // Dedup
+      for (const ck of Object.keys(columns)) {
+        const seen = new Set();
+        let unique = [];
+        for (const p of columns[ck]) {
+          const sig = `${Math.round(p.ymin)}_${Math.round(p.ymax)}`;
+          if (!seen.has(sig)) { seen.add(sig); unique.push(p); }
+        }
+        unique.sort((a, b) => (b.ymax - b.ymin) - (a.ymax - a.ymin));
+        const filtered = [];
+        for (const p of unique) {
+          let englobed = false;
+          for (const big of filtered) {
+            if (p.ymin >= big.ymin - 1 && p.ymax <= big.ymax + 1) { englobed = true; break; }
+          }
+          if (!englobed) filtered.push(p);
+        }
+        columns[ck] = filtered;
+      }
+      const sortedCols = Object.keys(columns).map(Number).sort((a, b) => a - b).map(k => columns[k]);
+      let omegaMM = 0, zedMM = 0;
+      for (let ci = 0; ci < sortedCols.length; ci++) {
+        const col = sortedCols[ci].sort((a, b) => a.ymin - b.ymin);
+        // Entraxe ZEDs
+        for (const p of col) {
+          const pw = Math.round(p.xmax - p.xmin);
+          const ph = Math.round(p.ymax - p.ymin);
+          const nz = Math.max(0, Math.ceil(pw / entraxeMax) - 1);
+          zedMM += nz * ph;
+        }
+        if (ci === 0) { for (const p of col) omegaMM += Math.round(p.ymax - p.ymin); }
+        if (ci < sortedCols.length - 1) {
+          const next = sortedCols[ci + 1].sort((a, b) => a.ymin - b.ymin);
+          for (const p of col) {
+            let ov = 0;
+            for (const np of next) { const s = Math.max(p.ymin, np.ymin), e = Math.min(p.ymax, np.ymax); if (e > s) ov += e - s; }
+            const nov = (p.ymax - p.ymin) - ov;
+            if (ov > 0) omegaMM += Math.round(ov);
+            if (nov > 10) zedMM += Math.round(nov);
+          }
+          for (const np of next) {
+            let ov = 0;
+            for (const p of col) { const s = Math.max(np.ymin, p.ymin), e = Math.min(np.ymax, p.ymax); if (e > s) ov += e - s; }
+            const nov = (np.ymax - np.ymin) - ov;
+            if (nov > 10) zedMM += Math.round(nov);
+          }
+        } else {
+          for (const p of col) omegaMM += Math.round(p.ymax - p.ymin);
+        }
+      }
+      result[fname] = {
+        omega_mm: Math.round(omegaMM), zed_mm: Math.round(zedMM),
+        omega_ml: Math.round(omegaMM / 10) / 100, zed_ml: Math.round(zedMM / 10) / 100,
+      };
+    }
+    return result;
+  }
+
+  const ossature = calcOssatureFacades(rectsSpatial, facadeLabels);
+  const baseName = fileName.replace(/\.(dxf|dwg)$/i, '');
+
+  return {
+    version: '6.0',
+    chantier: { nom: baseName, date: new Date().toISOString().slice(0, 10) },
+    stockPanels: [
+      { id: 1, w: 3650, h: 1860, active: true },
+      { id: 2, w: 2550, h: 1860, active: true },
+      { id: 3, w: 4270, h: 2130, active: true },
+    ],
+    nextStockId: 4,
+    groups,
+    nextGroupId: gid,
+    activeGroupId: 1,
+    ossature_facades: ossature,
+  };
+}
+
 async function importDxfHome(input) {
   const file = input.files[0];
   if (!file) return;
@@ -2054,16 +2319,35 @@ async function importDxfHome(input) {
   label.classList.add('loading');
   label.childNodes[0].textContent = '\u23F3 Analyse\u2026';
   try {
-    const fd = new FormData();
-    fd.append('file', file);
-    const resp = await fetch('/api/parse-dxf', { method: 'POST', body: fd });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: resp.statusText }));
-      throw new Error(err.error || resp.statusText);
+    let data, excelUrl = null;
+
+    // Essayer d'abord le serveur local (pour DWG et Excel)
+    let serverOk = false;
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const resp = await fetch('/api/parse-dxf', { method: 'POST', body: fd });
+      if (resp.ok) {
+        data = await resp.json();
+        excelUrl = data._excelUrl || null;
+        delete data._excelUrl;
+        serverOk = true;
+      }
+    } catch(_) { /* pas de serveur */ }
+
+    // Fallback : parser côté client (DXF seulement)
+    if (!serverOk) {
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (ext === 'dwg') {
+        throw new Error(
+          'Les fichiers DWG nécessitent le serveur local (node server.js).\n' +
+          'Convertissez votre fichier en DXF avec un logiciel CAO, ou utilisez un convertisseur en ligne.'
+        );
+      }
+      const text = await file.text();
+      data = parseDxfClientSide(text, file.name);
     }
-    const data = await resp.json();
-    const excelUrl = data._excelUrl || null;
-    delete data._excelUrl;
+
     const name = data.chantier?.nom || file.name.replace(/\.(dxf|dwg)$/i, '');
 
     // Calcul des stats pour le résumé

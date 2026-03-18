@@ -131,60 +131,26 @@ def dwg_to_dxf(dwg_path):
 
 # ─── Calcul ossature par façade (analyse spatiale) ────────────────────────────
 
-def _merge_y_intervals(panels):
-    """Fusionne les intervalles Y des panneaux d'une colonne.
-    Retourne une liste triée de (ymin, ymax)."""
-    intervals = [(p["ymin"], p["ymax"]) for p in panels]
-    intervals.sort()
-    merged = []
-    for s, e in intervals:
-        if merged and s <= merged[-1][1] + 20:  # fusionne si gap < 20mm
-            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
-        else:
-            merged.append((s, e))
-    return merged
-
-
-def _interval_overlap(a_intervals, b_intervals):
-    """Longueur totale de recouvrement entre deux ensembles d'intervalles Y."""
-    overlap = 0
-    for a_s, a_e in a_intervals:
-        for b_s, b_e in b_intervals:
-            o_start = max(a_s, b_s)
-            o_end = min(a_e, b_e)
-            if o_end > o_start:
-                overlap += o_end - o_start
-    return overlap
-
-
-def _interval_total(intervals):
-    """Longueur totale couverte par les intervalles."""
-    return sum(e - s for s, e in intervals)
-
-
-def _interval_diff(a_intervals, b_intervals):
-    """Longueur de A non couverte par B."""
-    return _interval_total(a_intervals) - _interval_overlap(a_intervals, b_intervals)
-
-
-def calc_ossature_facades(rects_spatial, facade_labels):
+def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600):
     """
     Analyse la disposition spatiale des panneaux pour calculer l'ossature
     (Oméga et Zed) par façade.
 
     Logique :
     - Les panneaux sont regroupés en colonnes verticales (même position X).
-    - Entre deux colonnes adjacentes :
-      - Là où les deux ont des panneaux (joint 8mm) → OMÉGA (jonction)
-      - Là où une seule colonne a un panneau (bord d'ouverture) → ZED
-    - Bords extrêmes de façade (gauche/droite) → OMÉGA
+    - OMÉGA (jonction entre 2 panneaux côte à côte) :
+      - Bords extrêmes de façade (gauche/droite)
+      - Entre deux colonnes adjacentes là où les deux ont des panneaux
+    - ZED (bords d'ouverture + entraxe) :
+      - Bord d'ouverture : là où une seule colonne a un panneau (fenêtre/porte)
+      - Entraxe : support intermédiaire quand la largeur du panneau > entraxe_max
 
-    Retourne un dict {facade_name: {"omega_mm": int, "zed_mm": int, "omega_ml": float, "zed_ml": float}}
+    Retourne un dict {facade_name: {"omega_mm", "zed_mm", "omega_ml", "zed_ml",
+                                     "omega_details": {h: qty}, "zed_details": {h: qty}}}
     """
     def nearest_facade(xcenter):
         return min(facade_labels, key=lambda lbl: abs(lbl[0] - xcenter))[1]
 
-    # Regrouper par façade
     by_facade = defaultdict(list)
     for r in rects_spatial:
         fname = nearest_facade((r["xmin"] + r["xmax"]) / 2)
@@ -200,40 +166,107 @@ def calc_ossature_facades(rects_spatial, facade_labels):
             col_key = round(p["xmin"] / 10) * 10
             columns[col_key].append(p)
 
+        # Dédupliquer les panneaux par colonne (couches DXF superposées)
+        # et retirer les sous-panneaux englobés par un panneau plus grand
+        for col_key in columns:
+            seen = set()
+            unique = []
+            for p in columns[col_key]:
+                sig = (round(p["ymin"]), round(p["ymax"]))
+                if sig not in seen:
+                    seen.add(sig)
+                    unique.append(p)
+            # Retirer les panneaux strictement englobés par un autre
+            filtered = []
+            unique.sort(key=lambda p: p["ymax"] - p["ymin"], reverse=True)
+            for p in unique:
+                englobed = False
+                for bigger in filtered:
+                    if p["ymin"] >= bigger["ymin"] - 1 and p["ymax"] <= bigger["ymax"] + 1:
+                        englobed = True
+                        break
+                if not englobed:
+                    filtered.append(p)
+            columns[col_key] = filtered
+
         sorted_cols = sorted(columns.items())
         total_omega_mm = 0
         total_zed_mm = 0
+        omega_details = defaultdict(int)  # hauteur → quantité
+        zed_details = defaultdict(int)
 
         for i, (col_x, col_panels) in enumerate(sorted_cols):
-            col_intervals = _merge_y_intervals(col_panels)
-            col_height = _interval_total(col_intervals)
+            col_panels_sorted = sorted(col_panels, key=lambda p: p["ymin"])
 
-            # Bord gauche de la façade → oméga
+            # ── ZED d'entraxe : support intermédiaire par panneau ──
+            for p in col_panels_sorted:
+                pw = round(p["xmax"] - p["xmin"])
+                ph = round(p["ymax"] - p["ymin"])
+                nb_zed = max(0, math.ceil(pw / entraxe_max) - 1)
+                if nb_zed > 0:
+                    total_zed_mm += nb_zed * ph
+                    zed_details[ph] += nb_zed
+
+            # ── OMÉGA / ZED aux jonctions entre colonnes ──
             if i == 0:
-                total_omega_mm += col_height
+                # Bord gauche de la façade → oméga par panneau
+                for p in col_panels_sorted:
+                    ph = round(p["ymax"] - p["ymin"])
+                    total_omega_mm += ph
+                    omega_details[ph] += 1
 
             if i < len(sorted_cols) - 1:
                 _, next_col_panels = sorted_cols[i + 1]
-                next_intervals = _merge_y_intervals(next_col_panels)
+                next_sorted = sorted(next_col_panels, key=lambda p: p["ymin"])
 
-                # Là où les deux colonnes ont des panneaux → oméga
-                overlap = _interval_overlap(col_intervals, next_intervals)
-                # Là où seule la colonne courante a un panneau → zed
-                only_current = _interval_diff(col_intervals, next_intervals)
-                # Là où seule la colonne suivante a un panneau → zed
-                only_next = _interval_diff(next_intervals, col_intervals)
+                # Pour chaque panneau de la colonne courante :
+                # vérifier le recouvrement avec les panneaux de la colonne suivante
+                for p in col_panels_sorted:
+                    p_ymin, p_ymax = p["ymin"], p["ymax"]
+                    overlap = 0
+                    for np in next_sorted:
+                        os = max(p_ymin, np["ymin"])
+                        oe = min(p_ymax, np["ymax"])
+                        if oe > os:
+                            overlap += oe - os
+                    non_overlap = (p_ymax - p_ymin) - overlap
+                    if overlap > 0:
+                        h = round(overlap)
+                        total_omega_mm += h
+                        omega_details[h] += 1
+                    if non_overlap > 10:
+                        h = round(non_overlap)
+                        total_zed_mm += h
+                        zed_details[h] += 1
 
-                total_omega_mm += overlap
-                total_zed_mm += only_current + only_next
+                # Panneaux de la colonne suivante non couverts par la courante
+                for np in next_sorted:
+                    np_ymin, np_ymax = np["ymin"], np["ymax"]
+                    overlap = 0
+                    for p in col_panels_sorted:
+                        os = max(np_ymin, p["ymin"])
+                        oe = min(np_ymax, p["ymax"])
+                        if oe > os:
+                            overlap += oe - os
+                    non_overlap = (np_ymax - np_ymin) - overlap
+                    if non_overlap > 10:
+                        h = round(non_overlap)
+                        total_zed_mm += h
+                        zed_details[h] += 1
             else:
-                # Bord droit de la façade → oméga
-                total_omega_mm += col_height
+                # Bord droit de la façade → oméga par panneau
+                for p in col_panels_sorted:
+                    ph = round(p["ymax"] - p["ymin"])
+                    total_omega_mm += ph
+                    omega_details[ph] += 1
 
         result[fname] = {
             "omega_mm": round(total_omega_mm),
             "zed_mm": round(total_zed_mm),
             "omega_ml": round(total_omega_mm / 1000, 2),
             "zed_ml": round(total_zed_mm / 1000, 2),
+            "omega_details": dict(omega_details),
+            "zed_details": dict(zed_details),
         }
 
     return result
@@ -567,44 +600,37 @@ def generate_excel(data, out_path):
             if col >= 2:
                 ws_oss.cell(r, col).number_format = '0.00'
 
-        # Section détaillée : Oméga par façade puis Zed par façade
-        ws_oss.append([])
-        ws_oss.append(["DÉTAIL OMÉGA PAR FAÇADE"])
-        r = ws_oss.max_row
-        ws_oss.cell(r, 1).font = Font(bold=True, size=11, color="FF2563EB")
+        # Section détaillée par hauteur de profil
+        for profile_type, label, color_hex, fill_hex in [
+            ("omega_details", "DÉTAIL OMÉGA PAR HAUTEUR", "FF2563EB", "FFD4E6FF"),
+            ("zed_details", "DÉTAIL ZED PAR HAUTEUR", "FFCA8A04", "FFFFF3CD"),
+        ]:
+            ws_oss.append([])
+            ws_oss.append([label])
+            r = ws_oss.max_row
+            ws_oss.cell(r, 1).font = Font(bold=True, size=11, color=color_hex)
 
-        ws_oss.append(["Façade", "Oméga (mm)", "Oméga (ml)"])
-        r = ws_oss.max_row
-        for col in range(1, 4):
-            ws_oss.cell(r, col).font = Font(bold=True)
-            ws_oss.cell(r, col).fill = PatternFill("solid", fgColor="FFD4E6FF")
-            ws_oss.cell(r, col).border = _border()
-
-        for facade_name in facades_order:
-            oss = ossature.get(facade_name, {})
-            ws_oss.append([facade_name, oss.get("omega_mm", 0), oss.get("omega_ml", 0)])
+            ws_oss.append(["Hauteur (mm)", "Quantité", "Total (ml)"])
             r = ws_oss.max_row
             for col in range(1, 4):
+                ws_oss.cell(r, col).font = Font(bold=True)
+                ws_oss.cell(r, col).fill = PatternFill("solid", fgColor=fill_hex)
                 ws_oss.cell(r, col).border = _border()
 
-        ws_oss.append([])
-        ws_oss.append(["DÉTAIL ZED PAR FAÇADE"])
-        r = ws_oss.max_row
-        ws_oss.cell(r, 1).font = Font(bold=True, size=11, color="FFCA8A04")
+            # Agréger toutes les façades
+            all_details = defaultdict(int)
+            for facade_name in facades_order:
+                oss = ossature.get(facade_name, {})
+                for h_str, qty in oss.get(profile_type, {}).items():
+                    all_details[int(h_str)] += qty
 
-        ws_oss.append(["Façade", "Zed (mm)", "Zed (ml)"])
-        r = ws_oss.max_row
-        for col in range(1, 4):
-            ws_oss.cell(r, col).font = Font(bold=True)
-            ws_oss.cell(r, col).fill = PatternFill("solid", fgColor="FFFFF3CD")
-            ws_oss.cell(r, col).border = _border()
-
-        for facade_name in facades_order:
-            oss = ossature.get(facade_name, {})
-            ws_oss.append([facade_name, oss.get("zed_mm", 0), oss.get("zed_ml", 0)])
-            r = ws_oss.max_row
-            for col in range(1, 4):
-                ws_oss.cell(r, col).border = _border()
+            for h in sorted(all_details.keys(), reverse=True):
+                qty = all_details[h]
+                ml = round(h * qty / 1000, 2)
+                ws_oss.append([h, qty, ml])
+                r = ws_oss.max_row
+                for col in range(1, 4):
+                    ws_oss.cell(r, col).border = _border()
 
         ws_oss.column_dimensions["A"].width = 22
         ws_oss.column_dimensions["B"].width = 16
