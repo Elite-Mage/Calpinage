@@ -2,9 +2,12 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const { execFile } = require('child_process');
 const { WebSocketServer } = require('ws');
 const Database = require('better-sqlite3');
 const { v4: uuidv4 } = require('uuid');
+const multer = require('multer');
 
 const PORT = 3000;
 const DB_PATH = path.join(__dirname, 'data.db');
@@ -69,6 +72,39 @@ app.put('/api/projects/:id', (req, res) => {
 app.delete('/api/projects/:id', (req, res) => {
   db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
+});
+
+// ─── IMPORT DXF / DWG ────────────────────────────────────────────────────────
+const upload = multer({
+  dest: os.tmpdir(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 Mo max
+  fileFilter: (_req, file, cb) => {
+    const ok = /\.(dxf|dwg)$/i.test(file.originalname);
+    cb(ok ? null : new Error('Seuls les fichiers .dxf et .dwg sont acceptés'), ok);
+  },
+});
+
+app.post('/api/parse-dxf', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
+
+  const tmpIn  = req.file.path;
+  const script = path.join(__dirname, 'parse_dxf.py');
+
+  execFile('python3', [script, tmpIn], { timeout: 30000 }, (err, stdout, stderr) => {
+    fs.unlink(tmpIn, () => {});
+    if (err) {
+      console.error('[parse-dxf]', stderr);
+      return res.status(500).json({ error: stderr || err.message });
+    }
+    try {
+      const data = JSON.parse(stdout);
+      // Patch chantier.nom avec le nom original du fichier
+      data.chantier.nom = path.basename(req.file.originalname, path.extname(req.file.originalname));
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ error: 'Réponse invalide du parser : ' + e.message });
+    }
+  });
 });
 
 // ─── HTTP + WS SERVER ────────────────────────────────────────────────────────
