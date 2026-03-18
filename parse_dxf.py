@@ -318,71 +318,46 @@ def parse_dxf_file(filepath):
     rects = []
     rects_spatial = []  # Garde les positions complètes pour l'analyse ossature
 
-    def add_rect_from_points(pts, entity):
-        """Extrait un rectangle depuis une liste de points et l'ajoute aux résultats."""
-        if len(pts) < 3:
-            return
-        xs = [float(p[0]) for p in pts]
-        ys = [float(p[1]) for p in pts]
-        raw_w = max(xs) - min(xs)
-        raw_h = max(ys) - min(ys)
+    def add_rect(xmin, xmax, ymin, ymax, color_aci):
+        """Ajoute un rectangle avec dédoublonnage spatial (tolérance 5mm)."""
+        raw_w = xmax - xmin
+        raw_h = ymax - ymin
         if raw_w < 10 or raw_h < 10:
-            return  # ignore lignes dégénérées
+            return
+        # Dédoublonnage spatial
+        TOL = 5
+        for ex in rects_spatial:
+            if (abs(ex["xmin"] - xmin) < TOL and abs(ex["xmax"] - xmax) < TOL and
+                    abs(ex["ymin"] - ymin) < TOL and abs(ex["ymax"] - ymax) < TOL):
+                return  # doublon
         w, h = normalize_rect(raw_w, raw_h)
-        xcenter = (min(xs) + max(xs)) / 2.0
-        color_aci = resolve_color(entity)
+        xcenter = (xmin + xmax) / 2.0
         rects.append({"xcenter": xcenter, "w": w, "h": h, "color": color_aci})
-        rects_spatial.append({
-            "xmin": min(xs), "xmax": max(xs),
-            "ymin": min(ys), "ymax": max(ys),
-            "color": color_aci,
-        })
+        rects_spatial.append({"xmin": xmin, "xmax": xmax, "ymin": ymin, "ymax": ymax, "color": color_aci})
 
     def process_entity(e, offset_x=0.0, offset_y=0.0, parent_color=None, parent_layer=None):
         """Traite une entité DXF (supporte offset pour les INSERT/blocks)."""
+        def _resolve(e):
+            c = resolve_color(e)
+            if c == 0 and parent_color:  # BYBLOCK
+                c = parent_color
+            if c == 256 and parent_layer:
+                c = layer_colors.get(parent_layer, 256)
+            return c
+
         if e.dxftype() == "LWPOLYLINE":
             pts = [(p[0] + offset_x, p[1] + offset_y) for p in e.get_points()]
             if len(pts) >= 3:
                 xs = [float(p[0]) for p in pts]
                 ys = [float(p[1]) for p in pts]
-                raw_w = max(xs) - min(xs)
-                raw_h = max(ys) - min(ys)
-                if raw_w >= 10 and raw_h >= 10:
-                    w, h = normalize_rect(raw_w, raw_h)
-                    xcenter = (min(xs) + max(xs)) / 2.0
-                    color_aci = resolve_color(e)
-                    if color_aci == 0 and parent_color:  # BYBLOCK
-                        color_aci = parent_color
-                    if color_aci == 256 and parent_layer:
-                        color_aci = layer_colors.get(parent_layer, 256)
-                    rects.append({"xcenter": xcenter, "w": w, "h": h, "color": color_aci})
-                    rects_spatial.append({
-                        "xmin": min(xs), "xmax": max(xs),
-                        "ymin": min(ys), "ymax": max(ys),
-                        "color": color_aci,
-                    })
+                add_rect(min(xs), max(xs), min(ys), max(ys), _resolve(e))
         elif e.dxftype() == "POLYLINE":
             try:
                 pts = [(v.dxf.location.x + offset_x, v.dxf.location.y + offset_y) for v in e.vertices]
                 if len(pts) >= 3:
                     xs = [float(p[0]) for p in pts]
                     ys = [float(p[1]) for p in pts]
-                    raw_w = max(xs) - min(xs)
-                    raw_h = max(ys) - min(ys)
-                    if raw_w >= 10 and raw_h >= 10:
-                        w, h = normalize_rect(raw_w, raw_h)
-                        xcenter = (min(xs) + max(xs)) / 2.0
-                        color_aci = resolve_color(e)
-                        if color_aci == 0 and parent_color:
-                            color_aci = parent_color
-                        if color_aci == 256 and parent_layer:
-                            color_aci = layer_colors.get(parent_layer, 256)
-                        rects.append({"xcenter": xcenter, "w": w, "h": h, "color": color_aci})
-                        rects_spatial.append({
-                            "xmin": min(xs), "xmax": max(xs),
-                            "ymin": min(ys), "ymax": max(ys),
-                            "color": color_aci,
-                        })
+                    add_rect(min(xs), max(xs), min(ys), max(ys), _resolve(e))
             except Exception:
                 pass
         elif e.dxftype() == "INSERT":
