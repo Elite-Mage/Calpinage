@@ -73,30 +73,61 @@ def classify_subtype(w, h, stock_w):
         return "Plein"
     return "Pièce spéciale"
 
-def dwg_to_dxf(dwg_path):
-    """
-    Essaie de convertir DWG→DXF via dwg2dxf (LibreDWG).
-    Retourne le chemin du DXF temporaire ou lève une exception.
-    """
-    dwg2dxf = None
+def _dwg_to_dxf_libredwg(dwg_path):
+    """Conversion DWG→DXF via dwg2dxf (LibreDWG) si disponible."""
     for cmd in ["dwg2dxf", "/usr/bin/dwg2dxf", "/usr/local/bin/dwg2dxf"]:
         result = subprocess.run(["which", cmd.split("/")[-1]], capture_output=True, text=True)
         if result.returncode == 0:
-            dwg2dxf = cmd
-            break
+            tmpdir = tempfile.mkdtemp()
+            base = os.path.splitext(os.path.basename(dwg_path))[0]
+            out_dxf = os.path.join(tmpdir, base + ".dxf")
+            subprocess.run([cmd, dwg_path, "-o", out_dxf], check=True,
+                           capture_output=True, text=True)
+            return out_dxf
+    return None
 
-    if dwg2dxf is None:
-        raise RuntimeError(
-            "dwg2dxf introuvable. Installez LibreDWG :\n"
-            "  Debian/Ubuntu : compilez depuis https://github.com/LibreDWG/libredwg\n"
-            "  ou convertissez manuellement en DXF avec LibreCAD / AutoCAD / FreeCAD."
-        )
 
-    tmpdir = tempfile.mkdtemp()
-    base = os.path.splitext(os.path.basename(dwg_path))[0]
-    out_dxf = os.path.join(tmpdir, base + ".dxf")
-    subprocess.run([dwg2dxf, dwg_path, "-o", out_dxf], check=True)
-    return out_dxf
+def _dwg_to_dxf_aspose(dwg_path):
+    """Conversion DWG→DXF via aspose-cad (fallback)."""
+    try:
+        import aspose.cad as cad
+        from aspose.cad.imageoptions import DxfOptions
+        image = cad.Image.load(dwg_path)
+        opts = DxfOptions()
+        tmpdir = tempfile.mkdtemp()
+        base = os.path.splitext(os.path.basename(dwg_path))[0]
+        out_dxf = os.path.join(tmpdir, base + ".dxf")
+        image.save(out_dxf, opts)
+        return out_dxf
+    except ImportError:
+        return None
+    except Exception as e:
+        print(f"aspose-cad conversion failed: {e}", file=sys.stderr)
+        return None
+
+
+def dwg_to_dxf(dwg_path):
+    """
+    Convertit DWG→DXF en essayant d'abord dwg2dxf (LibreDWG),
+    puis aspose-cad en fallback.
+    Retourne le chemin du DXF temporaire ou lève une exception.
+    """
+    # Essai 1 : LibreDWG (dwg2dxf)
+    result = _dwg_to_dxf_libredwg(dwg_path)
+    if result:
+        return result
+
+    # Essai 2 : aspose-cad
+    result = _dwg_to_dxf_aspose(dwg_path)
+    if result:
+        return result
+
+    raise RuntimeError(
+        "Aucun convertisseur DWG→DXF disponible.\n"
+        "Installez l'un des deux :\n"
+        "  pip install aspose-cad\n"
+        "  ou compilez LibreDWG depuis https://github.com/LibreDWG/libredwg"
+    )
 
 def parse_dxf_file(filepath):
     """
