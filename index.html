@@ -2126,10 +2126,34 @@ function parseDxfClientSide(text, fileName) {
 
     if (groupCode === 0) {
       // New entity or end of section
-      if (currentEntity) entities.push(currentEntity);
+      if (currentEntity) {
+        // Pour POLYLINE : on pousse l'entité seulement à SEQEND
+        if (currentType === 'VERTEX' && currentEntity._polyline) {
+          // Ajouter le vertex au polyline parent
+          if (currentEntity._lastX !== undefined && currentEntity._lastY !== undefined) {
+            currentEntity._polyline.vertices.push([currentEntity._lastX, currentEntity._lastY]);
+          }
+        } else if (currentType !== 'VERTEX') {
+          entities.push(currentEntity);
+        }
+      }
       if (value === 'ENDSEC' || value === 'EOF') break;
-      currentType = value;
-      currentEntity = { type: currentType, props: {}, vertices: [] };
+
+      if (value === 'VERTEX') {
+        // VERTEX appartient au POLYLINE courant
+        const parentPoly = entities.length > 0 && entities[entities.length - 1].type === 'POLYLINE'
+          ? entities[entities.length - 1]
+          : (currentEntity && currentEntity.type === 'POLYLINE' ? currentEntity : null);
+        currentType = 'VERTEX';
+        currentEntity = { type: 'VERTEX', props: {}, vertices: [], _polyline: parentPoly, _lastX: undefined, _lastY: undefined };
+      } else if (value === 'SEQEND') {
+        // Fin du POLYLINE
+        currentType = value;
+        currentEntity = null;
+      } else {
+        currentType = value;
+        currentEntity = { type: currentType, props: {}, vertices: [] };
+      }
     } else if (currentEntity) {
       if (currentType === 'LWPOLYLINE') {
         if (groupCode === 62) currentEntity.props.color = parseInt(value, 10);
@@ -2138,6 +2162,19 @@ function parseDxfClientSide(text, fileName) {
         if (groupCode === 20) {
           currentEntity.vertices.push([currentEntity._lastX, parseFloat(value)]);
         }
+      } else if (currentType === 'POLYLINE') {
+        if (groupCode === 62) currentEntity.props.color = parseInt(value, 10);
+        if (groupCode === 8) currentEntity.props.layer = value;
+      } else if (currentType === 'VERTEX') {
+        if (groupCode === 10) currentEntity._lastX = parseFloat(value);
+        if (groupCode === 20) currentEntity._lastY = parseFloat(value);
+      } else if (currentType === 'LINE') {
+        if (groupCode === 62) currentEntity.props.color = parseInt(value, 10);
+        if (groupCode === 8) currentEntity.props.layer = value;
+        if (groupCode === 10) currentEntity.props.x1 = parseFloat(value);
+        if (groupCode === 20) currentEntity.props.y1 = parseFloat(value);
+        if (groupCode === 11) currentEntity.props.x2 = parseFloat(value);
+        if (groupCode === 21) currentEntity.props.y2 = parseFloat(value);
       } else if (currentType === 'TEXT' || currentType === 'MTEXT') {
         if (groupCode === 10) currentEntity.props.x = parseFloat(value);
         if (groupCode === 1) currentEntity.props.text = value;
@@ -2165,27 +2202,90 @@ function parseDxfClientSide(text, fileName) {
     return best[1];
   }
 
-  // Extract rectangles from LWPOLYLINE
+  // ── Assembler les LINE en rectangles ──
+  // Grouper les LINE par calque+couleur, puis chercher les rectangles fermés
+  const linesByKey = {};
+  for (const e of entities) {
+    if (e.type !== 'LINE') continue;
+    const p = e.props;
+    if (p.x1 === undefined || p.y1 === undefined || p.x2 === undefined || p.y2 === undefined) continue;
+    let colorAci = p.color;
+    if (!colorAci || colorAci === 256) colorAci = (p.layer && layerColors[p.layer]) || 256;
+    const key = `${colorAci}|${p.layer || ''}`;
+    if (!linesByKey[key]) linesByKey[key] = [];
+    linesByKey[key].push({ x1: p.x1, y1: p.y1, x2: p.x2, y2: p.y2, color: colorAci, layer: p.layer });
+  }
+  // Pour chaque groupe de lignes, chercher des rectangles (4 lignes formant un rectangle)
+  const lineRects = [];
+  for (const [key, segs] of Object.entries(linesByKey)) {
+    // Séparer H et V
+    const hSegs = [], vSegs = [];
+    for (const s of segs) {
+      if (Math.abs(s.y1 - s.y2) < 1) hSegs.push(s);
+      else if (Math.abs(s.x1 - s.x2) < 1) vSegs.push(s);
+    }
+    // Pour chaque paire de H-segs au même X-range, trouver les V-segs correspondants
+    for (let hi = 0; hi < hSegs.length; hi++) {
+      const h1 = hSegs[hi];
+      const h1xmin = Math.min(h1.x1, h1.x2), h1xmax = Math.max(h1.x1, h1.x2);
+      for (let hj = hi + 1; hj < hSegs.length; hj++) {
+        const h2 = hSegs[hj];
+        const h2xmin = Math.min(h2.x1, h2.x2), h2xmax = Math.max(h2.x1, h2.x2);
+        if (Math.abs(h1xmin - h2xmin) > 2 || Math.abs(h1xmax - h2xmax) > 2) continue;
+        const ymin = Math.min(h1.y1, h2.y1), ymax = Math.max(h1.y1, h2.y1);
+        if (ymax - ymin < 10) continue;
+        // Chercher les 2 V-segs aux bords
+        let hasLeft = false, hasRight = false;
+        for (const v of vSegs) {
+          const vx = (v.x1 + v.x2) / 2;
+          const vymin = Math.min(v.y1, v.y2), vymax = Math.max(v.y1, v.y2);
+          if (Math.abs(vymin - ymin) < 2 && Math.abs(vymax - ymax) < 2) {
+            if (Math.abs(vx - h1xmin) < 2) hasLeft = true;
+            if (Math.abs(vx - h1xmax) < 2) hasRight = true;
+          }
+        }
+        if (hasLeft && hasRight) {
+          lineRects.push({
+            xmin: h1xmin, xmax: h1xmax, ymin, ymax,
+            color: h1.color, layer: h1.layer
+          });
+        }
+      }
+    }
+  }
+
+  // Extract rectangles from LWPOLYLINE, POLYLINE, and LINE rectangles
   const rects = [];
   const rectsSpatial = [];
-  for (const e of entities) {
-    if (e.type !== 'LWPOLYLINE' || e.vertices.length < 3) continue;
-    const xs = e.vertices.map(v => v[0]);
-    const ys = e.vertices.map(v => v[1]);
-    const xmin = Math.min(...xs), xmax = Math.max(...xs);
-    const ymin = Math.min(...ys), ymax = Math.max(...ys);
+
+  function addRect(xmin, xmax, ymin, ymax, colorAci, layerName) {
     const rawW = xmax - xmin, rawH = ymax - ymin;
-    if (rawW < 10 || rawH < 10) continue;
+    if (rawW < 10 || rawH < 10) return;
     const w = Math.round(Math.max(rawW, rawH));
     const h = Math.round(Math.min(rawW, rawH));
     const xcenter = (xmin + xmax) / 2;
-    // Résolution couleur : entité explicite > couleur du calque (BYLAYER)
-    let colorAci = e.props.color;
-    if (!colorAci || colorAci === 256) {
-      colorAci = (e.props.layer && layerColors[e.props.layer]) || 256;
+    let color = colorAci;
+    if (!color || color === 256) {
+      color = (layerName && layerColors[layerName]) || 256;
     }
-    rects.push({ xcenter, w, h, color: colorAci });
-    rectsSpatial.push({ xmin, xmax, ymin, ymax, color: colorAci });
+    rects.push({ xcenter, w, h, color });
+    rectsSpatial.push({ xmin, xmax, ymin, ymax, color });
+  }
+
+  for (const e of entities) {
+    if (e.type === 'LWPOLYLINE' && e.vertices.length >= 3) {
+      const xs = e.vertices.map(v => v[0]);
+      const ys = e.vertices.map(v => v[1]);
+      addRect(Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys), e.props.color, e.props.layer);
+    } else if (e.type === 'POLYLINE' && e.vertices.length >= 3) {
+      const xs = e.vertices.map(v => v[0]);
+      const ys = e.vertices.map(v => v[1]);
+      addRect(Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys), e.props.color, e.props.layer);
+    }
+  }
+  // Ajouter les rectangles formés par des LINE
+  for (const lr of lineRects) {
+    addRect(lr.xmin, lr.xmax, lr.ymin, lr.ymax, lr.color, lr.layer);
   }
 
   // Classify subtype
