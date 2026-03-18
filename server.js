@@ -91,13 +91,17 @@ if (!fs.existsSync(EXCEL_TMP)) fs.mkdirSync(EXCEL_TMP, { recursive: true });
 app.post('/api/parse-dxf', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
 
-  const tmpIn  = req.file.path;
+  // Multer supprime l'extension → on renomme le fichier temporaire avec l'extension originale
+  const ext = path.extname(req.file.originalname).toLowerCase(); // .dxf ou .dwg
+  const tmpIn = req.file.path + ext;
+  fs.renameSync(req.file.path, tmpIn);
+
   const script = path.join(__dirname, 'parse_dxf.py');
-  const baseName = path.basename(req.file.originalname, path.extname(req.file.originalname));
+  const baseName = path.basename(req.file.originalname, ext);
   const excelId = uuidv4();
   const excelPath = path.join(EXCEL_TMP, excelId + '.xlsx');
 
-  execFile('python3', [script, tmpIn, '--excel', excelPath], { timeout: 30000 }, (err, stdout, stderr) => {
+  execFile('python3', [script, tmpIn, '--excel', excelPath], { timeout: 60000 }, (err, stdout, stderr) => {
     fs.unlink(tmpIn, () => {});
     if (err) {
       console.error('[parse-dxf]', stderr);

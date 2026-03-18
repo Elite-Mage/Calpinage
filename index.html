@@ -2402,7 +2402,7 @@ function renderOssature() {
   const prixZed = parseFloat(ossatureConfig.prixZed) || 0;
   const kerf = ossatureConfig.kerf || 0;
 
-  if (groups.every(g => g.subsections.every(s => s.pieces.length === 0))) {
+  if (groups.every(g => g.subsections.every(s => s.panelSubtypes.every(st => st.pieces.length === 0)))) {
     el.innerHTML = '<div class="card placeholder"><div class="icon">&#9670;</div><div class="text">Aucune pièce configurée.<br>Ajoute des pièces dans l\'onglet <span style="color:var(--accent);font-weight:700;">Panneaux</span>.</div></div>';
     document.getElementById('ossatureSummaryCard').style.display = 'none';
     return;
@@ -2624,7 +2624,7 @@ function renderFixation() {
   const intervalleEl = document.getElementById('fixationIntervalleDisplay');
   if (intervalleEl) intervalleEl.textContent = entaxeMax;
 
-  if (groups.every(g => g.subsections.every(s => s.pieces.length === 0))) {
+  if (groups.every(g => g.subsections.every(s => s.panelSubtypes.every(st => st.pieces.length === 0)))) {
     el.innerHTML = '<div class="card placeholder"><div class="icon">&#9670;</div><div class="text">Aucune pièce configurée.<br>Ajoute des pièces dans l\'onglet <span style="color:var(--accent);font-weight:700;">Panneaux</span>.</div></div>';
     document.getElementById('fixationSummaryCard').style.display = 'none';
     return;
@@ -2737,7 +2737,7 @@ function renderDevis() {
 
   // Check if we have data
   const hasPanels = allResults && groups.some(g => allResults[g.id] && allResults[g.id].panels && allResults[g.id].panels.length > 0);
-  const hasPieces = groups.some(g => g.subsections.some(s => s.pieces.length > 0));
+  const hasPieces = groups.some(g => g.subsections.some(s => s.panelSubtypes.some(st => st.pieces.length > 0)));
 
   if (!hasPieces) {
     el.innerHTML = '<div class="card placeholder"><div class="icon">&#9670;</div><div class="text">Aucune donnée.<br>Configure d\'abord tes panneaux.</div></div>';
