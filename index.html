@@ -2529,31 +2529,78 @@ function parseDxfClientSide(text, fileName) {
       }
       const sortedCols = Object.keys(columns).map(Number).sort((a, b) => a - b).map(k => columns[k]);
       let omegaMM = 0, zedMM = 0;
+      const omegaDetails = {}, zedDetails = {};
       for (let ci = 0; ci < sortedCols.length; ci++) {
         const col = sortedCols[ci].sort((a, b) => a.ymin - b.ymin);
-        // Entraxe ZEDs (supports intermédiaires basés sur la largeur du panneau)
+        // ZED d'entraxe : support intermédiaire par panneau
         for (const p of col) {
           const pw = Math.round(p.xmax - p.xmin);
           const ph = Math.round(p.ymax - p.ymin);
           const nz = Math.max(0, Math.ceil(pw / entraxeMax) - 1);
-          zedMM += nz * ph;
+          if (nz > 0) {
+            zedMM += nz * ph;
+            zedDetails[ph] = (zedDetails[ph] || 0) + nz;
+          }
         }
-        // OMEGA à chaque jonction de colonne (bord gauche de la 1ère colonne)
-        if (ci === 0) { for (const p of col) omegaMM += Math.round(p.ymax - p.ymin); }
-        // OMEGA entre colonnes adjacentes : montant oméga sur toute la hauteur
-        // (pas seulement la zone de chevauchement — le montant court sur toute la hauteur)
-        if (ci < sortedCols.length - 1) {
+        // Bord gauche : oméga par panneau
+        if (ci === 0) {
           for (const p of col) {
-            omegaMM += Math.round(p.ymax - p.ymin);
+            const ph = Math.round(p.ymax - p.ymin);
+            omegaMM += ph;
+            omegaDetails[ph] = (omegaDetails[ph] || 0) + 1;
+          }
+        }
+        // Jonction entre colonnes adjacentes : calcul overlap/non-overlap
+        if (ci < sortedCols.length - 1) {
+          const nextCol = sortedCols[ci + 1].sort((a, b) => a.ymin - b.ymin);
+          // Pour chaque panneau colonne courante → overlap avec colonne suivante
+          for (const p of col) {
+            let overlap = 0;
+            for (const np of nextCol) {
+              const os = Math.max(p.ymin, np.ymin);
+              const oe = Math.min(p.ymax, np.ymax);
+              if (oe > os) overlap += oe - os;
+            }
+            const nonOverlap = (p.ymax - p.ymin) - overlap;
+            if (overlap > 0) {
+              const h = Math.round(overlap);
+              omegaMM += h;
+              omegaDetails[h] = (omegaDetails[h] || 0) + 1;
+            }
+            if (nonOverlap > 10) {
+              const h = Math.round(nonOverlap);
+              zedMM += h;
+              zedDetails[h] = (zedDetails[h] || 0) + 1;
+            }
+          }
+          // Panneaux colonne suivante non couverts par la courante
+          for (const np of nextCol) {
+            let overlap = 0;
+            for (const p of col) {
+              const os = Math.max(np.ymin, p.ymin);
+              const oe = Math.min(np.ymax, p.ymax);
+              if (oe > os) overlap += oe - os;
+            }
+            const nonOverlap = (np.ymax - np.ymin) - overlap;
+            if (nonOverlap > 10) {
+              const h = Math.round(nonOverlap);
+              zedMM += h;
+              zedDetails[h] = (zedDetails[h] || 0) + 1;
+            }
           }
         } else {
-          // Bord droit de la dernière colonne
-          for (const p of col) omegaMM += Math.round(p.ymax - p.ymin);
+          // Bord droit de la dernière colonne → oméga par panneau
+          for (const p of col) {
+            const ph = Math.round(p.ymax - p.ymin);
+            omegaMM += ph;
+            omegaDetails[ph] = (omegaDetails[ph] || 0) + 1;
+          }
         }
       }
       result[fname] = {
         omega_mm: Math.round(omegaMM), zed_mm: Math.round(zedMM),
         omega_ml: Math.round(omegaMM / 10) / 100, zed_ml: Math.round(zedMM / 10) / 100,
+        omega_details: omegaDetails, zed_details: zedDetails,
       };
     }
     return result;

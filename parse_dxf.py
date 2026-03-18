@@ -378,6 +378,45 @@ def parse_dxf_file(filepath):
     for e in msp:
         process_entity(e)
 
+    # 2b. Assembler les LINE isolées en rectangles (4 lignes → 1 rectangle)
+    lines_by_key = defaultdict(list)
+    for e in msp:
+        if e.dxftype() == "LINE":
+            color_aci = resolve_color(e)
+            layer = e.dxf.get("layer", "0")
+            key = f"{color_aci}|{layer}"
+            x1, y1 = float(e.dxf.start.x), float(e.dxf.start.y)
+            x2, y2 = float(e.dxf.end.x), float(e.dxf.end.y)
+            lines_by_key[key].append((x1, y1, x2, y2, color_aci, layer))
+
+    for key, segs in lines_by_key.items():
+        h_segs = [(s[0], s[1], s[2], s[3]) for s in segs if abs(s[1] - s[3]) < 1]
+        v_segs = [(s[0], s[1], s[2], s[3]) for s in segs if abs(s[0] - s[2]) < 1]
+        color_aci = segs[0][4]
+        for hi in range(len(h_segs)):
+            h1 = h_segs[hi]
+            h1xmin, h1xmax = min(h1[0], h1[2]), max(h1[0], h1[2])
+            for hj in range(hi + 1, len(h_segs)):
+                h2 = h_segs[hj]
+                h2xmin, h2xmax = min(h2[0], h2[2]), max(h2[0], h2[2])
+                if abs(h1xmin - h2xmin) > 2 or abs(h1xmax - h2xmax) > 2:
+                    continue
+                ymin = min(h1[1], h2[1])
+                ymax = max(h1[1], h2[1])
+                if ymax - ymin < 10:
+                    continue
+                has_left = has_right = False
+                for v in v_segs:
+                    vx = (v[0] + v[2]) / 2
+                    vymin, vymax = min(v[1], v[3]), max(v[1], v[3])
+                    if abs(vymin - ymin) < 2 and abs(vymax - ymax) < 2:
+                        if abs(vx - h1xmin) < 2:
+                            has_left = True
+                        if abs(vx - h1xmax) < 2:
+                            has_right = True
+                if has_left and has_right:
+                    add_rect(h1xmin, h1xmax, ymin, ymax, color_aci)
+
     # 3. Assigne chaque rectangle à la façade la plus proche (par X)
     def nearest_facade(xcenter):
         return min(facade_labels, key=lambda lbl: abs(lbl[0] - xcenter))[1]
