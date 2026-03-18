@@ -16,9 +16,15 @@
       "w": 2550,
       "h": 1860,
       "active": true
+    },
+    {
+      "id": 3,
+      "w": 4270,
+      "h": 2130,
+      "active": true
     }
   ],
-  "nextStockId": 3,
+  "nextStockId": 4,
   "groups": [
     {
       "id": 1,
