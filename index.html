@@ -1714,7 +1714,24 @@ function exportExcel() {
       }
     }
   }
-  const xlsHtml = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"></head><body><table>${rows}</table></body></html>`;
+  // ── Ossature par façade ──
+  const ossData = calcOssature();
+  let ossRows = '<tr><th colspan="4" style="background:#333;color:#fff;font-size:14px;">OSSATURE PAR FAÇADE</th></tr>';
+  ossRows += '<tr><th>Façade</th><th>Oméga (ml)</th><th>Zed (ml)</th><th>Total (ml)</th></tr>';
+  let grandOmML = 0, grandZdML = 0;
+  for (const gd of ossData) {
+    for (const sd of gd.subsections) {
+      const facName = sd.subsection.name;
+      const omML = sd.totalOmegaML;
+      const zdML = sd.totalZedML;
+      grandOmML += omML;
+      grandZdML += zdML;
+      ossRows += `<tr><td>${facName} (${gd.group.name})</td><td>${omML.toFixed(2)}</td><td>${zdML.toFixed(2)}</td><td>${(omML+zdML).toFixed(2)}</td></tr>`;
+    }
+  }
+  ossRows += `<tr style="font-weight:bold;background:#eee;"><td>TOTAL</td><td>${grandOmML.toFixed(2)}</td><td>${grandZdML.toFixed(2)}</td><td>${(grandOmML+grandZdML).toFixed(2)}</td></tr>`;
+
+  const xlsHtml = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"></head><body><table>${rows}</table><br/><table>${ossRows}</table></body></html>`;
   const blob = new Blob(['\uFEFF' + xlsHtml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
@@ -2342,49 +2359,93 @@ function calcOssature() {
   const entaxeMax = ossatureConfig.entaxeMax || 600;
   const results = [];
 
+  // Détecte si un sous-type est "plein" (panneaux pleine hauteur)
+  function isPleinSubtype(stName) {
+    const n = stName.toLowerCase();
+    return n.includes('plein') || n.includes('bandeau');
+  }
+  // Détecte si un sous-type est lié aux ouvertures (fenêtre/porte/pièce spéciale)
+  function isOpeningSubtype(stName) {
+    const n = stName.toLowerCase();
+    return n.includes('fen') || n.includes('porte') || n.includes('spéc') || n.includes('spec');
+  }
+
   for (const g of groups) {
     const groupData = { group: g, subsections: [] };
     for (const sub of g.subsections) {
       const subData = { subsection: sub, pieces: [], totalOmegaML: 0, totalZedML: 0, omegaCuts: [], zedCuts: [] };
-      // Flatten all pieces from all subtypes
-      const allSubPieces = sub.panelSubtypes.flatMap(st => st.pieces);
-      const totalPanelsInSub = allSubPieces.reduce((s, p) => s + p.qty, 0);
-      const totalOmegas = totalPanelsInSub > 0 ? totalPanelsInSub + 1 : 0;
 
       let panelNum = 1;
-      for (const p of allSubPieces) {
-        const nbZed = Math.max(0, Math.ceil(p.w / entaxeMax) - 1);
-        const firstPanelOfType = panelNum;
-        subData.pieces.push({
-          ...p,
-          nbZedPerPanel: nbZed,
-          totalZed: nbZed * p.qty,
-          zedML: nbZed * p.qty * p.h / 1000,
-          firstPanelNum: firstPanelOfType,
-        });
-        subData.totalZedML += nbZed * p.qty * p.h / 1000;
-        for (let q = 0; q < p.qty; q++) {
-          const pn = panelNum++;
-          // Omega: left edge of this panel (= right edge of previous, or facade start)
-          const omRef = pn === 1 ? `◀ P1` : `P${pn-1}/P${pn}`;
-          subData.omegaCuts.push({ len: p.h, ref: omRef });
-          // Zed cuts for this panel
-          for (let z = 0; z < nbZed; z++) {
-            subData.zedCuts.push({ len: p.h, ref: `P${pn}` });
+
+      for (const st of sub.panelSubtypes) {
+        if (st.pieces.length === 0) continue;
+        const isPlein = isPleinSubtype(st.name);
+        const isOpening = isOpeningSubtype(st.name);
+        const totalInSubtype = st.pieces.reduce((s, p) => s + p.qty, 0);
+
+        for (const p of st.pieces) {
+          const nbZed = Math.max(0, Math.ceil(p.w / entaxeMax) - 1);
+          subData.pieces.push({
+            ...p,
+            subtypeName: st.name,
+            isPlein,
+            isOpening,
+            nbZedPerPanel: nbZed,
+            totalZed: nbZed * p.qty,
+            zedML: nbZed * p.qty * p.h / 1000,
+            firstPanelNum: panelNum,
+          });
+
+          if (isPlein) {
+            // Panneaux plein : oméga entre chaque panneau (jonction 8mm)
+            for (let q = 0; q < p.qty; q++) {
+              const pn = panelNum++;
+              const omRef = `P${pn} [${st.name}]`;
+              subData.omegaCuts.push({ len: p.h, ref: omRef });
+            }
+            subData.totalOmegaML += p.qty * p.h / 1000;
+          } else if (isOpening) {
+            // Panneaux ouverture : oméga aux jonctions internes, zed aux bords
+            for (let q = 0; q < p.qty; q++) {
+              const pn = panelNum++;
+              if (q > 0) {
+                // Jonction interne linteau → oméga
+                subData.omegaCuts.push({ len: p.h, ref: `P${pn-1}/P${pn} [linteau]` });
+                subData.totalOmegaML += p.h / 1000;
+              }
+            }
+            // 2 zeds aux bords d'ouverture (extrémités du groupe)
+            subData.zedCuts.push({ len: p.h, ref: `◀ ouv. [${st.name}]` });
+            subData.zedCuts.push({ len: p.h, ref: `ouv. ▶ [${st.name}]` });
+            subData.totalZedML += 2 * p.h / 1000;
+          } else {
+            // Autres sous-types : traiter comme plein par défaut
+            for (let q = 0; q < p.qty; q++) {
+              const pn = panelNum++;
+              subData.omegaCuts.push({ len: p.h, ref: `P${pn}` });
+            }
+            subData.totalOmegaML += p.qty * p.h / 1000;
           }
+
+          // Zed d'entraxe (horizontal support) pour tous les types
+          for (let q = 0; q < p.qty; q++) {
+            for (let z = 0; z < nbZed; z++) {
+              subData.zedCuts.push({ len: p.h, ref: `P${panelNum - p.qty + q} [entraxe]` });
+            }
+          }
+          subData.totalZedML += nbZed * p.qty * p.h / 1000;
+        }
+
+        // Oméga de fermeture pour les sous-types plein
+        // (bord droit du dernier panneau plein = 1 oméga supplémentaire)
+        if (isPlein && totalInSubtype > 0) {
+          const maxH = Math.max(...st.pieces.map(p => p.h));
+          subData.omegaCuts.push({ len: maxH, ref: `bord [${st.name}]` });
+          subData.totalOmegaML += maxH / 1000;
         }
       }
 
-      // Omega closing cut: right edge of last panel
-      let omegaML = 0;
-      for (const p of allSubPieces) omegaML += p.qty * p.h / 1000;
-      if (allSubPieces.length > 0) {
-        const maxH = Math.max(...allSubPieces.map(p => p.h));
-        omegaML += maxH / 1000;
-        subData.omegaCuts.push({ len: maxH, ref: `P${panelNum-1} ▶` });
-      }
-      subData.totalOmegaML = omegaML;
-      subData.totalOmegas = totalOmegas;
+      subData.totalOmegas = subData.omegaCuts.length;
       groupData.subsections.push(subData);
     }
     results.push(groupData);

@@ -129,6 +129,116 @@ def dwg_to_dxf(dwg_path):
         "  ou compilez LibreDWG depuis https://github.com/LibreDWG/libredwg"
     )
 
+# ─── Calcul ossature par façade (analyse spatiale) ────────────────────────────
+
+def _merge_y_intervals(panels):
+    """Fusionne les intervalles Y des panneaux d'une colonne.
+    Retourne une liste triée de (ymin, ymax)."""
+    intervals = [(p["ymin"], p["ymax"]) for p in panels]
+    intervals.sort()
+    merged = []
+    for s, e in intervals:
+        if merged and s <= merged[-1][1] + 20:  # fusionne si gap < 20mm
+            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+        else:
+            merged.append((s, e))
+    return merged
+
+
+def _interval_overlap(a_intervals, b_intervals):
+    """Longueur totale de recouvrement entre deux ensembles d'intervalles Y."""
+    overlap = 0
+    for a_s, a_e in a_intervals:
+        for b_s, b_e in b_intervals:
+            o_start = max(a_s, b_s)
+            o_end = min(a_e, b_e)
+            if o_end > o_start:
+                overlap += o_end - o_start
+    return overlap
+
+
+def _interval_total(intervals):
+    """Longueur totale couverte par les intervalles."""
+    return sum(e - s for s, e in intervals)
+
+
+def _interval_diff(a_intervals, b_intervals):
+    """Longueur de A non couverte par B."""
+    return _interval_total(a_intervals) - _interval_overlap(a_intervals, b_intervals)
+
+
+def calc_ossature_facades(rects_spatial, facade_labels):
+    """
+    Analyse la disposition spatiale des panneaux pour calculer l'ossature
+    (Oméga et Zed) par façade.
+
+    Logique :
+    - Les panneaux sont regroupés en colonnes verticales (même position X).
+    - Entre deux colonnes adjacentes :
+      - Là où les deux ont des panneaux (joint 8mm) → OMÉGA (jonction)
+      - Là où une seule colonne a un panneau (bord d'ouverture) → ZED
+    - Bords extrêmes de façade (gauche/droite) → OMÉGA
+
+    Retourne un dict {facade_name: {"omega_mm": int, "zed_mm": int, "omega_ml": float, "zed_ml": float}}
+    """
+    def nearest_facade(xcenter):
+        return min(facade_labels, key=lambda lbl: abs(lbl[0] - xcenter))[1]
+
+    # Regrouper par façade
+    by_facade = defaultdict(list)
+    for r in rects_spatial:
+        fname = nearest_facade((r["xmin"] + r["xmax"]) / 2)
+        by_facade[fname].append(r)
+
+    result = {}
+    for fname in sorted(by_facade.keys()):
+        panels = by_facade[fname]
+
+        # Regrouper en colonnes par position X (tolérance 10mm)
+        columns = defaultdict(list)
+        for p in panels:
+            col_key = round(p["xmin"] / 10) * 10
+            columns[col_key].append(p)
+
+        sorted_cols = sorted(columns.items())
+        total_omega_mm = 0
+        total_zed_mm = 0
+
+        for i, (col_x, col_panels) in enumerate(sorted_cols):
+            col_intervals = _merge_y_intervals(col_panels)
+            col_height = _interval_total(col_intervals)
+
+            # Bord gauche de la façade → oméga
+            if i == 0:
+                total_omega_mm += col_height
+
+            if i < len(sorted_cols) - 1:
+                _, next_col_panels = sorted_cols[i + 1]
+                next_intervals = _merge_y_intervals(next_col_panels)
+
+                # Là où les deux colonnes ont des panneaux → oméga
+                overlap = _interval_overlap(col_intervals, next_intervals)
+                # Là où seule la colonne courante a un panneau → zed
+                only_current = _interval_diff(col_intervals, next_intervals)
+                # Là où seule la colonne suivante a un panneau → zed
+                only_next = _interval_diff(next_intervals, col_intervals)
+
+                total_omega_mm += overlap
+                total_zed_mm += only_current + only_next
+            else:
+                # Bord droit de la façade → oméga
+                total_omega_mm += col_height
+
+        result[fname] = {
+            "omega_mm": round(total_omega_mm),
+            "zed_mm": round(total_zed_mm),
+            "omega_ml": round(total_omega_mm / 1000, 2),
+            "zed_ml": round(total_zed_mm / 1000, 2),
+        }
+
+    return result
+
+
 def parse_dxf_file(filepath):
     """
     Lit un fichier DXF et retourne les données structurées sous forme de dict
@@ -155,6 +265,7 @@ def parse_dxf_file(filepath):
 
     # 2. Extrait tous les rectangles (LWPOLYLINE avec 4 points)
     rects = []
+    rects_spatial = []  # Garde les positions complètes pour l'analyse ossature
     for e in msp:
         if e.dxftype() == "LWPOLYLINE":
             pts = list(e.get_points())
@@ -170,6 +281,11 @@ def parse_dxf_file(filepath):
             xcenter = (min(xs) + max(xs)) / 2.0
             color_aci = e.dxf.get("color", 256)  # 256 = BYLAYER
             rects.append({"xcenter": xcenter, "w": w, "h": h, "color": color_aci})
+            rects_spatial.append({
+                "xmin": min(xs), "xmax": max(xs),
+                "ymin": min(ys), "ymax": max(ys),
+                "color": color_aci,
+            })
 
     # 3. Assigne chaque rectangle à la façade la plus proche (par X)
     def nearest_facade(xcenter):
@@ -250,6 +366,9 @@ def parse_dxf_file(filepath):
     today = datetime.date.today().isoformat()
     base_name = os.path.splitext(os.path.basename(filepath))[0]
 
+    # Calcul ossature par façade (analyse spatiale)
+    ossature = calc_ossature_facades(rects_spatial, facade_labels)
+
     return {
         "version": "6.0",
         "chantier": {"nom": base_name, "date": today},
@@ -262,6 +381,7 @@ def parse_dxf_file(filepath):
         "groups": groups,
         "nextGroupId": gid,
         "activeGroupId": 1,
+        "ossature_facades": ossature,
     }
 
 # ─── Génération Excel ─────────────────────────────────────────────────────────
@@ -399,6 +519,97 @@ def generate_excel(data, out_path):
         ws.column_dimensions["A"].width = 28
         for col_letter in ["B", "C", "D", "E", "F"]:
             ws.column_dimensions[col_letter].width = 20
+
+    # ── 3. Feuille Ossature ────────────────────────────────────────────────
+    ossature = data.get("ossature_facades", {})
+    if ossature:
+        ws_oss = wb.create_sheet("Ossature")
+        title = data["chantier"]["nom"] + " — Ossature"
+        ws_oss.append([title])
+        ws_oss["A1"].font = Font(bold=True, size=13)
+        ws_oss.append([])  # ligne vide
+
+        # En-têtes
+        ws_oss.append(["Façade", "Oméga (ml)", "Zed (ml)", "Total (ml)"])
+        r = ws_oss.max_row
+        for col in range(1, 5):
+            ws_oss.cell(r, col).font = Font(bold=True)
+            ws_oss.cell(r, col).fill = PatternFill("solid", fgColor="FFE0E0E0")
+            ws_oss.cell(r, col).border = _border()
+
+        grand_omega = 0
+        grand_zed = 0
+
+        for facade_name in facades_order:
+            oss = ossature.get(facade_name, {})
+            omega_ml = oss.get("omega_ml", 0)
+            zed_ml = oss.get("zed_ml", 0)
+            total_ml = round(omega_ml + zed_ml, 2)
+            grand_omega += omega_ml
+            grand_zed += zed_ml
+
+            ws_oss.append([facade_name, omega_ml, zed_ml, total_ml])
+            r = ws_oss.max_row
+            for col in range(1, 5):
+                ws_oss.cell(r, col).border = _border()
+            ws_oss.cell(r, 2).number_format = '0.00'
+            ws_oss.cell(r, 3).number_format = '0.00'
+            ws_oss.cell(r, 4).number_format = '0.00'
+
+        # Ligne total
+        ws_oss.append(["TOTAL", round(grand_omega, 2), round(grand_zed, 2),
+                        round(grand_omega + grand_zed, 2)])
+        r = ws_oss.max_row
+        for col in range(1, 5):
+            ws_oss.cell(r, col).font = Font(bold=True)
+            ws_oss.cell(r, col).fill = PatternFill("solid", fgColor="FFDDDDDD")
+            ws_oss.cell(r, col).border = _border()
+            if col >= 2:
+                ws_oss.cell(r, col).number_format = '0.00'
+
+        # Section détaillée : Oméga par façade puis Zed par façade
+        ws_oss.append([])
+        ws_oss.append(["DÉTAIL OMÉGA PAR FAÇADE"])
+        r = ws_oss.max_row
+        ws_oss.cell(r, 1).font = Font(bold=True, size=11, color="FF2563EB")
+
+        ws_oss.append(["Façade", "Oméga (mm)", "Oméga (ml)"])
+        r = ws_oss.max_row
+        for col in range(1, 4):
+            ws_oss.cell(r, col).font = Font(bold=True)
+            ws_oss.cell(r, col).fill = PatternFill("solid", fgColor="FFD4E6FF")
+            ws_oss.cell(r, col).border = _border()
+
+        for facade_name in facades_order:
+            oss = ossature.get(facade_name, {})
+            ws_oss.append([facade_name, oss.get("omega_mm", 0), oss.get("omega_ml", 0)])
+            r = ws_oss.max_row
+            for col in range(1, 4):
+                ws_oss.cell(r, col).border = _border()
+
+        ws_oss.append([])
+        ws_oss.append(["DÉTAIL ZED PAR FAÇADE"])
+        r = ws_oss.max_row
+        ws_oss.cell(r, 1).font = Font(bold=True, size=11, color="FFCA8A04")
+
+        ws_oss.append(["Façade", "Zed (mm)", "Zed (ml)"])
+        r = ws_oss.max_row
+        for col in range(1, 4):
+            ws_oss.cell(r, col).font = Font(bold=True)
+            ws_oss.cell(r, col).fill = PatternFill("solid", fgColor="FFFFF3CD")
+            ws_oss.cell(r, col).border = _border()
+
+        for facade_name in facades_order:
+            oss = ossature.get(facade_name, {})
+            ws_oss.append([facade_name, oss.get("zed_mm", 0), oss.get("zed_ml", 0)])
+            r = ws_oss.max_row
+            for col in range(1, 4):
+                ws_oss.cell(r, col).border = _border()
+
+        ws_oss.column_dimensions["A"].width = 22
+        ws_oss.column_dimensions["B"].width = 16
+        ws_oss.column_dimensions["C"].width = 16
+        ws_oss.column_dimensions["D"].width = 16
 
     wb.save(out_path)
     return out_path
