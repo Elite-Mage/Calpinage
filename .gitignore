@@ -1,7 +1,11 @@
 node_modules/
+__pycache__/
+*.pyc
 data.db
 data.db-shm
 data.db-wal
 *.dxf
 *.dwg
 *.svg
+*.xlsx
+Calpinage_Beauchamp_Detail.json

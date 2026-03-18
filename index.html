@@ -50,6 +50,13 @@
     padding: 10px 14px; font-size: 12px; transition: all 0.15s; font-family: inherit;
   }
   .home-import-label:hover { border-color: var(--accent); color: var(--accent); }
+  .home-import-dxf {
+    display: inline-block; cursor: pointer; background: transparent;
+    border: 1px solid #4a9eff; color: #4a9eff; border-radius: 8px;
+    padding: 10px 14px; font-size: 12px; transition: all 0.15s; font-family: inherit;
+  }
+  .home-import-dxf:hover { background: #4a9eff22; }
+  .home-import-dxf.loading { opacity: 0.6; cursor: wait; pointer-events: none; }
 
   /* ── COLLAB BADGE ────────────────────────────────────────────── */
   #collabBadge {
@@ -447,6 +454,7 @@
         <input class="home-new-input" id="newProjectName" placeholder="Nom du nouveau chantier…">
         <button class="btn-home-create" onclick="createProject()">+ Nouveau</button>
         <label class="home-import-label">&#128193; JSON<input type="file" accept=".json" style="display:none" onchange="importProjectHome(this)"></label>
+        <label class="home-import-dxf" id="dxfImportLabel" title="Importer un fichier DXF ou DWG et créer un chantier automatiquement">&#128257; DXF / DWG<input type="file" accept=".dxf,.dwg" style="display:none" onchange="importDxfHome(this)"></label>
       </div>
     </div>
   </div>
@@ -1988,6 +1996,34 @@ async function importProjectHome(input) {
     openProject(p.id);
   } catch(e) {
     alert('Fichier invalide : ' + e.message);
+  }
+}
+
+async function importDxfHome(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+  const label = document.getElementById('dxfImportLabel');
+  const origText = label.childNodes[0].textContent;
+  label.classList.add('loading');
+  label.childNodes[0].textContent = '⏳ Analyse…';
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const resp = await fetch('/api/parse-dxf', { method: 'POST', body: fd });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      throw new Error(err.error || resp.statusText);
+    }
+    const data = await resp.json();
+    const name = data.chantier?.nom || file.name.replace(/\.(dxf|dwg)$/i, '');
+    const p = await storage.create(name, data);
+    openProject(p.id);
+  } catch(e) {
+    alert('Erreur import DXF/DWG :\n' + e.message);
+  } finally {
+    label.classList.remove('loading');
+    label.childNodes[0].textContent = origText;
   }
 }
 
