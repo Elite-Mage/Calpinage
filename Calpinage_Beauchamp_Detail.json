@@ -13,7 +13,7 @@
   "groups": [
     {
       "id": 1,
-      "name": "Panneaux N1 — 3650mm",
+      "name": "Panneaux Orange",
       "color": "#fd9a51",
       "reference": "",
       "coloris": "",
@@ -37,9 +37,18 @@
               "name": "Fenêtre/Porte N1",
               "pieces": [],
               "nextPieceId": 1
+            },
+            {
+              "id": 3,
+              "name": "Bandeau Haut",
+              "pieces": [
+                { "id": 1, "w": 4075.0, "h": 1064.0, "qty": 2 },
+                { "id": 2, "w": 4076.0, "h": 1064.0, "qty": 1 }
+              ],
+              "nextPieceId": 3
             }
           ],
-          "nextSubtypeId": 3,
+          "nextSubtypeId": 4,
           "activeSubtypeId": 1
         },
         {
@@ -77,9 +86,18 @@
                 { "id": 5, "w": 984.0,  "h": 822.0,  "qty": 8 }
               ],
               "nextPieceId": 6
+            },
+            {
+              "id": 3,
+              "name": "Bandeau Haut",
+              "pieces": [
+                { "id": 1, "w": 4267.0, "h": 1064.0, "qty": 2 },
+                { "id": 2, "w": 4268.0, "h": 1064.0, "qty": 5 }
+              ],
+              "nextPieceId": 3
             }
           ],
-          "nextSubtypeId": 3,
+          "nextSubtypeId": 4,
           "activeSubtypeId": 1
         },
         {
@@ -112,9 +130,18 @@
                 { "id": 5, "w": 984.0,  "h": 822.1, "qty": 5 }
               ],
               "nextPieceId": 6
+            },
+            {
+              "id": 3,
+              "name": "Bandeau Haut",
+              "pieces": [
+                { "id": 1, "w": 4267.0, "h": 1064.0, "qty": 2 },
+                { "id": 2, "w": 4268.0, "h": 1064.0, "qty": 5 }
+              ],
+              "nextPieceId": 3
             }
           ],
-          "nextSubtypeId": 3,
+          "nextSubtypeId": 4,
           "activeSubtypeId": 1
         },
         {
@@ -138,9 +165,18 @@
                 { "id": 2, "w": 1134.0, "h": 492.1,  "qty": 1 }
               ],
               "nextPieceId": 3
+            },
+            {
+              "id": 3,
+              "name": "Bandeau Haut",
+              "pieces": [
+                { "id": 1, "w": 4075.0, "h": 1064.0, "qty": 2 },
+                { "id": 2, "w": 4076.0, "h": 1064.0, "qty": 1 }
+              ],
+              "nextPieceId": 3
             }
           ],
-          "nextSubtypeId": 3,
+          "nextSubtypeId": 4,
           "activeSubtypeId": 1
         }
       ],
@@ -149,8 +185,8 @@
     },
     {
       "id": 2,
-      "name": "Panneaux RDC — 2550mm",
-      "color": "#a0c4ff",
+      "name": "Panneaux Marron",
+      "color": "#8B5E3C",
       "reference": "",
       "coloris": "",
       "epaisseur": 18,
@@ -275,89 +311,8 @@
       ],
       "nextSubsectionId": 5,
       "activeSubsectionId": 1
-    },
-    {
-      "id": 3,
-      "name": "Bandeau Haut — 4270mm",
-      "color": "#ffb300",
-      "reference": "",
-      "coloris": "",
-      "epaisseur": 18,
-      "prixM2": "",
-      "subsections": [
-        {
-          "id": 1,
-          "name": "Façade Nord",
-          "panelSubtypes": [
-            {
-              "id": 1,
-              "name": "Bandeau Haut",
-              "pieces": [
-                { "id": 1, "w": 4075.0, "h": 1064.0, "qty": 2 },
-                { "id": 2, "w": 4076.0, "h": 1064.0, "qty": 1 }
-              ],
-              "nextPieceId": 3
-            }
-          ],
-          "nextSubtypeId": 2,
-          "activeSubtypeId": 1
-        },
-        {
-          "id": 2,
-          "name": "Façade Ouest",
-          "panelSubtypes": [
-            {
-              "id": 1,
-              "name": "Bandeau Haut",
-              "pieces": [
-                { "id": 1, "w": 4267.0, "h": 1064.0, "qty": 2 },
-                { "id": 2, "w": 4268.0, "h": 1064.0, "qty": 5 }
-              ],
-              "nextPieceId": 3
-            }
-          ],
-          "nextSubtypeId": 2,
-          "activeSubtypeId": 1
-        },
-        {
-          "id": 3,
-          "name": "Façade Est",
-          "panelSubtypes": [
-            {
-              "id": 1,
-              "name": "Bandeau Haut",
-              "pieces": [
-                { "id": 1, "w": 4267.0, "h": 1064.0, "qty": 2 },
-                { "id": 2, "w": 4268.0, "h": 1064.0, "qty": 5 }
-              ],
-              "nextPieceId": 3
-            }
-          ],
-          "nextSubtypeId": 2,
-          "activeSubtypeId": 1
-        },
-        {
-          "id": 4,
-          "name": "Façade Sud",
-          "panelSubtypes": [
-            {
-              "id": 1,
-              "name": "Bandeau Haut",
-              "pieces": [
-                { "id": 1, "w": 4075.0, "h": 1064.0, "qty": 2 },
-                { "id": 2, "w": 4076.0, "h": 1064.0, "qty": 1 }
-              ],
-              "nextPieceId": 3
-            }
-          ],
-          "nextSubtypeId": 2,
-          "activeSubtypeId": 1
-        }
-      ],
-      "nextSubsectionId": 5,
-      "activeSubsectionId": 1
     }
   ],
-  "nextGroupId": 4,
+  "nextGroupId": 3,
   "activeGroupId": 1
 }
