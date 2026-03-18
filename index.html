@@ -184,8 +184,9 @@
   .unplaced-item { font-size: 12px; color: var(--red); margin-left: 8px; }
 
   .order-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-  .order-table th { text-align: left; font-size: 11px; color: var(--text3); padding: 6px 8px; border-bottom: 1px solid var(--border); letter-spacing: 1px; }
-  .order-table td { padding: 8px; font-size: 13px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
+  .order-table th { text-align: left; font-size: 10px; color: var(--text3); padding: 4px 5px; border-bottom: 1px solid var(--border); letter-spacing: 0.5px; white-space: nowrap; }
+  .order-table td { padding: 5px; font-size: 12px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
+  .order-table td.no-wrap { white-space: nowrap; }
   .order-table tr:last-child td { border-bottom: none; font-weight: 700; }
 
   .btn-export {
@@ -255,6 +256,20 @@
     transition: color 0.15s; background: none; border: none; padding: 0; line-height: 1;
   }
   .subsection-tab .sclose:hover { color: var(--red); }
+  /* SUBTYPE TABS (sous-types de panneaux) */
+  .subtype-tabs { margin-top: 2px; }
+  .subtype-tab {
+    padding: 4px 9px; border-radius: 5px; cursor: pointer; font-size: 11px; font-weight: 600;
+    border: 1.5px solid transparent; transition: all 0.15s; display: flex; align-items: center; gap: 4px;
+    background: var(--bg); color: var(--text3);
+  }
+  .subtype-tab:hover { border-color: var(--text4); color: var(--text); }
+  .subtype-tab.active { border-color: var(--yellow); color: var(--yellow); background: color-mix(in srgb, var(--yellow) 8%, var(--bg)); }
+  .subtype-tab .sclose {
+    font-size: 11px; color: var(--text4); cursor: pointer; margin-left: 2px;
+    transition: color 0.15s; background: none; border: none; padding: 0; line-height: 1;
+  }
+  .subtype-tab .sclose:hover { color: var(--red); }
   .btn-add-subsection {
     padding: 4px 9px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 800;
     border: 1.5px dashed var(--text4); background: none; color: var(--text4); transition: all 0.15s;
@@ -706,11 +721,19 @@ let nextStockId = 5;
 
 let chantier = { nom: '', date: new Date().toISOString().slice(0,10) };
 
+function makeDefaultSubtypes() {
+  return [
+    { id: 1, name: 'Plein N1', pieces: [], nextPieceId: 1 },
+    { id: 2, name: 'Fenetre',  pieces: [], nextPieceId: 1 },
+    { id: 3, name: 'Porte N1', pieces: [], nextPieceId: 1 },
+  ];
+}
+
 let groups = [
   {
     id: 1,
-    name: 'Type 1',
-    color: GROUP_COLORS[0],
+    name: 'Type Orange',
+    color: '#fd9a51',
     reference: '',
     coloris: '',
     epaisseur: 18,
@@ -719,23 +742,36 @@ let groups = [
       {
         id: 1,
         name: 'Facade 1',
-        pieces: [
-          { id: 1, w: 2340, h: 600, qty: 1 },
-          { id: 2, w: 2340, h: 400, qty: 1 },
-          { id: 3, w: 2340, h: 800, qty: 1 },
-          { id: 4, w: 2340, h: 400, qty: 1 },
-          { id: 5, w: 3550, h: 350, qty: 1 },
-          { id: 6, w: 3550, h: 1000, qty: 1 },
-          { id: 7, w: 3550, h: 800, qty: 1 },
-        ],
-        nextPieceId: 8,
+        panelSubtypes: makeDefaultSubtypes(),
+        nextSubtypeId: 4,
+        activeSubtypeId: 1,
+      }
+    ],
+    nextSubsectionId: 2,
+    activeSubsectionId: 1,
+  },
+  {
+    id: 2,
+    name: 'Type Marron',
+    color: '#c8956c',
+    reference: '',
+    coloris: '',
+    epaisseur: 18,
+    prixM2: '',
+    subsections: [
+      {
+        id: 1,
+        name: 'Facade 1',
+        panelSubtypes: makeDefaultSubtypes(),
+        nextSubtypeId: 4,
+        activeSubtypeId: 1,
       }
     ],
     nextSubsectionId: 2,
     activeSubsectionId: 1,
   }
 ];
-let nextGroupId = 2;
+let nextGroupId = 3;
 let activeGroupId = 1;
 let allResults = null;
 let activeSection = 'panneaux'; // 'panneaux' | 'ossature' | 'devis'
@@ -782,17 +818,49 @@ function getActiveSubsection(groupId) {
   const g = getGroup(groupId);
   return g ? getSubsection(groupId, g.activeSubsectionId) : null;
 }
+function getSubtype(groupId, subId, subtypeId) {
+  const sub = getSubsection(groupId, subId);
+  return sub ? sub.panelSubtypes.find(st => st.id === subtypeId) : null;
+}
+function getActiveSubtype(groupId) {
+  const g = getGroup(groupId);
+  const sub = getActiveSubsection(groupId);
+  if (!sub) return null;
+  return sub.panelSubtypes.find(st => st.id === sub.activeSubtypeId) || sub.panelSubtypes[0];
+}
 function getTotalPieceCount(g) {
-  return g.subsections.reduce((s, sub) => s + sub.pieces.reduce((ss, p) => ss + p.qty, 0), 0);
+  return g.subsections.reduce((s, sub) =>
+    s + sub.panelSubtypes.reduce((ss, st) =>
+      ss + st.pieces.reduce((sss, p) => sss + p.qty, 0), 0), 0);
 }
 function getAllGroupPieces(g) {
   const all = [];
   for (const sub of g.subsections) {
-    for (const p of sub.pieces) {
-      all.push({ ...p, subsectionId: sub.id, subsectionName: sub.name });
+    for (const st of sub.panelSubtypes) {
+      for (const p of st.pieces) {
+        all.push({ ...p, subsectionId: sub.id, subsectionName: sub.name, subtypeId: st.id, subtypeName: st.name });
+      }
     }
   }
   return all;
+}
+// Migration: convert old subsection format (with pieces[]) to new format (with panelSubtypes[])
+function migrateSubsection(sub) {
+  if (!sub.panelSubtypes) {
+    sub.panelSubtypes = [{ id: 1, name: 'Plein N1', pieces: sub.pieces || [], nextPieceId: (sub.nextPieceId || 1) }];
+    sub.nextSubtypeId = 2;
+    sub.activeSubtypeId = 1;
+    delete sub.pieces;
+    delete sub.nextPieceId;
+  }
+  return sub;
+}
+function migrateGroups() {
+  for (const g of groups) {
+    for (let i = 0; i < g.subsections.length; i++) {
+      g.subsections[i] = migrateSubsection(g.subsections[i]);
+    }
+  }
 }
 
 function renderGroupTabs() {
@@ -818,12 +886,13 @@ function renderActiveGroup() {
   const el = document.getElementById('activeGroupContent');
   const activeSub = getSubsection(g.id, g.activeSubsectionId);
   if (!activeSub) return;
+  const activeSt = getActiveSubtype(g.id);
 
-  // Subsection tabs
+  // Subsection (facade) tabs
   let subTabsHtml = g.subsections.map((sub, i) => {
     const isActive = sub.id === g.activeSubsectionId;
     const col = PIECE_COLORS[i % PIECE_COLORS.length];
-    const subPieces = sub.pieces.reduce((s, p) => s + p.qty, 0);
+    const subPieces = sub.panelSubtypes.reduce((s, st) => s + st.pieces.reduce((ss, p) => ss + p.qty, 0), 0);
     return `<div class="subsection-tab ${isActive ? 'active' : ''}" onclick="selectSubsection(${g.id}, ${sub.id})">
       <span class="sdot" style="background:${col};"></span>
       <span>${sub.name}</span>
@@ -837,19 +906,34 @@ function renderActiveGroup() {
   const subIdx = g.subsections.findIndex(s => s.id === activeSub.id);
   const subColor = PIECE_COLORS[subIdx % PIECE_COLORS.length];
 
-  // Pieces of active subsection
-  let piecesHtml = activeSub.pieces.map((p, i) => {
-    return `<div class="piece-item" style="border-left: 3px solid ${subColor};">
-      <span class="piece-dot" style="background:${subColor};"></span>
-      <span class="piece-dim mono">${p.w} &times; ${p.h} mm</span>
-      <div class="piece-qty">
-        <button onclick="changeQty(${g.id}, ${p.id}, -1)">-</button>
-        <span class="mono">${p.qty}</span>
-        <button onclick="changeQty(${g.id}, ${p.id}, 1)">+</button>
-      </div>
-      <button class="piece-remove" onclick="removePiece(${g.id}, ${p.id})">&times;</button>
+  // Panel subtype tabs
+  let subtypeTabsHtml = activeSub.panelSubtypes.map((st, i) => {
+    const isActive = st.id === activeSub.activeSubtypeId;
+    const stPieces = st.pieces.reduce((s, p) => s + p.qty, 0);
+    return `<div class="subtype-tab ${isActive ? 'active' : ''}" onclick="selectSubtype(${g.id}, ${activeSub.id}, ${st.id})">
+      <span>${st.name}</span>
+      <span style="font-size:10px;color:var(--text4);font-weight:400;">(${stPieces})</span>
+      ${activeSub.panelSubtypes.length > 1 ? `<button class="sclose" onclick="removeSubtype(${g.id}, ${activeSub.id}, ${st.id}); event.stopPropagation();">&times;</button>` : ''}
     </div>`;
   }).join('');
+  subtypeTabsHtml += `<button class="btn-add-subsection" onclick="addSubtype(${g.id}, ${activeSub.id})" title="Ajouter un sous-type">+</button>`;
+
+  // Pieces of active subtype
+  let piecesHtml = '';
+  if (activeSt) {
+    piecesHtml = activeSt.pieces.map((p) => {
+      return `<div class="piece-item" style="border-left: 3px solid ${subColor};">
+        <span class="piece-dot" style="background:${subColor};"></span>
+        <span class="piece-dim mono">${p.w} &times; ${p.h} mm</span>
+        <div class="piece-qty">
+          <button onclick="changeQty(${g.id}, ${p.id}, -1)">-</button>
+          <span class="mono">${p.qty}</span>
+          <button onclick="changeQty(${g.id}, ${p.id}, 1)">+</button>
+        </div>
+        <button class="piece-remove" onclick="removePiece(${g.id}, ${p.id})">&times;</button>
+      </div>`;
+    }).join('');
+  }
 
   // Color swatches
   let colorSwatches = GROUP_COLORS.map(c =>
@@ -891,7 +975,7 @@ function renderActiveGroup() {
           <input type="number" value="${g.prixM2||''}" placeholder="ex: 45.00" min="0" step="0.01" oninput="updateGroupSupplier(${g.id},'prixM2',this.value)">
         </div>
       </div>
-      <!-- Subsection tabs -->
+      <!-- Subsection (facade) tabs -->
       <div class="subsection-zone">
         <div class="subsection-label">&#9679; Facades</div>
         <div class="subsection-tabs">${subTabsHtml}</div>
@@ -902,8 +986,19 @@ function renderActiveGroup() {
           onchange="renameSubsection(${g.id}, ${activeSub.id}, this.value)"
           placeholder="Nom de la facade">
       </div>
+      <!-- Panel subtype tabs -->
+      <div class="subsection-zone" style="margin-top:8px;">
+        <div class="subsection-label" style="color:var(--text3);">&#9632; Sous-type</div>
+        <div class="subsection-tabs subtype-tabs">${subtypeTabsHtml}</div>
+      </div>
+      <!-- Active subtype name -->
+      ${activeSt ? `<div style="margin-bottom: 10px;">
+        <input class="subsection-name-input" value="${activeSt.name}"
+          onchange="renameSubtype(${g.id}, ${activeSub.id}, ${activeSt.id}, this.value)"
+          placeholder="Nom du sous-type">
+      </div>` : ''}
       <!-- Piece list -->
-      <div class="piece-list">${piecesHtml || '<div style="color:var(--text4);font-size:12px;padding:8px;">Aucune piece dans cette facade</div>'}</div>
+      <div class="piece-list">${piecesHtml || '<div style="color:var(--text4);font-size:12px;padding:8px;">Aucune piece dans ce sous-type</div>'}</div>
       <!-- Add piece -->
       <div class="add-row">
         <input type="number" id="newPieceW_${g.id}" placeholder="L (mm)" min="1">
@@ -935,7 +1030,11 @@ function addGroup() {
     coloris: '',
     epaisseur: 18,
     prixM2: '',
-    subsections: [{ id: 1, name: 'Facade 1', pieces: [], nextPieceId: 1 }],
+    subsections: [{
+      id: 1, name: 'Facade 1',
+      panelSubtypes: makeDefaultSubtypes(),
+      nextSubtypeId: 4, activeSubtypeId: 1,
+    }],
     nextSubsectionId: 2,
     activeSubsectionId: 1,
   });
@@ -977,7 +1076,11 @@ function addSubsection(groupId) {
   const g = getGroup(groupId);
   if (!g) return;
   const newId = g.nextSubsectionId++;
-  g.subsections.push({ id: newId, name: `Facade ${newId}`, pieces: [], nextPieceId: 1 });
+  g.subsections.push({
+    id: newId, name: `Facade ${newId}`,
+    panelSubtypes: makeDefaultSubtypes(),
+    nextSubtypeId: 4, activeSubtypeId: 1,
+  });
   g.activeSubsectionId = newId;
   renderGroupTabs();
   renderActiveGroup();
@@ -997,15 +1100,43 @@ function renameSubsection(groupId, subId, name) {
   if (sub) { sub.name = name || `Facade ${subId}`; renderGroupTabs(); renderActiveGroup(); }
 }
 
-// --- PIECE FUNCTIONS (work on active subsection) ---
+// --- SUBTYPE FUNCTIONS ---
+function selectSubtype(groupId, subId, subtypeId) {
+  const sub = getSubsection(groupId, subId);
+  if (sub) { sub.activeSubtypeId = subtypeId; renderActiveGroup(); }
+}
+
+function addSubtype(groupId, subId) {
+  const sub = getSubsection(groupId, subId);
+  if (!sub) return;
+  const newId = sub.nextSubtypeId++;
+  sub.panelSubtypes.push({ id: newId, name: `Sous-type ${newId}`, pieces: [], nextPieceId: 1 });
+  sub.activeSubtypeId = newId;
+  renderActiveGroup();
+}
+
+function removeSubtype(groupId, subId, subtypeId) {
+  const sub = getSubsection(groupId, subId);
+  if (!sub || sub.panelSubtypes.length <= 1) return;
+  sub.panelSubtypes = sub.panelSubtypes.filter(st => st.id !== subtypeId);
+  if (sub.activeSubtypeId === subtypeId) sub.activeSubtypeId = sub.panelSubtypes[0].id;
+  renderActiveGroup();
+}
+
+function renameSubtype(groupId, subId, subtypeId, name) {
+  const st = getSubtype(groupId, subId, subtypeId);
+  if (st) { st.name = name || `Sous-type ${subtypeId}`; renderActiveGroup(); }
+}
+
+// --- PIECE FUNCTIONS (work on active subtype) ---
 function addPiece(groupId) {
   const g = getGroup(groupId);
-  const sub = getActiveSubsection(groupId);
-  if (!g || !sub) return;
+  const st = getActiveSubtype(groupId);
+  if (!g || !st) return;
   const w = parseInt(document.getElementById(`newPieceW_${groupId}`).value);
   const h = parseInt(document.getElementById(`newPieceH_${groupId}`).value);
   if (!w || !h || w <= 0 || h <= 0) return;
-  sub.pieces.push({ id: sub.nextPieceId++, w, h, qty: 1 });
+  st.pieces.push({ id: st.nextPieceId++, w, h, qty: 1 });
   document.getElementById(`newPieceW_${groupId}`).value = '';
   document.getElementById(`newPieceH_${groupId}`).value = '';
   renderGroupTabs();
@@ -1013,14 +1144,14 @@ function addPiece(groupId) {
 }
 
 function removePiece(groupId, pieceId) {
-  const sub = getActiveSubsection(groupId);
-  if (sub) { sub.pieces = sub.pieces.filter(p => p.id !== pieceId); renderGroupTabs(); renderActiveGroup(); }
+  const st = getActiveSubtype(groupId);
+  if (st) { st.pieces = st.pieces.filter(p => p.id !== pieceId); renderGroupTabs(); renderActiveGroup(); }
 }
 
 function changeQty(groupId, pieceId, delta) {
-  const sub = getActiveSubsection(groupId);
-  if (sub) {
-    sub.pieces = sub.pieces.map(p => p.id === pieceId ? {...p, qty: Math.max(1, p.qty + delta)} : p);
+  const st = getActiveSubtype(groupId);
+  if (st) {
+    st.pieces = st.pieces.map(p => p.id === pieceId ? {...p, qty: Math.max(1, p.qty + delta)} : p);
     renderGroupTabs();
     renderActiveGroup();
   }
@@ -1316,13 +1447,13 @@ function renderAllResults() {
         <td style="font-size:11px;color:var(--text3);">${og.reference || '—'}${og.coloris ? ' / ' + og.coloris : ''}</td>
         <td style="text-align:center;font-size:12px;">${og.epaisseur} mm</td>
         <td class="mono">${label} mm</td>
-        <td style="text-align:center;color:${og.color};font-weight:700;">&times; ${count}</td>
-        <td>${area.toFixed(2)} m&sup2;</td>
+        <td class="no-wrap" style="text-align:center;color:${og.color};font-weight:700;">&times; ${count}</td>
+        <td class="no-wrap">${area.toFixed(2)} m&sup2;</td>
         <td style="color:var(--yellow);">${prix ? prix + ' €' : '—'}</td>
       </tr>`;
     }
   }
-  tableHTML += `<tr><td colspan="4" style="text-align:right;color:var(--text3);">TOTAL</td><td style="text-align:center;">${grandTotalPanels}</td><td>${(grandTotalStock/1e6).toFixed(2)} m&sup2;</td><td style="color:var(--yellow);font-weight:700;">${hasPrice ? grandTotalPrice.toFixed(2)+' €' : '—'}</td></tr>`;
+  tableHTML += `<tr><td colspan="4" style="text-align:right;color:var(--text3);">TOTAL</td><td class="no-wrap" style="text-align:center;">${grandTotalPanels}</td><td class="no-wrap">${(grandTotalStock/1e6).toFixed(2)} m&sup2;</td><td class="no-wrap" style="color:var(--yellow);font-weight:700;">${hasPrice ? grandTotalPrice.toFixed(2)+' €' : '—'}</td></tr>`;
   document.getElementById('orderTable').innerHTML = tableHTML;
   document.getElementById('orderCard').style.display = 'block';
 }
@@ -1682,6 +1813,7 @@ function applyProjectData(data) {
   if (data.stockPanels) { stockPanels = data.stockPanels; nextStockId = data.nextStockId || stockPanels.length + 1; renderStock(); }
   if (data.groups) {
     groups = data.groups;
+    migrateGroups(); // migrate old format (pieces[]) to new format (panelSubtypes[])
     nextGroupId = data.nextGroupId || groups.length + 1;
     activeGroupId = data.activeGroupId || groups[0]?.id;
   }
@@ -2065,11 +2197,13 @@ function calcOssature() {
     const groupData = { group: g, subsections: [] };
     for (const sub of g.subsections) {
       const subData = { subsection: sub, pieces: [], totalOmegaML: 0, totalZedML: 0, omegaCuts: [], zedCuts: [] };
-      const totalPanelsInSub = sub.pieces.reduce((s, p) => s + p.qty, 0);
+      // Flatten all pieces from all subtypes
+      const allSubPieces = sub.panelSubtypes.flatMap(st => st.pieces);
+      const totalPanelsInSub = allSubPieces.reduce((s, p) => s + p.qty, 0);
       const totalOmegas = totalPanelsInSub > 0 ? totalPanelsInSub + 1 : 0;
 
       let panelNum = 1;
-      for (const p of sub.pieces) {
+      for (const p of allSubPieces) {
         const nbZed = Math.max(0, Math.ceil(p.w / entaxeMax) - 1);
         const firstPanelOfType = panelNum;
         subData.pieces.push({
@@ -2094,9 +2228,9 @@ function calcOssature() {
 
       // Omega closing cut: right edge of last panel
       let omegaML = 0;
-      for (const p of sub.pieces) omegaML += p.qty * p.h / 1000;
-      if (sub.pieces.length > 0) {
-        const maxH = Math.max(...sub.pieces.map(p => p.h));
+      for (const p of allSubPieces) omegaML += p.qty * p.h / 1000;
+      if (allSubPieces.length > 0) {
+        const maxH = Math.max(...allSubPieces.map(p => p.h));
         omegaML += maxH / 1000;
         subData.omegaCuts.push({ len: maxH, ref: `P${panelNum-1} ▶` });
       }
@@ -2587,8 +2721,10 @@ function renderDevis() {
   // Calculate total surface utile from pieces
   for (const g of groups) {
     for (const sub of g.subsections) {
-      for (const p of sub.pieces) {
-        totalSurfaceUtile += p.w * p.h * p.qty / 1e6;
+      for (const st of sub.panelSubtypes) {
+        for (const p of st.pieces) {
+          totalSurfaceUtile += p.w * p.h * p.qty / 1e6;
+        }
       }
     }
   }
@@ -2708,7 +2844,7 @@ function exportDevisPDF() {
 
   // Main d'œuvre
   let totalSurf = 0;
-  for (const g of groups) { for (const sub of g.subsections) { for (const p of sub.pieces) { totalSurf += p.w*p.h*p.qty/1e6; } } }
+  for (const g of groups) { for (const sub of g.subsections) { for (const st of sub.panelSubtypes) { for (const p of st.pieces) { totalSurf += p.w*p.h*p.qty/1e6; } } } }
   const totalMO = totalSurf * prixMO;
 
   body += `<h3 style="margin:16px 0 8px;">4. Main d'œuvre</h3>`;
