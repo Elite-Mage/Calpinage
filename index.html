@@ -2106,6 +2106,64 @@ function parseDxfClientSide(text, fileName) {
     }
   }
 
+  // ── Parse BLOCKS section to get block definitions ──
+  const blockDefs = {}; // blockName -> array of raw entity data
+  let bi = 0;
+  while (bi < lines.length && lines[bi].trim() !== 'BLOCKS') bi++;
+  if (bi < lines.length) {
+    bi++;
+    let bgc = null, inBlock = false, blockName = null, blockEntities = [];
+    let bEntity = null, bType = '';
+    while (bi < lines.length) {
+      const bl = lines[bi].trim();
+      if (bgc === null) { bgc = parseInt(bl, 10); bi++; continue; }
+      if (bgc === 0) {
+        // Finalize previous entity in block
+        if (bEntity && inBlock) blockEntities.push(bEntity);
+        if (bl === 'ENDSEC') break;
+        if (bl === 'BLOCK') {
+          inBlock = true;
+          blockName = null;
+          blockEntities = [];
+          bEntity = null;
+        } else if (bl === 'ENDBLK') {
+          if (blockName && blockEntities.length > 0) {
+            blockDefs[blockName] = blockEntities;
+          }
+          inBlock = false;
+          bEntity = null;
+        } else if (inBlock) {
+          bType = bl;
+          bEntity = { type: bType, props: {}, vertices: [] };
+        }
+      } else if (inBlock) {
+        if (bgc === 2 && !blockName && inBlock && !bEntity) {
+          blockName = bl; // Block name comes right after BLOCK entity
+        }
+        if (bEntity) {
+          if (bType === 'LWPOLYLINE') {
+            if (bgc === 62) bEntity.props.color = parseInt(bl, 10);
+            if (bgc === 8) bEntity.props.layer = bl;
+            if (bgc === 10) bEntity._lastX = parseFloat(bl);
+            if (bgc === 20) bEntity.vertices.push([bEntity._lastX, parseFloat(bl)]);
+          } else if (bType === 'LINE') {
+            if (bgc === 62) bEntity.props.color = parseInt(bl, 10);
+            if (bgc === 8) bEntity.props.layer = bl;
+            if (bgc === 10) bEntity.props.x1 = parseFloat(bl);
+            if (bgc === 20) bEntity.props.y1 = parseFloat(bl);
+            if (bgc === 11) bEntity.props.x2 = parseFloat(bl);
+            if (bgc === 21) bEntity.props.y2 = parseFloat(bl);
+          }
+        }
+        // Capture block name from group code 2 after BLOCK start
+        if (bgc === 2 && blockName === null) blockName = bl;
+      }
+      bgc = null;
+      bi++;
+    }
+  }
+  console.log('[DXF Parser] Blocs définis:', Object.keys(blockDefs).length, Object.keys(blockDefs));
+
   // ── Find ENTITIES section ──
   while (i < lines.length && lines[i].trim() !== 'ENTITIES') i++;
   i++;
@@ -2175,6 +2233,12 @@ function parseDxfClientSide(text, fileName) {
         if (groupCode === 20) currentEntity.props.y1 = parseFloat(value);
         if (groupCode === 11) currentEntity.props.x2 = parseFloat(value);
         if (groupCode === 21) currentEntity.props.y2 = parseFloat(value);
+      } else if (currentType === 'INSERT') {
+        if (groupCode === 2) currentEntity.props.blockName = value;
+        if (groupCode === 8) currentEntity.props.layer = value;
+        if (groupCode === 62) currentEntity.props.color = parseInt(value, 10);
+        if (groupCode === 10) currentEntity.props.insX = parseFloat(value);
+        if (groupCode === 20) currentEntity.props.insY = parseFloat(value);
       } else if (currentType === 'TEXT' || currentType === 'MTEXT') {
         if (groupCode === 10) currentEntity.props.x = parseFloat(value);
         if (groupCode === 1) currentEntity.props.text = value;
@@ -2185,6 +2249,48 @@ function parseDxfClientSide(text, fileName) {
     i++;
   }
   if (currentEntity) entities.push(currentEntity);
+
+  // ── Expand INSERT entities → résoudre les blocs ──
+  const expandedEntities = [];
+  let insertCount = 0;
+  for (const e of entities) {
+    if (e.type === 'INSERT' && e.props.blockName) {
+      const blockEnts = blockDefs[e.props.blockName];
+      if (!blockEnts) continue;
+      insertCount++;
+      const ox = e.props.insX || 0;
+      const oy = e.props.insY || 0;
+      for (const be of blockEnts) {
+        // Cloner l'entité du bloc avec offset
+        const clone = { type: be.type, props: { ...be.props }, vertices: [] };
+        // Résoudre couleur BYBLOCK (0) : hériter de l'INSERT
+        if (!clone.props.color || clone.props.color === 0) {
+          clone.props.color = e.props.color;
+        }
+        // Résoudre calque : hériter de l'INSERT si non défini
+        if (!clone.props.layer) {
+          clone.props.layer = e.props.layer;
+        }
+        if (be.type === 'LWPOLYLINE' && be.vertices.length > 0) {
+          clone.vertices = be.vertices.map(v => [v[0] + ox, v[1] + oy]);
+        } else if (be.type === 'LINE') {
+          clone.props.x1 = (be.props.x1 || 0) + ox;
+          clone.props.y1 = (be.props.y1 || 0) + oy;
+          clone.props.x2 = (be.props.x2 || 0) + ox;
+          clone.props.y2 = (be.props.y2 || 0) + oy;
+        }
+        expandedEntities.push(clone);
+      }
+    } else {
+      expandedEntities.push(e);
+    }
+  }
+  if (insertCount > 0) {
+    console.log(`[DXF Parser] ${insertCount} INSERT(s) résolus, ${expandedEntities.length - entities.length + insertCount} entités ajoutées depuis les blocs`);
+  }
+  // Remplacer entities par les expandedEntities
+  entities.length = 0;
+  for (const e of expandedEntities) entities.push(e);
 
   // Extract facade labels
   const facadeLabels = entities
@@ -2287,6 +2393,19 @@ function parseDxfClientSide(text, fileName) {
   for (const lr of lineRects) {
     addRect(lr.xmin, lr.xmax, lr.ymin, lr.ymax, lr.color, lr.layer);
   }
+
+  // ── Diagnostic : log les entités trouvées ──
+  const entityCounts = {};
+  for (const e of entities) {
+    entityCounts[e.type] = (entityCounts[e.type] || 0) + 1;
+  }
+  console.log('[DXF Parser] Entités trouvées:', entityCounts);
+  console.log('[DXF Parser] LWPOLYLINE rectangles:', entities.filter(e => e.type === 'LWPOLYLINE' && e.vertices.length >= 3).length);
+  console.log('[DXF Parser] POLYLINE rectangles:', entities.filter(e => e.type === 'POLYLINE' && e.vertices.length >= 3).length);
+  console.log('[DXF Parser] LINE rectangles assemblés:', lineRects.length);
+  console.log('[DXF Parser] Total rectangles extraits:', rects.length);
+  console.log('[DXF Parser] Couleurs calques:', JSON.stringify(layerColors));
+  console.log('[DXF Parser] Rectangles par couleur:', rects.reduce((acc, r) => { acc[r.color] = (acc[r.color] || 0) + 1; return acc; }, {}));
 
   // Classify subtype
   function classifySubtype(w, h, stockW) {
