@@ -54,7 +54,7 @@
           "pieces": [
             {
               "id": 1,
-              "w": 3651.2,
+              "w": 3650,
               "h": 445.0,
               "qty": 1
             },
@@ -140,47 +140,53 @@
             {
               "id": 1,
               "w": 3650,
-              "h": 776.0,
+              "h": 542.0,
               "qty": 1
             },
             {
               "id": 2,
               "w": 3650,
-              "h": 777.0,
-              "qty": 2
+              "h": 776.0,
+              "qty": 1
             },
             {
               "id": 3,
               "w": 3650,
-              "h": 778.0,
+              "h": 777.0,
               "qty": 2
             },
             {
               "id": 4,
               "w": 3650,
+              "h": 778.0,
+              "qty": 2
+            },
+            {
+              "id": 5,
+              "w": 3650,
               "h": 822.3,
               "qty": 10
             },
             {
-              "id": 5,
+              "id": 6,
               "w": 3650,
               "h": 833.0,
               "qty": 4
             },
             {
-              "id": 6,
+              "id": 7,
               "w": 3650,
               "h": 981.0,
               "qty": 2
             },
             {
-              "id": 7,
+              "id": 8,
               "w": 3650,
               "h": 1028.5,
               "qty": 2
             }
           ],
-          "nextPieceId": 8
+          "nextPieceId": 9
         },
         {
           "id": 4,
@@ -313,83 +319,6 @@
     },
     {
       "id": 3,
-      "name": "Bandeau Haut — 1064mm",
-      "color": "#ffb300",
-      "reference": "",
-      "coloris": "",
-      "epaisseur": 18,
-      "prixM2": "",
-      "subsections": [
-        {
-          "id": 1,
-          "name": "Façade Nord",
-          "pieces": [
-            {
-              "id": 1,
-              "w": 4075.0,
-              "h": 1064.0,
-              "qty": 2
-            },
-            {
-              "id": 2,
-              "w": 4076.0,
-              "h": 1064.0,
-              "qty": 1
-            }
-          ],
-          "nextPieceId": 3
-        },
-        {
-          "id": 2,
-          "name": "Façade Ouest",
-          "pieces": [
-            {
-              "id": 1,
-              "w": 4267.0,
-              "h": 1064.0,
-              "qty": 2
-            }
-          ],
-          "nextPieceId": 2
-        },
-        {
-          "id": 3,
-          "name": "Façade Est",
-          "pieces": [
-            {
-              "id": 1,
-              "w": 4267.0,
-              "h": 1064.0,
-              "qty": 2
-            }
-          ],
-          "nextPieceId": 2
-        },
-        {
-          "id": 4,
-          "name": "Façade Sud",
-          "pieces": [
-            {
-              "id": 1,
-              "w": 4075.0,
-              "h": 1064.0,
-              "qty": 2
-            },
-            {
-              "id": 2,
-              "w": 4076.0,
-              "h": 1064.0,
-              "qty": 1
-            }
-          ],
-          "nextPieceId": 3
-        }
-      ],
-      "nextSubsectionId": 5,
-      "activeSubsectionId": 1
-    },
-    {
-      "id": 4,
       "name": "Plein RDC — Panneaux 2550mm",
       "color": "#a0c4ff",
       "reference": "",
@@ -502,47 +431,53 @@
             {
               "id": 1,
               "w": 2550,
-              "h": 776.0,
+              "h": 542.0,
               "qty": 1
             },
             {
               "id": 2,
               "w": 2550,
-              "h": 777.0,
-              "qty": 2
+              "h": 776.0,
+              "qty": 1
             },
             {
               "id": 3,
               "w": 2550,
-              "h": 778.0,
+              "h": 777.0,
               "qty": 2
             },
             {
               "id": 4,
               "w": 2550,
+              "h": 778.0,
+              "qty": 2
+            },
+            {
+              "id": 5,
+              "w": 2550,
               "h": 822.3,
               "qty": 10
             },
             {
-              "id": 5,
+              "id": 6,
               "w": 2550,
               "h": 833.0,
               "qty": 4
             },
             {
-              "id": 6,
+              "id": 7,
               "w": 2550,
               "h": 981.0,
               "qty": 2
             },
             {
-              "id": 7,
+              "id": 8,
               "w": 2550,
               "h": 1028.5,
               "qty": 2
             }
           ],
-          "nextPieceId": 8
+          "nextPieceId": 9
         },
         {
           "id": 4,
@@ -568,7 +503,7 @@
       "activeSubsectionId": 1
     },
     {
-      "id": 5,
+      "id": 4,
       "name": "Fenêtres/Portes RDC — Panneaux 2550mm",
       "color": "#c9e0ff",
       "reference": "",
@@ -629,6 +564,95 @@
         }
       ],
       "nextSubsectionId": 4,
+      "activeSubsectionId": 1
+    },
+    {
+      "id": 5,
+      "name": "Bandeau Haut — 1064mm",
+      "color": "#ffb300",
+      "reference": "",
+      "coloris": "",
+      "epaisseur": 18,
+      "prixM2": "",
+      "subsections": [
+        {
+          "id": 1,
+          "name": "Façade Nord",
+          "pieces": [
+            {
+              "id": 1,
+              "w": 4075.0,
+              "h": 1064.0,
+              "qty": 2
+            },
+            {
+              "id": 2,
+              "w": 4076.0,
+              "h": 1064.0,
+              "qty": 1
+            }
+          ],
+          "nextPieceId": 3
+        },
+        {
+          "id": 2,
+          "name": "Façade Ouest",
+          "pieces": [
+            {
+              "id": 1,
+              "w": 4267.0,
+              "h": 1064.0,
+              "qty": 2
+            },
+            {
+              "id": 2,
+              "w": 4268.0,
+              "h": 1064.0,
+              "qty": 5
+            }
+          ],
+          "nextPieceId": 3
+        },
+        {
+          "id": 3,
+          "name": "Façade Est",
+          "pieces": [
+            {
+              "id": 1,
+              "w": 4267.0,
+              "h": 1064.0,
+              "qty": 2
+            },
+            {
+              "id": 2,
+              "w": 4268.0,
+              "h": 1064.0,
+              "qty": 5
+            }
+          ],
+          "nextPieceId": 3
+        },
+        {
+          "id": 4,
+          "name": "Façade Sud",
+          "pieces": [
+            {
+              "id": 1,
+              "w": 4075.0,
+              "h": 1064.0,
+              "qty": 2
+            },
+            {
+              "id": 2,
+              "w": 4076.0,
+              "h": 1064.0,
+              "qty": 1
+            }
+          ],
+          "nextPieceId": 3
+        }
+      ],
+      "nextSubsectionId": 5,
       "activeSubsectionId": 1
     }
   ],
