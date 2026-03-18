@@ -26,29 +26,23 @@
           "panelSubtypes": [
             {
               "id": 1,
-              "name": "Plein N1",
-              "pieces": [
-                { "id": 1, "w": 3650, "h": 867.0, "qty": 14 }
-              ],
-              "nextPieceId": 2
-            },
-            {
-              "id": 2,
-              "name": "Fenêtre/Porte N1",
-              "pieces": [],
-              "nextPieceId": 1
-            },
-            {
-              "id": 3,
               "name": "Bandeau Haut",
               "pieces": [
                 { "id": 1, "w": 4075.0, "h": 1064.0, "qty": 2 },
                 { "id": 2, "w": 4076.0, "h": 1064.0, "qty": 1 }
               ],
               "nextPieceId": 3
+            },
+            {
+              "id": 2,
+              "name": "Plein",
+              "pieces": [
+                { "id": 1, "w": 3650, "h": 867.0, "qty": 14 }
+              ],
+              "nextPieceId": 2
             }
           ],
-          "nextSubtypeId": 4,
+          "nextSubtypeId": 3,
           "activeSubtypeId": 1
         },
         {
@@ -57,7 +51,16 @@
           "panelSubtypes": [
             {
               "id": 1,
-              "name": "Plein N1",
+              "name": "Bandeau Haut",
+              "pieces": [
+                { "id": 1, "w": 4267.0, "h": 1064.0, "qty": 2 },
+                { "id": 2, "w": 4268.0, "h": 1064.0, "qty": 5 }
+              ],
+              "nextPieceId": 3
+            },
+            {
+              "id": 2,
+              "name": "Plein",
               "pieces": [
                 { "id": 1,  "w": 3650, "h": 445.0,  "qty": 1 },
                 { "id": 2,  "w": 3650, "h": 491.0,  "qty": 1 },
@@ -76,8 +79,8 @@
               "nextPieceId": 14
             },
             {
-              "id": 2,
-              "name": "Fenêtre/Porte N1",
+              "id": 3,
+              "name": "Dessus/Dessous Fenêtre-Porte",
               "pieces": [
                 { "id": 1, "w": 1008.0, "h": 788.0,  "qty": 3 },
                 { "id": 2, "w": 1008.0, "h": 984.0,  "qty": 8 },
@@ -86,15 +89,6 @@
                 { "id": 5, "w": 984.0,  "h": 822.0,  "qty": 8 }
               ],
               "nextPieceId": 6
-            },
-            {
-              "id": 3,
-              "name": "Bandeau Haut",
-              "pieces": [
-                { "id": 1, "w": 4267.0, "h": 1064.0, "qty": 2 },
-                { "id": 2, "w": 4268.0, "h": 1064.0, "qty": 5 }
-              ],
-              "nextPieceId": 3
             }
           ],
           "nextSubtypeId": 4,
@@ -106,22 +100,31 @@
           "panelSubtypes": [
             {
               "id": 1,
-              "name": "Plein N1",
+              "name": "Bandeau Haut",
               "pieces": [
-                { "id": 1, "w": 3650, "h": 542.0,   "qty": 1 },
-                { "id": 2, "w": 3650, "h": 776.0,   "qty": 1 },
-                { "id": 3, "w": 3650, "h": 777.0,   "qty": 2 },
-                { "id": 4, "w": 3650, "h": 778.0,   "qty": 2 },
-                { "id": 5, "w": 3650, "h": 822.3,   "qty": 10 },
-                { "id": 6, "w": 3650, "h": 833.0,   "qty": 4 },
-                { "id": 7, "w": 3650, "h": 981.0,   "qty": 2 },
-                { "id": 8, "w": 3650, "h": 1028.5,  "qty": 2 }
+                { "id": 1, "w": 4267.0, "h": 1064.0, "qty": 2 },
+                { "id": 2, "w": 4268.0, "h": 1064.0, "qty": 5 }
+              ],
+              "nextPieceId": 3
+            },
+            {
+              "id": 2,
+              "name": "Plein",
+              "pieces": [
+                { "id": 1, "w": 3650, "h": 542.0,  "qty": 1 },
+                { "id": 2, "w": 3650, "h": 776.0,  "qty": 1 },
+                { "id": 3, "w": 3650, "h": 777.0,  "qty": 2 },
+                { "id": 4, "w": 3650, "h": 778.0,  "qty": 2 },
+                { "id": 5, "w": 3650, "h": 822.3,  "qty": 10 },
+                { "id": 6, "w": 3650, "h": 833.0,  "qty": 4 },
+                { "id": 7, "w": 3650, "h": 981.0,  "qty": 2 },
+                { "id": 8, "w": 3650, "h": 1028.5, "qty": 2 }
               ],
               "nextPieceId": 9
             },
             {
-              "id": 2,
-              "name": "Fenêtre/Porte N1",
+              "id": 3,
+              "name": "Dessus/Dessous Fenêtre-Porte",
               "pieces": [
                 { "id": 1, "w": 1007.9, "h": 788.0, "qty": 6 },
                 { "id": 2, "w": 1007.9, "h": 984.0, "qty": 5 },
@@ -130,15 +133,6 @@
                 { "id": 5, "w": 984.0,  "h": 822.1, "qty": 5 }
               ],
               "nextPieceId": 6
-            },
-            {
-              "id": 3,
-              "name": "Bandeau Haut",
-              "pieces": [
-                { "id": 1, "w": 4267.0, "h": 1064.0, "qty": 2 },
-                { "id": 2, "w": 4268.0, "h": 1064.0, "qty": 5 }
-              ],
-              "nextPieceId": 3
             }
           ],
           "nextSubtypeId": 4,
@@ -150,7 +144,16 @@
           "panelSubtypes": [
             {
               "id": 1,
-              "name": "Plein N1",
+              "name": "Bandeau Haut",
+              "pieces": [
+                { "id": 1, "w": 4075.0, "h": 1064.0, "qty": 2 },
+                { "id": 2, "w": 4076.0, "h": 1064.0, "qty": 1 }
+              ],
+              "nextPieceId": 3
+            },
+            {
+              "id": 2,
+              "name": "Plein",
               "pieces": [
                 { "id": 1, "w": 3650, "h": 296.0, "qty": 2 },
                 { "id": 2, "w": 3650, "h": 867.0, "qty": 12 }
@@ -158,20 +161,11 @@
               "nextPieceId": 3
             },
             {
-              "id": 2,
-              "name": "Fenêtre/Porte N1",
+              "id": 3,
+              "name": "Dessus/Dessous Fenêtre-Porte",
               "pieces": [
                 { "id": 1, "w": 1134.0, "h": 1007.9, "qty": 1 },
                 { "id": 2, "w": 1134.0, "h": 492.1,  "qty": 1 }
-              ],
-              "nextPieceId": 3
-            },
-            {
-              "id": 3,
-              "name": "Bandeau Haut",
-              "pieces": [
-                { "id": 1, "w": 4075.0, "h": 1064.0, "qty": 2 },
-                { "id": 2, "w": 4076.0, "h": 1064.0, "qty": 1 }
               ],
               "nextPieceId": 3
             }
@@ -198,20 +192,14 @@
           "panelSubtypes": [
             {
               "id": 1,
-              "name": "Plein RDC",
+              "name": "Plein",
               "pieces": [
                 { "id": 1, "w": 2550, "h": 867.0, "qty": 14 }
               ],
               "nextPieceId": 2
-            },
-            {
-              "id": 2,
-              "name": "Fenêtre/Porte RDC",
-              "pieces": [],
-              "nextPieceId": 1
             }
           ],
-          "nextSubtypeId": 3,
+          "nextSubtypeId": 2,
           "activeSubtypeId": 1
         },
         {
@@ -220,7 +208,7 @@
           "panelSubtypes": [
             {
               "id": 1,
-              "name": "Plein RDC",
+              "name": "Plein",
               "pieces": [
                 { "id": 1,  "w": 2550, "h": 445.0,  "qty": 1 },
                 { "id": 2,  "w": 2550, "h": 491.0,  "qty": 1 },
@@ -240,7 +228,7 @@
             },
             {
               "id": 2,
-              "name": "Fenêtre/Porte RDC",
+              "name": "Dessus/Dessous Fenêtre-Porte",
               "pieces": [
                 { "id": 1, "w": 788.0, "h": 750.0, "qty": 6 },
                 { "id": 2, "w": 984.0, "h": 750.0, "qty": 8 }
@@ -257,7 +245,7 @@
           "panelSubtypes": [
             {
               "id": 1,
-              "name": "Plein RDC",
+              "name": "Plein",
               "pieces": [
                 { "id": 1, "w": 2550, "h": 542.0,  "qty": 1 },
                 { "id": 2, "w": 2550, "h": 776.0,  "qty": 1 },
@@ -272,7 +260,7 @@
             },
             {
               "id": 2,
-              "name": "Fenêtre/Porte RDC",
+              "name": "Dessus/Dessous Fenêtre-Porte",
               "pieces": [
                 { "id": 1, "w": 788.0, "h": 749.9, "qty": 6 },
                 { "id": 2, "w": 984.0, "h": 749.9, "qty": 5 }
@@ -289,7 +277,7 @@
           "panelSubtypes": [
             {
               "id": 1,
-              "name": "Plein RDC",
+              "name": "Plein",
               "pieces": [
                 { "id": 1, "w": 2550, "h": 296.0, "qty": 2 },
                 { "id": 2, "w": 2550, "h": 867.0, "qty": 12 }
@@ -298,7 +286,7 @@
             },
             {
               "id": 2,
-              "name": "Fenêtre/Porte RDC",
+              "name": "Dessus/Dessous Fenêtre-Porte",
               "pieces": [
                 { "id": 1, "w": 1134.0, "h": 749.9, "qty": 1 }
               ],
