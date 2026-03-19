@@ -569,6 +569,7 @@
           <button class="btn-export" onclick="exportCSV()">&#128196; CSV</button>
           <button class="btn-export" onclick="exportExcel()">&#128202; Excel</button>
           <button class="btn-export" onclick="exportPDF()">&#128247; PDF</button>
+          <button class="btn-export" onclick="exportDxfPanneaux()" title="Export DXF panneaux avec numérotation">&#128209; DXF Panneaux</button>
         </div>
       </div>
       <table class="order-table" id="orderTable"></table>
@@ -652,6 +653,10 @@
     <div class="card card-accent" id="ossatureSummaryCard" style="display:none;">
       <div class="card-title">Résumé ossature</div>
       <div id="ossatureSummaryContent"></div>
+      <div style="margin-top:12px;display:flex;gap:6px;">
+        <button class="btn-export" onclick="exportDxfOssature()" title="Export DXF ossature (oméga + zed)">&#128209; DXF Ossature</button>
+        <button class="btn-export" onclick="exportDxfPanneaux()" title="Export DXF panneaux">&#128209; DXF Panneaux</button>
+      </div>
     </div>
   </div>
   <div class="main" id="ossatureContent">
@@ -3960,6 +3965,431 @@ function exportDevisPDF() {
   </head><body>${body}<script>window.onload=()=>window.print();<\/script></body></html>`;
   const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
   window.open(URL.createObjectURL(blob), '_blank');
+}
+
+// ============================================================
+// DXF EXPORT (Panneaux + Ossature)
+// ============================================================
+
+function generateDxfString(layers, entities) {
+  let s = '0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n0\nENDSEC\n';
+  // TABLES section with LAYER table
+  s += '0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n' + layers.length + '\n';
+  for (const l of layers) {
+    s += '0\nLAYER\n2\n' + l.name + '\n70\n0\n62\n' + l.color + '\n6\nCONTINUOUS\n';
+  }
+  s += '0\nENDTAB\n0\nENDSEC\n';
+  // ENTITIES section
+  s += '0\nSECTION\n2\nENTITIES\n';
+  for (const e of entities) s += e;
+  s += '0\nENDSEC\n0\nEOF\n';
+  return s;
+}
+
+function dxfRect(xmin, ymin, xmax, ymax, layer, color) {
+  return '0\nLWPOLYLINE\n8\n' + layer + '\n62\n' + color + '\n70\n1\n90\n4\n' +
+    '10\n' + xmin.toFixed(1) + '\n20\n' + ymin.toFixed(1) + '\n' +
+    '10\n' + xmax.toFixed(1) + '\n20\n' + ymin.toFixed(1) + '\n' +
+    '10\n' + xmax.toFixed(1) + '\n20\n' + ymax.toFixed(1) + '\n' +
+    '10\n' + xmin.toFixed(1) + '\n20\n' + ymax.toFixed(1) + '\n';
+}
+
+function dxfLine(x1, y1, x2, y2, layer, color) {
+  return '0\nLINE\n8\n' + layer + '\n62\n' + color + '\n' +
+    '10\n' + x1.toFixed(1) + '\n20\n' + y1.toFixed(1) + '\n30\n0.0\n' +
+    '11\n' + x2.toFixed(1) + '\n21\n' + y2.toFixed(1) + '\n31\n0.0\n';
+}
+
+function dxfText(x, y, h, text, layer, color, halign) {
+  // halign: 0=left, 1=center, 2=right
+  const ha = halign || 0;
+  let s = '0\nTEXT\n8\n' + layer + '\n62\n' + color + '\n' +
+    '10\n' + x.toFixed(1) + '\n20\n' + y.toFixed(1) + '\n30\n0.0\n' +
+    '40\n' + h.toFixed(1) + '\n1\n' + text + '\n';
+  if (ha > 0) {
+    s += '72\n' + ha + '\n11\n' + x.toFixed(1) + '\n21\n' + y.toFixed(1) + '\n31\n0.0\n';
+  }
+  return s;
+}
+
+function dxfMtext(x, y, h, text, layer, color, attachPt) {
+  // attachPt: 1=TL,2=TC,4=ML,5=MC,7=BL,8=BC
+  return '0\nMTEXT\n8\n' + layer + '\n62\n' + color + '\n' +
+    '10\n' + x.toFixed(1) + '\n20\n' + y.toFixed(1) + '\n30\n0.0\n' +
+    '40\n' + h.toFixed(1) + '\n71\n' + (attachPt || 5) + '\n1\n' + text + '\n';
+}
+
+function downloadDxf(content, filename) {
+  const blob = new Blob([content], { type: 'application/dxf' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// Group rects by facade and return sorted facade data
+function groupRectsByFacade(rectsSpatial, facadeLabels) {
+  const fLabels = facadeLabels && facadeLabels.length ? facadeLabels : [[0, 'Facade']];
+  function nearestFacade(xcenter) {
+    let best = fLabels[0];
+    for (const lbl of fLabels) {
+      if (Math.abs(lbl[0] - xcenter) < Math.abs(best[0] - xcenter)) best = lbl;
+    }
+    return best[1];
+  }
+  const byFacade = {};
+  for (const r of rectsSpatial) {
+    const fn = nearestFacade((r.xmin + r.xmax) / 2);
+    if (!byFacade[fn]) byFacade[fn] = [];
+    byFacade[fn].push(r);
+  }
+  return { byFacade, nearestFacade };
+}
+
+// ── EXPORT DXF PANNEAUX ──
+function exportDxfPanneaux() {
+  if (!projectRectsSpatial || !projectRectsSpatial.length) {
+    alert('Aucune donnée spatiale disponible. Importez un DXF d\'abord.');
+    return;
+  }
+
+  const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+  const facadeNames = Object.keys(byFacade).sort();
+
+  // Layers
+  const layers = [
+    { name: 'CONTOUR', color: 8 },       // gray facade outline
+    { name: 'PANNEAUX', color: 7 },       // panel outlines (color per entity)
+    { name: 'TEXTE', color: 7 },          // labels
+    { name: 'TITRE', color: 7 },          // facade title
+    { name: 'COTES', color: 8 },          // dimensions
+  ];
+
+  const entities = [];
+  const SPACING = 2000; // vertical spacing between facades
+  let yOffset = 0;
+
+  for (const fname of facadeNames) {
+    const panels = byFacade[fname];
+    // Compute facade bounding box
+    let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
+    for (const p of panels) {
+      fxmin = Math.min(fxmin, p.xmin);
+      fxmax = Math.max(fxmax, p.xmax);
+      fymin = Math.min(fymin, p.ymin);
+      fymax = Math.max(fymax, p.ymax);
+    }
+
+    // Shift facade so it starts at X=0, Y=yOffset
+    const dx = -fxmin;
+    const dy = yOffset - fymin;
+
+    // Facade outline (slightly larger)
+    const margin = 100;
+    entities.push(dxfRect(-margin, yOffset - margin, (fxmax - fxmin) + margin, yOffset + (fymax - fymin) + margin, 'CONTOUR', 8));
+
+    // Facade title
+    const titleH = Math.max(150, (fymax - fymin) * 0.04);
+    entities.push(dxfText((fxmax - fxmin) / 2, yOffset + (fymax - fymin) + margin + titleH * 0.5, titleH, fname, 'TITRE', 7, 1));
+
+    // Sort panels for numbering: left to right, then bottom to top
+    const sorted = [...panels].sort((a, b) => {
+      const xa = Math.round(a.xmin / 50) * 50;
+      const xb = Math.round(b.xmin / 50) * 50;
+      if (xa !== xb) return xa - xb;
+      return a.ymin - b.ymin;
+    });
+
+    // Draw each panel
+    for (let i = 0; i < sorted.length; i++) {
+      const p = sorted[i];
+      const x1 = p.xmin + dx;
+      const y1 = p.ymin + dy;
+      const x2 = p.xmax + dx;
+      const y2 = p.ymax + dy;
+      const aciColor = p.color || 7;
+
+      // Panel rectangle
+      entities.push(dxfRect(x1, y1, x2, y2, 'PANNEAUX', aciColor));
+
+      // Panel label: number + dimensions
+      const pw = Math.round(p.xmax - p.xmin);
+      const ph = Math.round(p.ymax - p.ymin);
+      const cx = (x1 + x2) / 2;
+      const cy = (y1 + y2) / 2;
+      const labelH = Math.min(pw, ph) * 0.15;
+      const textH = Math.max(50, Math.min(120, labelH));
+
+      // Panel number
+      entities.push(dxfMtext(cx, cy + textH * 0.7, textH, 'P' + (i + 1), 'TEXTE', aciColor, 8));
+      // Dimensions
+      entities.push(dxfMtext(cx, cy - textH * 0.3, textH * 0.7, pw + 'x' + ph, 'COTES', 8, 2));
+    }
+
+    yOffset += (fymax - fymin) + SPACING + titleH * 2;
+  }
+
+  const dxf = generateDxfString(layers, entities);
+  const nom = chantier.nom || 'calpinage';
+  downloadDxf(dxf, nom.replace(/[^a-zA-Z0-9]/g, '_') + '_panneaux.dxf');
+}
+
+// ── EXPORT DXF OSSATURE ──
+function exportDxfOssature() {
+  if (!projectRectsSpatial || !projectRectsSpatial.length) {
+    alert('Aucune donnée spatiale disponible. Importez un DXF d\'abord.');
+    return;
+  }
+
+  const ENTRAXE_REGULAR = ossatureConfig.entaxeMax || 600;
+  const ENTRAXE_BANDEAU = ossatureConfig.entaxeBandeau || 800;
+  const JOINT = 8, MAX_GAP = 20;
+  const BANDEAU_H = 1064, BANDEAU_TOL = 15;
+
+  const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+  const facadeNames = Object.keys(byFacade).sort();
+
+  // Detect tier heights
+  const rdcH = {}, n1H = {};
+  for (const r of projectRectsSpatial) {
+    const h = Math.round(r.ymax - r.ymin);
+    if (h > 2000) {
+      if (r.color === 25) rdcH[h] = (rdcH[h] || 0) + 1;
+      if (r.color === 30) n1H[h] = (n1H[h] || 0) + 1;
+    }
+  }
+  let RDC_HEIGHT = 2550, N1_HEIGHT = 3650;
+  const rdcE = Object.entries(rdcH).sort((a, b) => b[1] - a[1]);
+  const n1E = Object.entries(n1H).sort((a, b) => b[1] - a[1]);
+  if (rdcE.length > 0) RDC_HEIGHT = parseInt(rdcE[0][0]);
+  if (n1E.length > 0) N1_HEIGHT = parseInt(n1E[0][0]);
+
+  function buildColumns(panels) {
+    const columns = {};
+    for (const p of panels) {
+      const ck = Math.round(p.xmin / 10) * 10;
+      if (!columns[ck]) columns[ck] = [];
+      columns[ck].push(p);
+    }
+    for (const ck of Object.keys(columns)) {
+      const seen = new Set();
+      let unique = [];
+      for (const p of columns[ck]) {
+        const sig = `${Math.round(p.ymin)}_${Math.round(p.ymax)}`;
+        if (!seen.has(sig)) { seen.add(sig); unique.push(p); }
+      }
+      unique.sort((a, b) => (b.ymax - b.ymin) - (a.ymax - a.ymin));
+      const filtered = [];
+      for (const p of unique) {
+        let englobed = false;
+        for (const big of filtered) {
+          if (p.ymin >= big.ymin - 1 && p.ymax <= big.ymax + 1) { englobed = true; break; }
+        }
+        if (!englobed) filtered.push(p);
+      }
+      columns[ck] = filtered;
+    }
+    return Object.keys(columns).map(Number).sort((a, b) => a - b).map(k => columns[k]);
+  }
+
+  function getGaps(leftIntervals, rightIntervals) {
+    const events = [];
+    for (const [s, e] of leftIntervals) { events.push([s, 'L+']); events.push([e, 'L-']); }
+    for (const [s, e] of rightIntervals) { events.push([s, 'R+']); events.push([e, 'R-']); }
+    events.sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]));
+    const leftGaps = [], rightGaps = [];
+    let lCount = 0, rCount = 0, prevY = null;
+    for (const [y, ev] of events) {
+      if (prevY !== null && y > prevY) {
+        if (lCount > 0 && rCount === 0) rightGaps.push([prevY, y]);
+        else if (rCount > 0 && lCount === 0) leftGaps.push([prevY, y]);
+      }
+      if (ev === 'L+') lCount++; else if (ev === 'L-') lCount--;
+      else if (ev === 'R+') rCount++; else if (ev === 'R-') rCount--;
+      prevY = y;
+    }
+    return { leftGaps, rightGaps };
+  }
+
+  // Layers
+  const layers = [
+    { name: 'CONTOUR', color: 8 },
+    { name: 'PANNEAUX_REF', color: 9 },   // light gray panel outlines
+    { name: 'OMEGA', color: 4 },           // cyan
+    { name: 'ZED_ENTRAXE', color: 2 },     // yellow
+    { name: 'ZED_BORD', color: 6 },        // magenta
+    { name: 'OMEGA_BANDEAU', color: 4 },   // cyan
+    { name: 'ZED_BANDEAU', color: 2 },     // yellow
+    { name: 'TITRE', color: 7 },
+    { name: 'TEXTE', color: 7 },
+  ];
+
+  const entities = [];
+  const SPACING = 2000;
+  let yOffset = 0;
+
+  for (const fname of facadeNames) {
+    const allPanels = byFacade[fname];
+    const regularPanels = [], bandeauPanels = [];
+    for (const p of allPanels) {
+      const facadeH = Math.round(p.ymax - p.ymin);
+      if (Math.abs(facadeH - BANDEAU_H) <= BANDEAU_TOL) bandeauPanels.push(p);
+      else regularPanels.push(p);
+    }
+
+    // Bounding box
+    let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
+    for (const p of allPanels) {
+      fxmin = Math.min(fxmin, p.xmin);
+      fxmax = Math.max(fxmax, p.xmax);
+      fymin = Math.min(fymin, p.ymin);
+      fymax = Math.max(fymax, p.ymax);
+    }
+    const dx = -fxmin;
+    const dy = yOffset - fymin;
+    const facW = fxmax - fxmin;
+    const facH = fymax - fymin;
+
+    // Facade outline
+    const margin = 100;
+    entities.push(dxfRect(-margin, yOffset - margin, facW + margin, yOffset + facH + margin, 'CONTOUR', 8));
+
+    // Title
+    const titleH = Math.max(150, facH * 0.04);
+    entities.push(dxfText(facW / 2, yOffset + facH + margin + titleH * 0.5, titleH, fname + ' — Ossature', 'TITRE', 7, 1));
+
+    // Draw all panels as light gray reference outlines
+    for (const p of allPanels) {
+      entities.push(dxfRect(p.xmin + dx, p.ymin + dy, p.xmax + dx, p.ymax + dy, 'PANNEAUX_REF', 9));
+    }
+
+    // ── Omega and Zed for regular panels ──
+    const sortedCols = buildColumns(regularPanels);
+    for (let ci = 0; ci < sortedCols.length; ci++) {
+      const col = sortedCols[ci].sort((a, b) => a.ymin - b.ymin);
+
+      // Entraxe ZED for each panel in this column
+      for (const p of col) {
+        const pw = Math.round(p.xmax - p.xmin);
+        const nz = Math.max(0, Math.ceil(pw / ENTRAXE_REGULAR) - 1);
+        if (nz > 0) {
+          const step = pw / (nz + 1);
+          for (let z = 1; z <= nz; z++) {
+            const zx = p.xmin + z * step + dx;
+            entities.push(dxfLine(zx, p.ymin + dy, zx, p.ymax + dy, 'ZED_ENTRAXE', 2));
+          }
+        }
+      }
+
+      if (ci >= sortedCols.length - 1) continue;
+      const nextCol = sortedCols[ci + 1].sort((a, b) => a.ymin - b.ymin);
+      const leftXmax = Math.max(...col.map(p => p.xmax));
+      const rightXmin = Math.min(...nextCol.map(p => p.xmin));
+      const xGap = rightXmin - leftXmax;
+
+      if (xGap > MAX_GAP) {
+        // Opening - free edge ZED on both sides
+        for (const p of col) {
+          const zx = p.xmax + dx;
+          entities.push(dxfLine(zx, p.ymin + dy, zx, p.ymax + dy, 'ZED_BORD', 6));
+        }
+        for (const p of nextCol) {
+          const zx = p.xmin + dx;
+          entities.push(dxfLine(zx, p.ymin + dy, zx, p.ymax + dy, 'ZED_BORD', 6));
+        }
+        continue;
+      }
+
+      // Adjacent columns: OMEGA at junction
+      const junctionX = (leftXmax + rightXmin) / 2 + dx;
+      const overlaps = [];
+      for (const pl of col) {
+        for (const pr of nextCol) {
+          const ovStart = Math.max(pl.ymin, pr.ymin);
+          const ovEnd = Math.min(pl.ymax, pr.ymax);
+          if (ovEnd - ovStart > 1) {
+            const lh = Math.round(pl.ymax - pl.ymin);
+            const rh = Math.round(pr.ymax - pr.ymin);
+            const isFullTier = (Math.abs(lh - RDC_HEIGHT) <= 15 || Math.abs(lh - N1_HEIGHT) <= 15) &&
+                               (Math.abs(rh - RDC_HEIGHT) <= 15 || Math.abs(rh - N1_HEIGHT) <= 15);
+            overlaps.push({ start: ovStart, end: ovEnd, isFullTier });
+          }
+        }
+      }
+      overlaps.sort((a, b) => a.start - b.start);
+
+      if (overlaps.length > 0) {
+        const merged = [{ ...overlaps[0] }];
+        for (let oi = 1; oi < overlaps.length; oi++) {
+          const ov = overlaps[oi];
+          const prev = merged[merged.length - 1];
+          const gap = ov.start - prev.end;
+          if (gap <= JOINT + 2) {
+            if (prev.isFullTier && ov.isFullTier) {
+              merged.push({ ...ov });
+            } else {
+              prev.end = Math.max(prev.end, ov.end);
+              prev.isFullTier = prev.isFullTier && ov.isFullTier;
+            }
+          } else {
+            merged.push({ ...ov });
+          }
+        }
+        for (const m of merged) {
+          entities.push(dxfLine(junctionX, m.start + dy, junctionX, m.end + dy, 'OMEGA', 4));
+        }
+      }
+
+      // Gap ZED at window junctions
+      const leftIntervals = col.map(p => [p.ymin, p.ymax]);
+      const rightIntervals = nextCol.map(p => [p.ymin, p.ymax]);
+      const { leftGaps, rightGaps } = getGaps(leftIntervals, rightIntervals);
+      for (const [gs, ge] of rightGaps) {
+        if (Math.round(ge - gs) >= 100) {
+          entities.push(dxfLine(junctionX, gs + dy, junctionX, ge + dy, 'ZED_BORD', 6));
+        }
+      }
+      for (const [gs, ge] of leftGaps) {
+        if (Math.round(ge - gs) >= 100) {
+          entities.push(dxfLine(junctionX, gs + dy, junctionX, ge + dy, 'ZED_BORD', 6));
+        }
+      }
+    }
+
+    // ── Bandeau panels ──
+    const banSorted = [...bandeauPanels].sort((a, b) => a.xmin - b.xmin);
+
+    // Bandeau entraxe ZED
+    for (const bp of bandeauPanels) {
+      const bw = Math.round(bp.xmax - bp.xmin);
+      const nz = Math.max(0, Math.ceil(bw / ENTRAXE_BANDEAU) - 1);
+      if (nz > 0) {
+        const step = bw / (nz + 1);
+        for (let z = 1; z <= nz; z++) {
+          const zx = bp.xmin + z * step + dx;
+          entities.push(dxfLine(zx, bp.ymin + dy, zx, bp.ymax + dy, 'ZED_BANDEAU', 2));
+        }
+      }
+    }
+
+    // Bandeau-bandeau junction OMEGA
+    for (let bi = 0; bi < banSorted.length - 1; bi++) {
+      const gap = banSorted[bi + 1].xmin - banSorted[bi].xmax;
+      if (gap <= MAX_GAP) {
+        const jx = (banSorted[bi].xmax + banSorted[bi + 1].xmin) / 2 + dx;
+        const jymin = Math.max(banSorted[bi].ymin, banSorted[bi + 1].ymin);
+        const jymax = Math.min(banSorted[bi].ymax, banSorted[bi + 1].ymax);
+        entities.push(dxfLine(jx, jymin + dy, jx, jymax + dy, 'OMEGA_BANDEAU', 4));
+      }
+    }
+
+    yOffset += facH + SPACING + titleH * 2;
+  }
+
+  const dxf = generateDxfString(layers, entities);
+  const nom = chantier.nom || 'calpinage';
+  downloadDxf(dxf, nom.replace(/[^a-zA-Z0-9]/g, '_') + '_ossature.dxf');
 }
 
 // ============================================================
