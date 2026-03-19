@@ -138,10 +138,11 @@ def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600):
 
     Logique :
     - Les panneaux sont regroupés en colonnes verticales (même position X).
-    - OMÉGA (jonction entre 2 panneaux côte à côte) :
-      - Bords extrêmes de façade (gauche/droite)
-      - Entre deux colonnes adjacentes là où les deux ont des panneaux
-    - ZED (bords d'ouverture + entraxe) :
+    - Joint de 8mm entre tous les panneaux sur la façade.
+    - OMÉGA = jonction entre 2 panneaux adjacents (2 bords se touchent) :
+      - Entre deux colonnes adjacentes là où les deux ont des panneaux (Y-overlap)
+    - ZED = bord libre (un seul bord de panneau, pas de voisin) :
+      - Bords extrêmes de façade (gauche/droite) → bord libre
       - Bord d'ouverture : là où une seule colonne a un panneau (fenêtre/porte)
       - Entraxe : support intermédiaire quand la largeur du panneau > entraxe_max
 
@@ -209,11 +210,11 @@ def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600):
 
             # ── OMÉGA / ZED aux jonctions entre colonnes ──
             if i == 0:
-                # Bord gauche de la façade → oméga par panneau
+                # Bord gauche de la façade → ZED (bord libre, pas de panneau adjacent)
                 for p in col_panels_sorted:
                     ph = round(p["ymax"] - p["ymin"])
-                    total_omega_mm += ph
-                    omega_details[ph] += 1
+                    total_zed_mm += ph
+                    zed_details[ph] += 1
 
             if i < len(sorted_cols) - 1:
                 _, next_col_panels = sorted_cols[i + 1]
@@ -254,11 +255,11 @@ def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600):
                         total_zed_mm += h
                         zed_details[h] += 1
             else:
-                # Bord droit de la façade → oméga par panneau
+                # Bord droit de la façade → ZED (bord libre, pas de panneau adjacent)
                 for p in col_panels_sorted:
                     ph = round(p["ymax"] - p["ymin"])
-                    total_omega_mm += ph
-                    omega_details[ph] += 1
+                    total_zed_mm += ph
+                    zed_details[ph] += 1
 
         result[fname] = {
             "omega_mm": round(total_omega_mm),

@@ -819,6 +819,8 @@ let activeSection = 'panneaux'; // 'panneaux' | 'ossature' | 'devis'
 let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0 };
 let devisConfig = { prixMO: '' };
 let fixationConfig = { prixFixation: '' };
+let projectRectsSpatial = []; // Stored spatial rectangles from DXF parsing
+let projectFacadeLabels = []; // Stored facade labels from DXF parsing
 
 // ============================================================
 // STOCK
@@ -1858,6 +1860,8 @@ function getProjectData() {
     ossatureConfig,
     devisConfig,
     fixationConfig,
+    rectsSpatial: projectRectsSpatial,
+    facadeLabels: projectFacadeLabels,
   };
 }
 
@@ -1893,6 +1897,8 @@ function applyProjectData(data) {
     fixationConfig = { ...fixationConfig, ...data.fixationConfig };
     document.getElementById('fixationPrix').value = fixationConfig.prixFixation || '';
   }
+  if (data.rectsSpatial) projectRectsSpatial = data.rectsSpatial;
+  if (data.facadeLabels) projectFacadeLabels = data.facadeLabels;
   allResults = null;
   document.getElementById('summaryCard').style.display = 'none';
   document.getElementById('orderCard').style.display = 'none';
@@ -2542,12 +2548,12 @@ function parseDxfClientSide(text, fileName) {
             zedDetails[ph] = (zedDetails[ph] || 0) + nz;
           }
         }
-        // Bord gauche : oméga par panneau
+        // Bord gauche de la façade : ZED (bord libre, pas de panneau adjacent)
         if (ci === 0) {
           for (const p of col) {
             const ph = Math.round(p.ymax - p.ymin);
-            omegaMM += ph;
-            omegaDetails[ph] = (omegaDetails[ph] || 0) + 1;
+            zedMM += ph;
+            zedDetails[ph] = (zedDetails[ph] || 0) + 1;
           }
         }
         // Jonction entre colonnes adjacentes : calcul overlap/non-overlap
@@ -2589,11 +2595,11 @@ function parseDxfClientSide(text, fileName) {
             }
           }
         } else {
-          // Bord droit de la dernière colonne → oméga par panneau
+          // Bord droit de la façade : ZED (bord libre, pas de panneau adjacent)
           for (const p of col) {
             const ph = Math.round(p.ymax - p.ymin);
-            omegaMM += ph;
-            omegaDetails[ph] = (omegaDetails[ph] || 0) + 1;
+            zedMM += ph;
+            zedDetails[ph] = (zedDetails[ph] || 0) + 1;
           }
         }
       }
@@ -2622,6 +2628,8 @@ function parseDxfClientSide(text, fileName) {
     nextGroupId: gid,
     activeGroupId: 1,
     ossature_facades: ossature,
+    rectsSpatial,
+    facadeLabels,
   };
 }
 
@@ -2959,128 +2967,251 @@ function calcOssature() {
   const hOss = ossatureConfig.hauteurOssature || 0; // 0 = auto (use panel dimensions)
   const results = [];
 
-  function isPleinSubtype(stName) {
-    const n = stName.toLowerCase();
-    return n.includes('plein') || n.includes('bandeau');
-  }
-  function isOpeningSubtype(stName) {
-    const n = stName.toLowerCase();
-    return n.includes('fen') || n.includes('porte') || n.includes('spéc') || n.includes('spec');
-  }
   function isBandeauSubtype(stName) {
     return stName.toLowerCase().includes('bandeau');
   }
 
   // ── Orientation des dimensions ──
-  // DXF : w = max(rawW, rawH) = plus grande dim, h = min = plus petite dim
-  // Plein (3650×867) : p.w=3650 (hauteur), p.h=867 (largeur)
-  // Bandeau (1064×4268) : p.w=4268 (largeur), p.h=1064 (hauteur)
-  // Ouverture (1580×984) : p.w=1580 (hauteur), p.h=984 (largeur)
+  // DXF : w = max(rawW, rawH), h = min(rawW, rawH)
+  // Plein (3650×867) : p.w=3650 (hauteur montant), p.h=867 (largeur panneau)
+  // Bandeau (4268×1064) : p.w=4268 (largeur), p.h=1064 (hauteur montant)
   function getOssH(p, stName) {
-    if (hOss > 0 && isPleinSubtype(stName) && !isBandeauSubtype(stName)) return hOss;
+    if (hOss > 0 && !isBandeauSubtype(stName)) return hOss;
     return isBandeauSubtype(stName) ? p.h : p.w;
   }
   function getOssW(p, stName) {
     return isBandeauSubtype(stName) ? p.w : p.h;
   }
 
+  // ── Step 1: Spatial analysis (omega at junctions, zed at free edges) ──
+  // Analyse ALL panels across all groups for each facade.
+  // Règles :
+  //   - OMÉGA = jonction entre 2 panneaux adjacents (2 bords se touchent)
+  //   - ZED = bord libre (un seul bord de panneau, pas de voisin)
+  //   - Bords de façade (gauche/droite) = ZED (bord libre)
+  //   - Joint de 8mm entre panneaux
+  //   - Bandeau haut compté séparément (ossature indépendante)
+  const spatialOss = {}; // facadeName → { omegaCuts: [], zedEdgeCuts: [] }
+
+  if (projectRectsSpatial && projectRectsSpatial.length > 0) {
+    const fLabels = projectFacadeLabels && projectFacadeLabels.length ? projectFacadeLabels : [[0, 'Façade']];
+    function nearestFacade(xcenter) {
+      let best = fLabels[0];
+      for (const lbl of fLabels) {
+        if (Math.abs(lbl[0] - xcenter) < Math.abs(best[0] - xcenter)) best = lbl;
+      }
+      return best[1];
+    }
+
+    // Group rects by facade
+    const byFacade = {};
+    for (const r of projectRectsSpatial) {
+      const fn = nearestFacade((r.xmin + r.xmax) / 2);
+      if (!byFacade[fn]) byFacade[fn] = [];
+      byFacade[fn].push(r);
+    }
+
+    for (const [fname, panels] of Object.entries(byFacade)) {
+      // Séparer bandeau (~1064mm de hauteur) des panneaux réguliers
+      const BANDEAU_H = 1064, BANDEAU_TOL = 8;
+      const bandeauPanels = [];
+      const regularPanels = [];
+      for (const p of panels) {
+        const ph = Math.round(p.ymax - p.ymin);
+        if (Math.abs(ph - BANDEAU_H) <= BANDEAU_TOL) {
+          bandeauPanels.push(p);
+        } else {
+          regularPanels.push(p);
+        }
+      }
+
+      spatialOss[fname] = { omegaCuts: [], zedEdgeCuts: [] };
+
+      // Traiter réguliers et bandeau séparément (ossature indépendante)
+      for (const layer of [regularPanels, bandeauPanels]) {
+        if (layer.length === 0) continue;
+        const layerTag = layer === bandeauPanels ? 'bandeau' : 'façade';
+
+        // Colonnes par position X (tolérance 10mm)
+        const columns = {};
+        for (const p of layer) {
+          const ck = Math.round(p.xmin / 10) * 10;
+          if (!columns[ck]) columns[ck] = [];
+          columns[ck].push(p);
+        }
+
+        // Déduplication par colonne
+        for (const ck of Object.keys(columns)) {
+          const seen = new Set();
+          let unique = [];
+          for (const p of columns[ck]) {
+            const sig = `${Math.round(p.ymin)}_${Math.round(p.ymax)}`;
+            if (!seen.has(sig)) { seen.add(sig); unique.push(p); }
+          }
+          unique.sort((a, b) => (b.ymax - b.ymin) - (a.ymax - a.ymin));
+          const filtered = [];
+          for (const p of unique) {
+            let englobed = false;
+            for (const big of filtered) {
+              if (p.ymin >= big.ymin - 1 && p.ymax <= big.ymax + 1) { englobed = true; break; }
+            }
+            if (!englobed) filtered.push(p);
+          }
+          columns[ck] = filtered;
+        }
+
+        const sortedCols = Object.keys(columns).map(Number).sort((a, b) => a - b).map(k => columns[k]);
+
+        for (let ci = 0; ci < sortedCols.length; ci++) {
+          const col = sortedCols[ci].sort((a, b) => a.ymin - b.ymin);
+
+          // Bord gauche de la façade → ZED (bord libre)
+          if (ci === 0) {
+            for (const p of col) {
+              const ph = Math.round(p.ymax - p.ymin);
+              spatialOss[fname].zedEdgeCuts.push({ len: ph, ref: `bord G [${layerTag}]` });
+            }
+          }
+
+          // Jonction entre colonnes adjacentes
+          if (ci < sortedCols.length - 1) {
+            const nextCol = sortedCols[ci + 1].sort((a, b) => a.ymin - b.ymin);
+
+            // Panneaux col courante → overlap avec col suivante
+            for (const p of col) {
+              let overlap = 0;
+              for (const np of nextCol) {
+                const os = Math.max(p.ymin, np.ymin);
+                const oe = Math.min(p.ymax, np.ymax);
+                if (oe > os) overlap += oe - os;
+              }
+              const nonOverlap = (p.ymax - p.ymin) - overlap;
+              // Overlap = 2 panneaux côte à côte → OMÉGA (jonction)
+              if (overlap > 0) {
+                const h = Math.round(overlap);
+                spatialOss[fname].omegaCuts.push({ len: h, ref: `jonction [${layerTag}]`, structural: true });
+              }
+              // Non-overlap = bord libre (ouverture) → ZED
+              if (nonOverlap > 10) {
+                const h = Math.round(nonOverlap);
+                spatialOss[fname].zedEdgeCuts.push({ len: h, ref: `bord ouverture [${layerTag}]` });
+              }
+            }
+
+            // Panneaux col suivante non couverts par col courante → ZED
+            for (const np of nextCol) {
+              let overlap = 0;
+              for (const p of col) {
+                const os = Math.max(np.ymin, p.ymin);
+                const oe = Math.min(np.ymax, p.ymax);
+                if (oe > os) overlap += oe - os;
+              }
+              const nonOverlap = (np.ymax - np.ymin) - overlap;
+              if (nonOverlap > 10) {
+                const h = Math.round(nonOverlap);
+                spatialOss[fname].zedEdgeCuts.push({ len: h, ref: `bord ouverture [${layerTag}]` });
+              }
+            }
+          } else {
+            // Bord droit de la façade → ZED (bord libre)
+            for (const p of col) {
+              const ph = Math.round(p.ymax - p.ymin);
+              spatialOss[fname].zedEdgeCuts.push({ len: ph, ref: `bord D [${layerTag}]` });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ── Step 2: Build results per group/subsection ──
+  // Per-piece ZED entraxe (dimensionnel) + spatial omega/zed (assigné une seule fois par façade)
+  const assignedFacades = new Set();
+
   for (const g of groups) {
     const groupData = { group: g, subsections: [] };
     for (const sub of g.subsections) {
       const subData = { subsection: sub, pieces: [], totalOmegaML: 0, totalZedML: 0, omegaCuts: [], zedCuts: [] };
 
-      // ── Déterminer la hauteur pleine façade pour cette sous-section ──
-      // C'est la hauteur des montants structurels (colonnes pleine hauteur)
-      let facadeFullH = hOss;
-      if (facadeFullH === 0) {
-        for (const st of sub.panelSubtypes) {
-          if (isPleinSubtype(st.name) && !isBandeauSubtype(st.name)) {
-            for (const p of st.pieces) facadeFullH = Math.max(facadeFullH, p.w);
-          }
-        }
-      }
-
       let panelNum = 1;
 
       for (const st of sub.panelSubtypes) {
         if (st.pieces.length === 0) continue;
-        const isPlein = isPleinSubtype(st.name);
-        const isOpening = isOpeningSubtype(st.name);
-        const isBandeau = isBandeauSubtype(st.name);
-        const totalInSubtype = st.pieces.reduce((s, p) => s + p.qty, 0);
 
         for (const p of st.pieces) {
           const ossH = getOssH(p, st.name);
           const ossW = getOssW(p, st.name);
           const nbZed = Math.max(0, Math.ceil(ossW / entaxeMax) - 1);
+
           subData.pieces.push({
             ...p,
             subtypeName: st.name,
-            isPlein,
-            isOpening,
+            isPlein: true,
+            isOpening: false,
             nbZedPerPanel: nbZed,
             totalZed: nbZed * p.qty,
             zedML: nbZed * p.qty * ossH / 1000,
             firstPanelNum: panelNum,
           });
 
-          if (isPlein) {
-            // ── Panneaux plein/bandeau ──
-            // 1 oméga par panneau à la hauteur du montant (ossH)
-            for (let q = 0; q < p.qty; q++) {
-              const pn = panelNum++;
-              subData.omegaCuts.push({ len: ossH, ref: `P${pn} [${st.name}]`, structural: !isBandeau });
-            }
-            subData.totalOmegaML += p.qty * ossH / 1000;
-          } else if (isOpening) {
-            // ── Panneaux ouverture (fenêtre/porte/pièce spéciale) ──
-            // Chaque position de panneau nécessite :
-            //   1) Un montant structural pleine hauteur (même hauteur que les pleins)
-            //   2) Des omégas de zone à la hauteur de la pièce (pour fixation fenêtre)
-            for (let q = 0; q < p.qty; q++) {
-              const pn = panelNum++;
-              // Montant structural pleine hauteur
-              if (facadeFullH > 0) {
-                subData.omegaCuts.push({ len: facadeFullH, ref: `P${pn} [struct ${st.name}]`, structural: true });
-                subData.totalOmegaML += facadeFullH / 1000;
-              }
-              // Oméga de zone à la hauteur ouverture (fixation fenêtre)
-              subData.omegaCuts.push({ len: ossH, ref: `P${pn} [zone ${st.name}]`, structural: false });
-              subData.totalOmegaML += ossH / 1000;
-              // Jonctions internes entre pièces adjacentes
-              if (q > 0) {
-                subData.omegaCuts.push({ len: ossH, ref: `P${pn-1}/P${pn} [linteau]`, structural: false });
-                subData.totalOmegaML += ossH / 1000;
-              }
-            }
-          } else {
-            // ── Autres sous-types ──
-            for (let q = 0; q < p.qty; q++) {
-              const pn = panelNum++;
-              subData.omegaCuts.push({ len: ossH, ref: `P${pn}`, structural: true });
-            }
-            subData.totalOmegaML += p.qty * ossH / 1000;
-          }
-
-          // Zed d'entraxe pour tous les types
+          // ZED d'entraxe : support intermédiaire quand largeur panneau > entraxeMax
           for (let q = 0; q < p.qty; q++) {
             for (let z = 0; z < nbZed; z++) {
-              subData.zedCuts.push({ len: ossH, ref: `P${panelNum - p.qty + q} [entraxe]` });
+              subData.zedCuts.push({ len: ossH, ref: `P${panelNum + q} [entraxe]` });
             }
           }
           subData.totalZedML += nbZed * p.qty * ossH / 1000;
+          panelNum += p.qty;
         }
+      }
 
-        // Oméga de fermeture (bord droit) pour plein et ouverture
-        if (isPlein && totalInSubtype > 0) {
-          const maxOssH = Math.max(...st.pieces.map(p => getOssH(p, st.name)));
-          subData.omegaCuts.push({ len: maxOssH, ref: `bord [${st.name}]`, structural: !isBandeau });
-          subData.totalOmegaML += maxOssH / 1000;
+      // Assigner les omega/zed spatiaux à la première sous-section de cette façade
+      const facadeKey = sub.name;
+      if (!assignedFacades.has(facadeKey) && spatialOss[facadeKey]) {
+        const sp = spatialOss[facadeKey];
+        for (const cut of sp.omegaCuts) {
+          subData.omegaCuts.push(cut);
+          subData.totalOmegaML += cut.len / 1000;
         }
-        if (isOpening && totalInSubtype > 0 && facadeFullH > 0) {
-          // Fermeture structurelle pour les colonnes d'ouverture
-          subData.omegaCuts.push({ len: facadeFullH, ref: `bord struct [${st.name}]`, structural: true });
-          subData.totalOmegaML += facadeFullH / 1000;
+        for (const cut of sp.zedEdgeCuts) {
+          subData.zedCuts.push(cut);
+          subData.totalZedML += cut.len / 1000;
+        }
+        assignedFacades.add(facadeKey);
+      }
+
+      // Fallback si pas de données spatiales : estimation dimensionnelle
+      if (!projectRectsSpatial || projectRectsSpatial.length === 0) {
+        let totalPanelsInSub = 0;
+        for (const st of sub.panelSubtypes) {
+          for (const p of st.pieces) totalPanelsInSub += p.qty;
+        }
+        // Heuristique : N panneaux côte à côte = N-1 oméga (jonctions) + 2 zed (bords)
+        if (totalPanelsInSub > 0) {
+          let panelIdx = 0;
+          for (const st of sub.panelSubtypes) {
+            for (const p of st.pieces) {
+              const ossH = getOssH(p, st.name);
+              for (let q = 0; q < p.qty; q++) {
+                panelIdx++;
+                if (panelIdx === 1) {
+                  // Bord gauche → ZED
+                  subData.zedCuts.push({ len: ossH, ref: `P${panelIdx} [bord G]` });
+                  subData.totalZedML += ossH / 1000;
+                }
+                if (panelIdx > 1) {
+                  // Jonction avec le panneau précédent → OMÉGA
+                  subData.omegaCuts.push({ len: ossH, ref: `P${panelIdx-1}/P${panelIdx} [jonction]`, structural: true });
+                  subData.totalOmegaML += ossH / 1000;
+                }
+                if (panelIdx === totalPanelsInSub) {
+                  // Bord droit → ZED
+                  subData.zedCuts.push({ len: ossH, ref: `P${panelIdx} [bord D]` });
+                  subData.totalZedML += ossH / 1000;
+                }
+              }
+            }
+          }
         }
       }
 
@@ -3088,39 +3219,6 @@ function calcOssature() {
       groupData.subsections.push(subData);
     }
     results.push(groupData);
-  }
-
-  // ── Dédoublonnage cross-groupe pour les façades partagées ──
-  // Les montants structurels (pleine hauteur) sont partagés physiquement entre groupes.
-  // Pour chaque façade partagée : garder le MAX de montants structurels, pas la somme.
-  // Les omégas de zone (fenêtre, bandeau) sont conservés de tous les groupes.
-  if (groups.length > 1) {
-    const facadeIndex = {};
-    for (let gi = 0; gi < results.length; gi++) {
-      for (const sd of results[gi].subsections) {
-        const key = sd.subsection.name.toLowerCase().trim();
-        if (!facadeIndex[key]) facadeIndex[key] = [];
-        facadeIndex[key].push({ groupIdx: gi, subData: sd });
-      }
-    }
-    for (const entries of Object.values(facadeIndex)) {
-      if (entries.length <= 1) continue;
-      // Compter les montants STRUCTURELS par groupe
-      entries.sort((a, b) => {
-        const aStruct = a.subData.omegaCuts.filter(c => c.structural).length;
-        const bStruct = b.subData.omegaCuts.filter(c => c.structural).length;
-        return bStruct - aStruct;
-      });
-      // Garder structurels du groupe principal, retirer des secondaires
-      for (let i = 1; i < entries.length; i++) {
-        const sd = entries[i].subData;
-        const zoneCuts = sd.omegaCuts.filter(c => !c.structural);
-        const zoneML = zoneCuts.reduce((sum, c) => sum + c.len / 1000, 0);
-        sd.omegaCuts = zoneCuts;
-        sd.totalOmegaML = zoneML;
-        sd.totalOmegas = zoneCuts.length;
-      }
-    }
   }
 
   return results;

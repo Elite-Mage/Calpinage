@@ -59,4 +59,36 @@ ACI 30           → "Panneaux Attique"    stock_w=4270
 
 ## Méthode de calcul OSSATURE (Oméga et Zed)
 
-(À documenter — en cours de vérification)
+### Principes
+- Tous les profils (Oméga et Zed) sont **verticaux** — jamais d'ossature horizontale.
+- Joint de **8mm** entre tous les panneaux sur la façade.
+- L'ossature du **bandeau haut** est comptée **séparément** (joint entre bandeau et panneaux du dessous, pas alignés).
+
+### OMÉGA (jonction entre 2 panneaux)
+- Un oméga est posé **uniquement** à une jonction entre **2 panneaux adjacents**.
+- Il est 2× plus épais qu'un Zed → permet de fixer **2 vis** (un panneau à gauche, un panneau à droite).
+- Hauteur de l'oméga = hauteur de la zone de recouvrement (overlap Y) entre les 2 panneaux.
+
+### ZED (bord libre ou renfort d'entraxe)
+Un Zed est utilisé dans 2 cas :
+1. **Bord libre** d'un panneau (pas de panneau voisin de l'autre côté) :
+   - Bords extrêmes de façade (gauche/droite)
+   - Bords d'ouverture (fenêtre, porte) — un seul bord de panneau → Zed
+2. **Renfort d'entraxe** : quand la largeur d'un panneau dépasse `entraxe_max` (600mm par défaut), des Zed intermédiaires sont ajoutés.
+   - `nbZed = ceil(largeur_panneau / entraxe_max) - 1`
+   - Hauteur du Zed = hauteur du montant (hauteur du panneau)
+
+### Analyse spatiale
+L'algorithme utilise les positions réelles des panneaux (`rectsSpatial`) :
+1. Les panneaux sont regroupés en **colonnes** par position X (tolérance 10mm).
+2. Le bandeau haut (hauteur ~1064mm ±8mm) est séparé des panneaux réguliers.
+3. Pour chaque paire de colonnes adjacentes :
+   - **Y-overlap** (les 2 colonnes ont des panneaux à la même hauteur) → **OMÉGA** (jonction)
+   - **Pas de overlap** (une seule colonne a un panneau) → **ZED** (bord libre)
+4. Bords extrêmes de façade → **ZED** (bord libre)
+5. ZED d'entraxe calculés par panneau (dimensionnel, indépendant de la position).
+
+### Fichiers implémentant cette logique
+- **Python** : `parse_dxf.py` — fonction `calc_ossature_facades()`
+- **JavaScript** : `index.html` — fonctions `calcOssatureFacades()` (parser) et `calcOssature()` (rendu)
+- Les deux parsers spatiaux sont **strictement alignés** et doivent produire des résultats identiques.
