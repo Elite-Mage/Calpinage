@@ -62,31 +62,39 @@ ACI 30           → "Panneaux Attique"    stock_w=4270
 ### Principes
 - Tous les profils (Oméga et Zed) sont **verticaux** — jamais d'ossature horizontale.
 - Joint de **8mm** entre tous les panneaux sur la façade.
-- L'ossature du **bandeau haut** est comptée **séparément** (joint entre bandeau et panneaux du dessous, pas alignés).
+- **Pas de ZED/OMÉGA aux bords de façade** (gauche/droite extrêmes).
+- Le **bandeau haut** (~1064mm) a son ossature intégrée (omegas aux jonctions régulières sous-jacentes, ZED entraxe propre).
 
 ### OMÉGA (jonction entre 2 panneaux)
-- Un oméga est posé **uniquement** à une jonction entre **2 panneaux adjacents**.
+- Un oméga est posé **uniquement** à une jonction entre **2 panneaux adjacents** (gap X ≤ 20mm).
 - Il est 2× plus épais qu'un Zed → permet de fixer **2 vis** (un panneau à gauche, un panneau à droite).
-- Hauteur de l'oméga = hauteur de la zone de recouvrement (overlap Y) entre les 2 panneaux.
+- **Séparation par étage** : quand 2 panneaux plein (RDC 2550mm + N1 3650mm) se touchent avec un joint de 8mm, l'oméga est séparé en 2 barres distinctes (une par étage). Les panneaux plein ne fusionnent PAS à travers le joint inter-étage.
+- **Fusion fenêtre** : les pièces de fenêtre (< hauteur d'étage) fusionnent à travers le joint inter-étage. Ex: 750mm + 8mm + 822mm = 1580mm → un seul oméga.
+- **Bandeau** : à chaque jonction régulière sous un panneau bandeau, un oméga bandeau de hauteur 1064mm est ajouté (que le bandeau soit un seul panneau ou deux panneaux adjacents).
 
 ### ZED (bord libre ou renfort d'entraxe)
 Un Zed est utilisé dans 2 cas :
-1. **Bord libre** d'un panneau (pas de panneau voisin de l'autre côté) :
-   - Bords extrêmes de façade (gauche/droite)
-   - Bords d'ouverture (fenêtre, porte) — un seul bord de panneau → Zed
-2. **Renfort d'entraxe** : quand la largeur d'un panneau dépasse `entraxe_max` (600mm par défaut), des Zed intermédiaires sont ajoutés.
-   - `nbZed = ceil(largeur_panneau / entraxe_max) - 1`
-   - Hauteur du Zed = hauteur du montant (hauteur du panneau)
+1. **Bord libre** d'ouverture (fenêtre, porte) — là où un seul côté a un panneau → Zed.
+   - Pas de ZED aux bords extrêmes de façade (le user ne les compte pas).
+   - Gap ZED : à une jonction fenêtre, les segments Y où un seul côté a du panneau (ex: en dessous de la fenêtre, ou dans l'ouverture fenêtre) → Zed de la hauteur du gap.
+2. **Renfort d'entraxe** :
+   - Panneaux réguliers : `entraxe_max = 600mm` → `nbZed = ceil(largeur / 600) - 1`
+   - Panneaux bandeau : `entraxe_bandeau = 400mm` → `nbZed = ceil(largeur / 400) - 1`
+   - Hauteur du Zed = hauteur du panneau sur la façade (ymax - ymin).
 
 ### Analyse spatiale
 L'algorithme utilise les positions réelles des panneaux (`rectsSpatial`) :
-1. Les panneaux sont regroupés en **colonnes** par position X (tolérance 10mm).
-2. Le bandeau haut (hauteur ~1064mm ±8mm) est séparé des panneaux réguliers.
-3. Pour chaque paire de colonnes adjacentes :
-   - **Y-overlap** (les 2 colonnes ont des panneaux à la même hauteur) → **OMÉGA** (jonction)
-   - **Pas de overlap** (une seule colonne a un panneau) → **ZED** (bord libre)
-4. Bords extrêmes de façade → **ZED** (bord libre)
-5. ZED d'entraxe calculés par panneau (dimensionnel, indépendant de la position).
+1. Détecter les hauteurs d'étage (RDC/N1) à partir des couleurs ACI (25=RDC, 30=N1).
+2. Séparer le **bandeau** (hauteur façade ~1064mm ±15mm) des panneaux réguliers.
+3. Construire des **colonnes** par position X (tolérance 10mm), dédupliquer.
+4. Pour chaque paire de colonnes adjacentes (gap X ≤ 20mm) :
+   - Calculer les **overlaps individuels** entre chaque panneau gauche et droit.
+   - **Fusionner** les overlaps séparés par ≤ 10mm (joint), SAUF si les deux overlaps sont des panneaux plein d'étage → **séparer** (un oméga par étage).
+   - Les segments fusionnés → **OMÉGA**.
+   - Les **gaps** (un seul côté a du panneau) → **ZED** bord libre (si hauteur ≥ 100mm).
+   - Si un panneau bandeau couvre cette jonction → **OMÉGA bandeau** (1064mm).
+5. Si gap X > 20mm → **ouverture** → ZED bord libre sur les panneaux adjacents.
+6. ZED d'entraxe calculés par panneau (régulier: 600mm, bandeau: 400mm).
 
 ### Fichiers implémentant cette logique
 - **Python** : `parse_dxf.py` — fonction `calc_ossature_facades()`
