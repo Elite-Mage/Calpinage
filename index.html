@@ -4033,6 +4033,7 @@ function createDxfBuilder() {
       // ── HEADER ──
       s += '  0\nSECTION\n  2\nHEADER\n';
       s += '  9\n$ACADVER\n  1\nAC1009\n';
+      s += '  9\n$DWGCODEPAGE\n  3\nANSI_1252\n';
       s += '  9\n$INSBASE\n 10\n0.0\n 20\n0.0\n 30\n0.0\n';
       s += '  9\n$EXTMIN\n 10\n' + f(extMinX - mx) + '\n 20\n' + f(extMinY - my) + '\n 30\n0.0\n';
       s += '  9\n$EXTMAX\n 10\n' + f(extMaxX + mx) + '\n 20\n' + f(extMaxY + my) + '\n 30\n0.0\n';
@@ -4077,7 +4078,13 @@ function createDxfBuilder() {
 }
 
 function downloadDxf(content, filename) {
-  const blob = new Blob([content], { type: 'application/dxf' });
+  // Encode as Windows-1252 so AutoCAD R12 reads accented characters correctly
+  const bytes = new Uint8Array(content.length);
+  for (let i = 0; i < content.length; i++) {
+    const code = content.charCodeAt(i);
+    bytes[i] = code < 256 ? code : 63; // '?' for chars outside Latin-1
+  }
+  const blob = new Blob([bytes], { type: 'application/dxf' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = filename;
