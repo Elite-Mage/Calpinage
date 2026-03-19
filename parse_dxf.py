@@ -154,7 +154,6 @@ def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600):
     BANDEAU_H = 1064
     BANDEAU_TOL = 15
     ENTRAXE_BANDEAU = 800
-    REFERENCE_BAR_H = 3350  # Standard ossature bar length used in practice
 
     def nearest_facade(xcenter):
         return min(facade_labels, key=lambda lbl: abs(lbl[0] - xcenter))[1]
@@ -320,11 +319,8 @@ def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600):
                             prev[2] = prev[2] and ov[2]
                     else:
                         merged.append(list(ov))
-                for start, end, is_full_tier in merged:
-                    h = round(end - start)
-                    if is_full_tier and (abs(h - rdc_height) <= 15 or abs(h - n1_height) <= 15):
-                        h = REFERENCE_BAR_H
-                    add_omega(h)
+                for start, end, _ in merged:
+                    add_omega(round(end - start))
 
             # Gap ZED (free edges at window junctions)
             left_intervals = [(p["ymin"], p["ymax"]) for p in col_sorted]

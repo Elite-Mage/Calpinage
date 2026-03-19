@@ -2499,11 +2499,10 @@ function parseDxfClientSide(text, fileName) {
   // Ossature calculation (same logic as parse_dxf.py)
   function calcOssatureFacades(rSpatial, fLabels) {
     const ENTRAXE_REGULAR = 600;
-    const ENTRAXE_BANDEAU = 400;
+    const ENTRAXE_BANDEAU = 800;
     const JOINT = 8;
     const MAX_GAP = 20;
     const BANDEAU_H = 1064, BANDEAU_TOL = 15;
-    const REFERENCE_BAR_H = 3350;
 
     const byFacade = {};
     for (const r of rSpatial) {
@@ -2651,11 +2650,7 @@ function parseDxfClientSide(text, fileName) {
               merged.push({ ...ov });
             }
           }
-          for (const m of merged) {
-            let h = Math.round(m.end - m.start);
-            if (m.isFullTier && (Math.abs(h - RDC_HEIGHT) <= 15 || Math.abs(h - N1_HEIGHT) <= 15)) h = REFERENCE_BAR_H;
-            addOmega(h);
-          }
+          for (const m of merged) addOmega(Math.round(m.end - m.start));
         }
 
         // Gap ZED (free edges at window junctions)
@@ -2665,18 +2660,14 @@ function parseDxfClientSide(text, fileName) {
         for (const [gs, ge] of rightGaps) { const h = Math.round(ge - gs); if (h >= 100) addZed(h); }
         for (const [gs, ge] of leftGaps) { const h = Math.round(ge - gs); if (h >= 100) addZed(h); }
 
-        // Bandeau omega at this regular junction (if bandeau panel spans it)
-        for (const bp of bandeauPanels) {
-          if (bp.xmin - 5 <= leftXmax && bp.xmax + 5 >= rightXmin) {
-            addOmega(Math.round(bp.ymax - bp.ymin));
-            break;
-          }
-        }
-        // Check if two different bandeau panels cover left and right
-        if (!bandeauPanels.some(bp => bp.xmin - 5 <= leftXmax && bp.xmax + 5 >= rightXmin)) {
-          const leftBp = bandeauPanels.find(bp => bp.xmin - 5 <= leftXmax && leftXmax <= bp.xmax + 5);
-          const rightBp = bandeauPanels.find(bp => bp.xmin - 5 <= rightXmin && rightXmin <= bp.xmax + 5);
-          if (leftBp && rightBp) addOmega(Math.round(leftBp.ymax - leftBp.ymin));
+      }
+
+      // --- Bandeau-bandeau junction OMEGAs (only between different bandeau panels) ---
+      const banSorted = [...bandeauPanels].sort((a, b) => a.xmin - b.xmin);
+      for (let bi = 0; bi < banSorted.length - 1; bi++) {
+        const gap = banSorted[bi + 1].xmin - banSorted[bi].xmax;
+        if (gap <= MAX_GAP) {
+          addOmega(Math.round(banSorted[bi].ymax - banSorted[bi].ymin));
         }
       }
 
@@ -3081,7 +3072,6 @@ function calcOssature() {
   if (projectRectsSpatial && projectRectsSpatial.length > 0) {
     const JOINT = 8, MAX_GAP = 20;
     const BANDEAU_H = 1064, BANDEAU_TOL = 15;
-    const REFERENCE_BAR_H = 3350;
 
     const fLabels = projectFacadeLabels && projectFacadeLabels.length ? projectFacadeLabels : [[0, 'Façade']];
     function nearestFacade(xcenter) {
@@ -3223,9 +3213,7 @@ function calcOssature() {
             }
           }
           for (const m of merged) {
-            let h = Math.round(m.end - m.start);
-            if (m.isFullTier && (Math.abs(h - RDC_HEIGHT) <= 15 || Math.abs(h - N1_HEIGHT) <= 15)) h = REFERENCE_BAR_H;
-            cuts.omegaCuts.push({ len: h, ref: 'jonction', structural: true });
+            cuts.omegaCuts.push({ len: Math.round(m.end - m.start), ref: 'jonction', structural: true });
           }
         }
 
@@ -3236,21 +3224,14 @@ function calcOssature() {
         for (const [gs, ge] of rightGaps) { const h = Math.round(ge - gs); if (h >= 100) cuts.zedEdgeCuts.push({ len: h, ref: 'bord ouverture' }); }
         for (const [gs, ge] of leftGaps) { const h = Math.round(ge - gs); if (h >= 100) cuts.zedEdgeCuts.push({ len: h, ref: 'bord ouverture' }); }
 
-        // Bandeau omega at this regular junction
-        let bandeauFound = false;
-        for (const bp of bandeauPanels) {
-          if (bp.xmin - 5 <= leftXmax && bp.xmax + 5 >= rightXmin) {
-            cuts.omegaCuts.push({ len: Math.round(bp.ymax - bp.ymin), ref: 'jonction bandeau', structural: true });
-            bandeauFound = true;
-            break;
-          }
-        }
-        if (!bandeauFound) {
-          const leftBp = bandeauPanels.find(bp => bp.xmin - 5 <= leftXmax && leftXmax <= bp.xmax + 5);
-          const rightBp = bandeauPanels.find(bp => bp.xmin - 5 <= rightXmin && rightXmin <= bp.xmax + 5);
-          if (leftBp && rightBp) {
-            cuts.omegaCuts.push({ len: Math.round(leftBp.ymax - leftBp.ymin), ref: 'jonction bandeau', structural: true });
-          }
+      }
+
+      // --- Bandeau-bandeau junction OMEGAs (only between different bandeau panels) ---
+      const banSorted = [...bandeauPanels].sort((a, b) => a.xmin - b.xmin);
+      for (let bi = 0; bi < banSorted.length - 1; bi++) {
+        const gap = banSorted[bi + 1].xmin - banSorted[bi].xmax;
+        if (gap <= MAX_GAP) {
+          cuts.omegaCuts.push({ len: Math.round(banSorted[bi].ymax - banSorted[bi].ymin), ref: 'jonction bandeau', structural: true });
         }
       }
     }
@@ -3273,7 +3254,7 @@ function calcOssature() {
         for (const p of st.pieces) {
           const ossH = getOssH(p, st.name);
           const ossW = getOssW(p, st.name);
-          const entraxeForType = isBandeauSubtype(st.name) ? (ossatureConfig.entaxeBandeau || 400) : entaxeMax;
+          const entraxeForType = isBandeauSubtype(st.name) ? (ossatureConfig.entaxeBandeau || 800) : entaxeMax;
           const nbZed = Math.max(0, Math.ceil(ossW / entraxeForType) - 1);
 
           subData.pieces.push({
