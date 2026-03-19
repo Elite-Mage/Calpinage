@@ -3968,55 +3968,112 @@ function exportDevisPDF() {
 }
 
 // ============================================================
-// DXF EXPORT (Panneaux + Ossature)
+// DXF EXPORT (Panneaux + Ossature) — Format R12 (AC1009)
 // ============================================================
 
-function generateDxfString(layers, entities) {
-  let s = '0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n0\nENDSEC\n';
-  // TABLES section with LAYER table
-  s += '0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n70\n' + layers.length + '\n';
-  for (const l of layers) {
-    s += '0\nLAYER\n2\n' + l.name + '\n70\n0\n62\n' + l.color + '\n6\nCONTINUOUS\n';
+// DXF R12 builder with proper structure for AutoCAD
+function createDxfBuilder() {
+  const layers = [];
+  const entityStrings = [];
+  let handle = 100; // entity handle counter
+  // Track global extents for HEADER
+  let extMinX = Infinity, extMinY = Infinity, extMaxX = -Infinity, extMaxY = -Infinity;
+
+  function trackPt(x, y) {
+    if (x < extMinX) extMinX = x;
+    if (y < extMinY) extMinY = y;
+    if (x > extMaxX) extMaxX = x;
+    if (y > extMaxY) extMaxY = y;
   }
-  s += '0\nENDTAB\n0\nENDSEC\n';
-  // ENTITIES section
-  s += '0\nSECTION\n2\nENTITIES\n';
-  for (const e of entities) s += e;
-  s += '0\nENDSEC\n0\nEOF\n';
-  return s;
-}
+  function nextHandle() { return (handle++).toString(16).toUpperCase(); }
+  function f(v) { return v.toFixed(2); }
 
-function dxfRect(xmin, ymin, xmax, ymax, layer, color) {
-  return '0\nLWPOLYLINE\n8\n' + layer + '\n62\n' + color + '\n70\n1\n90\n4\n' +
-    '10\n' + xmin.toFixed(1) + '\n20\n' + ymin.toFixed(1) + '\n' +
-    '10\n' + xmax.toFixed(1) + '\n20\n' + ymin.toFixed(1) + '\n' +
-    '10\n' + xmax.toFixed(1) + '\n20\n' + ymax.toFixed(1) + '\n' +
-    '10\n' + xmin.toFixed(1) + '\n20\n' + ymax.toFixed(1) + '\n';
-}
+  return {
+    addLayer(name, color) { layers.push({ name, color }); },
 
-function dxfLine(x1, y1, x2, y2, layer, color) {
-  return '0\nLINE\n8\n' + layer + '\n62\n' + color + '\n' +
-    '10\n' + x1.toFixed(1) + '\n20\n' + y1.toFixed(1) + '\n30\n0.0\n' +
-    '11\n' + x2.toFixed(1) + '\n21\n' + y2.toFixed(1) + '\n31\n0.0\n';
-}
+    addLine(x1, y1, x2, y2, layer, color) {
+      trackPt(x1, y1); trackPt(x2, y2);
+      entityStrings.push(
+        '  0\nLINE\n  5\n' + nextHandle() + '\n  8\n' + layer + '\n 62\n' + color + '\n' +
+        ' 10\n' + f(x1) + '\n 20\n' + f(y1) + '\n 30\n0.0\n' +
+        ' 11\n' + f(x2) + '\n 21\n' + f(y2) + '\n 31\n0.0\n'
+      );
+    },
 
-function dxfText(x, y, h, text, layer, color, halign) {
-  // halign: 0=left, 1=center, 2=right
-  const ha = halign || 0;
-  let s = '0\nTEXT\n8\n' + layer + '\n62\n' + color + '\n' +
-    '10\n' + x.toFixed(1) + '\n20\n' + y.toFixed(1) + '\n30\n0.0\n' +
-    '40\n' + h.toFixed(1) + '\n1\n' + text + '\n';
-  if (ha > 0) {
-    s += '72\n' + ha + '\n11\n' + x.toFixed(1) + '\n21\n' + y.toFixed(1) + '\n31\n0.0\n';
-  }
-  return s;
-}
+    addRect(xmin, ymin, xmax, ymax, layer, color) {
+      trackPt(xmin, ymin); trackPt(xmax, ymax);
+      // 4 LINE entities forming a closed rectangle
+      this.addLine(xmin, ymin, xmax, ymin, layer, color);
+      this.addLine(xmax, ymin, xmax, ymax, layer, color);
+      this.addLine(xmax, ymax, xmin, ymax, layer, color);
+      this.addLine(xmin, ymax, xmin, ymin, layer, color);
+    },
 
-function dxfMtext(x, y, h, text, layer, color, attachPt) {
-  // attachPt: 1=TL,2=TC,4=ML,5=MC,7=BL,8=BC
-  return '0\nMTEXT\n8\n' + layer + '\n62\n' + color + '\n' +
-    '10\n' + x.toFixed(1) + '\n20\n' + y.toFixed(1) + '\n30\n0.0\n' +
-    '40\n' + h.toFixed(1) + '\n71\n' + (attachPt || 5) + '\n1\n' + text + '\n';
+    addText(x, y, h, text, layer, color, halign) {
+      // halign: 0=left, 1=center, 2=right
+      trackPt(x, y);
+      const ha = halign || 0;
+      let s = '  0\nTEXT\n  5\n' + nextHandle() + '\n  8\n' + layer + '\n 62\n' + color + '\n' +
+        ' 10\n' + f(x) + '\n 20\n' + f(y) + '\n 30\n0.0\n' +
+        ' 40\n' + f(h) + '\n  1\n' + text + '\n';
+      if (ha > 0) {
+        s += ' 72\n' + ha + '\n 11\n' + f(x) + '\n 21\n' + f(y) + '\n 31\n0.0\n';
+      }
+      entityStrings.push(s);
+    },
+
+    toString() {
+      // Fallback extents if no entities
+      if (extMinX === Infinity) { extMinX = 0; extMinY = 0; extMaxX = 1000; extMaxY = 1000; }
+      // Add margin to extents
+      const mx = (extMaxX - extMinX) * 0.05 || 100;
+      const my = (extMaxY - extMinY) * 0.05 || 100;
+
+      let s = '';
+      // ── HEADER ──
+      s += '  0\nSECTION\n  2\nHEADER\n';
+      s += '  9\n$ACADVER\n  1\nAC1009\n';
+      s += '  9\n$INSBASE\n 10\n0.0\n 20\n0.0\n 30\n0.0\n';
+      s += '  9\n$EXTMIN\n 10\n' + f(extMinX - mx) + '\n 20\n' + f(extMinY - my) + '\n 30\n0.0\n';
+      s += '  9\n$EXTMAX\n 10\n' + f(extMaxX + mx) + '\n 20\n' + f(extMaxY + my) + '\n 30\n0.0\n';
+      s += '  9\n$LIMMIN\n 10\n' + f(extMinX - mx) + '\n 20\n' + f(extMinY - my) + '\n';
+      s += '  9\n$LIMMAX\n 10\n' + f(extMaxX + mx) + '\n 20\n' + f(extMaxY + my) + '\n';
+      s += '  0\nENDSEC\n';
+
+      // ── TABLES ──
+      s += '  0\nSECTION\n  2\nTABLES\n';
+
+      // LTYPE table — CONTINUOUS linetype (required)
+      s += '  0\nTABLE\n  2\nLTYPE\n 70\n1\n';
+      s += '  0\nLTYPE\n  5\n14\n  2\nCONTINUOUS\n 70\n0\n  3\nSolid line\n 72\n65\n 73\n0\n 40\n0.0\n';
+      s += '  0\nENDTAB\n';
+
+      // LAYER table
+      s += '  0\nTABLE\n  2\nLAYER\n 70\n' + (layers.length + 1) + '\n';
+      // Layer 0 (required by AutoCAD)
+      s += '  0\nLAYER\n  5\n10\n  2\n0\n 70\n0\n 62\n7\n  6\nCONTINUOUS\n';
+      for (let li = 0; li < layers.length; li++) {
+        s += '  0\nLAYER\n  5\n' + (11 + li).toString(16).toUpperCase() + '\n  2\n' + layers[li].name + '\n 70\n0\n 62\n' + layers[li].color + '\n  6\nCONTINUOUS\n';
+      }
+      s += '  0\nENDTAB\n';
+
+      // STYLE table — Standard text style (required for TEXT entities)
+      s += '  0\nTABLE\n  2\nSTYLE\n 70\n1\n';
+      s += '  0\nSTYLE\n  5\n30\n  2\nSTANDARD\n 70\n0\n 40\n0.0\n 41\n1.0\n 50\n0.0\n 71\n0\n 42\n2.5\n  3\ntxt\n  4\n\n';
+      s += '  0\nENDTAB\n';
+
+      s += '  0\nENDSEC\n';
+
+      // ── ENTITIES ──
+      s += '  0\nSECTION\n  2\nENTITIES\n';
+      for (const e of entityStrings) s += e;
+      s += '  0\nENDSEC\n';
+
+      // ── EOF ──
+      s += '  0\nEOF\n';
+      return s;
+    }
+  };
 }
 
 function downloadDxf(content, filename) {
@@ -4024,7 +4081,9 @@ function downloadDxf(content, filename) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(a.href);
 }
 
@@ -4050,29 +4109,24 @@ function groupRectsByFacade(rectsSpatial, facadeLabels) {
 // ── EXPORT DXF PANNEAUX ──
 function exportDxfPanneaux() {
   if (!projectRectsSpatial || !projectRectsSpatial.length) {
-    alert('Aucune donnée spatiale disponible. Importez un DXF d\'abord.');
+    alert('Aucune donnee spatiale disponible. Importez un DXF d\'abord.');
     return;
   }
 
+  const dxf = createDxfBuilder();
+  dxf.addLayer('CONTOUR', 8);
+  dxf.addLayer('PANNEAUX', 7);
+  dxf.addLayer('TEXTE', 7);
+  dxf.addLayer('TITRE', 7);
+  dxf.addLayer('COTES', 8);
+
   const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
   const facadeNames = Object.keys(byFacade).sort();
-
-  // Layers
-  const layers = [
-    { name: 'CONTOUR', color: 8 },       // gray facade outline
-    { name: 'PANNEAUX', color: 7 },       // panel outlines (color per entity)
-    { name: 'TEXTE', color: 7 },          // labels
-    { name: 'TITRE', color: 7 },          // facade title
-    { name: 'COTES', color: 8 },          // dimensions
-  ];
-
-  const entities = [];
-  const SPACING = 2000; // vertical spacing between facades
+  const SPACING = 2000;
   let yOffset = 0;
 
   for (const fname of facadeNames) {
     const panels = byFacade[fname];
-    // Compute facade bounding box
     let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
     for (const p of panels) {
       fxmin = Math.min(fxmin, p.xmin);
@@ -4080,20 +4134,20 @@ function exportDxfPanneaux() {
       fymin = Math.min(fymin, p.ymin);
       fymax = Math.max(fymax, p.ymax);
     }
-
-    // Shift facade so it starts at X=0, Y=yOffset
     const dx = -fxmin;
     const dy = yOffset - fymin;
+    const facW = fxmax - fxmin;
+    const facH = fymax - fymin;
 
-    // Facade outline (slightly larger)
+    // Facade outline
     const margin = 100;
-    entities.push(dxfRect(-margin, yOffset - margin, (fxmax - fxmin) + margin, yOffset + (fymax - fymin) + margin, 'CONTOUR', 8));
+    dxf.addRect(-margin, yOffset - margin, facW + margin, yOffset + facH + margin, 'CONTOUR', 8);
 
-    // Facade title
-    const titleH = Math.max(150, (fymax - fymin) * 0.04);
-    entities.push(dxfText((fxmax - fxmin) / 2, yOffset + (fymax - fymin) + margin + titleH * 0.5, titleH, fname, 'TITRE', 7, 1));
+    // Title
+    const titleH = Math.max(150, facH * 0.04);
+    dxf.addText(facW / 2, yOffset + facH + margin + titleH * 0.5, titleH, fname, 'TITRE', 7, 1);
 
-    // Sort panels for numbering: left to right, then bottom to top
+    // Sort panels: left to right, bottom to top
     const sorted = [...panels].sort((a, b) => {
       const xa = Math.round(a.xmin / 50) * 50;
       const xb = Math.round(b.xmin / 50) * 50;
@@ -4101,44 +4155,36 @@ function exportDxfPanneaux() {
       return a.ymin - b.ymin;
     });
 
-    // Draw each panel
     for (let i = 0; i < sorted.length; i++) {
       const p = sorted[i];
-      const x1 = p.xmin + dx;
-      const y1 = p.ymin + dy;
-      const x2 = p.xmax + dx;
-      const y2 = p.ymax + dy;
+      const x1 = p.xmin + dx, y1 = p.ymin + dy, x2 = p.xmax + dx, y2 = p.ymax + dy;
       const aciColor = p.color || 7;
-
-      // Panel rectangle
-      entities.push(dxfRect(x1, y1, x2, y2, 'PANNEAUX', aciColor));
-
-      // Panel label: number + dimensions
       const pw = Math.round(p.xmax - p.xmin);
       const ph = Math.round(p.ymax - p.ymin);
+
+      // Panel rectangle
+      dxf.addRect(x1, y1, x2, y2, 'PANNEAUX', aciColor);
+
+      // Text labels
       const cx = (x1 + x2) / 2;
       const cy = (y1 + y2) / 2;
-      const labelH = Math.min(pw, ph) * 0.15;
-      const textH = Math.max(50, Math.min(120, labelH));
+      const textH = Math.max(50, Math.min(120, Math.min(pw, ph) * 0.12));
 
-      // Panel number
-      entities.push(dxfMtext(cx, cy + textH * 0.7, textH, 'P' + (i + 1), 'TEXTE', aciColor, 8));
-      // Dimensions
-      entities.push(dxfMtext(cx, cy - textH * 0.3, textH * 0.7, pw + 'x' + ph, 'COTES', 8, 2));
+      dxf.addText(cx, cy + textH * 0.8, textH, 'P' + (i + 1), 'TEXTE', aciColor, 1);
+      dxf.addText(cx, cy - textH * 0.6, textH * 0.7, pw + 'x' + ph, 'COTES', 8, 1);
     }
 
-    yOffset += (fymax - fymin) + SPACING + titleH * 2;
+    yOffset += facH + SPACING + titleH * 2;
   }
 
-  const dxf = generateDxfString(layers, entities);
   const nom = chantier.nom || 'calpinage';
-  downloadDxf(dxf, nom.replace(/[^a-zA-Z0-9]/g, '_') + '_panneaux.dxf');
+  downloadDxf(dxf.toString(), nom.replace(/[^a-zA-Z0-9]/g, '_') + '_panneaux.dxf');
 }
 
 // ── EXPORT DXF OSSATURE ──
 function exportDxfOssature() {
   if (!projectRectsSpatial || !projectRectsSpatial.length) {
-    alert('Aucune donnée spatiale disponible. Importez un DXF d\'abord.');
+    alert('Aucune donnee spatiale disponible. Importez un DXF d\'abord.');
     return;
   }
 
@@ -4212,20 +4258,17 @@ function exportDxfOssature() {
     return { leftGaps, rightGaps };
   }
 
-  // Layers
-  const layers = [
-    { name: 'CONTOUR', color: 8 },
-    { name: 'PANNEAUX_REF', color: 9 },   // light gray panel outlines
-    { name: 'OMEGA', color: 4 },           // cyan
-    { name: 'ZED_ENTRAXE', color: 2 },     // yellow
-    { name: 'ZED_BORD', color: 6 },        // magenta
-    { name: 'OMEGA_BANDEAU', color: 4 },   // cyan
-    { name: 'ZED_BANDEAU', color: 2 },     // yellow
-    { name: 'TITRE', color: 7 },
-    { name: 'TEXTE', color: 7 },
-  ];
+  const dxf = createDxfBuilder();
+  dxf.addLayer('CONTOUR', 8);
+  dxf.addLayer('PANNEAUX_REF', 9);
+  dxf.addLayer('OMEGA', 4);
+  dxf.addLayer('ZED_ENTRAXE', 2);
+  dxf.addLayer('ZED_BORD', 6);
+  dxf.addLayer('OMEGA_BANDEAU', 4);
+  dxf.addLayer('ZED_BANDEAU', 2);
+  dxf.addLayer('TITRE', 7);
+  dxf.addLayer('TEXTE', 7);
 
-  const entities = [];
   const SPACING = 2000;
   let yOffset = 0;
 
@@ -4238,7 +4281,6 @@ function exportDxfOssature() {
       else regularPanels.push(p);
     }
 
-    // Bounding box
     let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
     for (const p of allPanels) {
       fxmin = Math.min(fxmin, p.xmin);
@@ -4246,22 +4288,18 @@ function exportDxfOssature() {
       fymin = Math.min(fymin, p.ymin);
       fymax = Math.max(fymax, p.ymax);
     }
-    const dx = -fxmin;
-    const dy = yOffset - fymin;
-    const facW = fxmax - fxmin;
-    const facH = fymax - fymin;
+    const dx = -fxmin, dy = yOffset - fymin;
+    const facW = fxmax - fxmin, facH = fymax - fymin;
 
-    // Facade outline
     const margin = 100;
-    entities.push(dxfRect(-margin, yOffset - margin, facW + margin, yOffset + facH + margin, 'CONTOUR', 8));
+    dxf.addRect(-margin, yOffset - margin, facW + margin, yOffset + facH + margin, 'CONTOUR', 8);
 
-    // Title
     const titleH = Math.max(150, facH * 0.04);
-    entities.push(dxfText(facW / 2, yOffset + facH + margin + titleH * 0.5, titleH, fname + ' — Ossature', 'TITRE', 7, 1));
+    dxf.addText(facW / 2, yOffset + facH + margin + titleH * 0.5, titleH, fname + ' - Ossature', 'TITRE', 7, 1);
 
-    // Draw all panels as light gray reference outlines
+    // Panel outlines in light gray
     for (const p of allPanels) {
-      entities.push(dxfRect(p.xmin + dx, p.ymin + dy, p.xmax + dx, p.ymax + dy, 'PANNEAUX_REF', 9));
+      dxf.addRect(p.xmin + dx, p.ymin + dy, p.xmax + dx, p.ymax + dy, 'PANNEAUX_REF', 9);
     }
 
     // ── Omega and Zed for regular panels ──
@@ -4269,15 +4307,14 @@ function exportDxfOssature() {
     for (let ci = 0; ci < sortedCols.length; ci++) {
       const col = sortedCols[ci].sort((a, b) => a.ymin - b.ymin);
 
-      // Entraxe ZED for each panel in this column
+      // Entraxe ZED
       for (const p of col) {
         const pw = Math.round(p.xmax - p.xmin);
         const nz = Math.max(0, Math.ceil(pw / ENTRAXE_REGULAR) - 1);
         if (nz > 0) {
           const step = pw / (nz + 1);
           for (let z = 1; z <= nz; z++) {
-            const zx = p.xmin + z * step + dx;
-            entities.push(dxfLine(zx, p.ymin + dy, zx, p.ymax + dy, 'ZED_ENTRAXE', 2));
+            dxf.addLine(p.xmin + z * step + dx, p.ymin + dy, p.xmin + z * step + dx, p.ymax + dy, 'ZED_ENTRAXE', 2);
           }
         }
       }
@@ -4289,19 +4326,12 @@ function exportDxfOssature() {
       const xGap = rightXmin - leftXmax;
 
       if (xGap > MAX_GAP) {
-        // Opening - free edge ZED on both sides
-        for (const p of col) {
-          const zx = p.xmax + dx;
-          entities.push(dxfLine(zx, p.ymin + dy, zx, p.ymax + dy, 'ZED_BORD', 6));
-        }
-        for (const p of nextCol) {
-          const zx = p.xmin + dx;
-          entities.push(dxfLine(zx, p.ymin + dy, zx, p.ymax + dy, 'ZED_BORD', 6));
-        }
+        for (const p of col) dxf.addLine(p.xmax + dx, p.ymin + dy, p.xmax + dx, p.ymax + dy, 'ZED_BORD', 6);
+        for (const p of nextCol) dxf.addLine(p.xmin + dx, p.ymin + dy, p.xmin + dx, p.ymax + dy, 'ZED_BORD', 6);
         continue;
       }
 
-      // Adjacent columns: OMEGA at junction
+      // OMEGA at junction
       const junctionX = (leftXmax + rightXmin) / 2 + dx;
       const overlaps = [];
       for (const pl of col) {
@@ -4326,70 +4356,46 @@ function exportDxfOssature() {
           const prev = merged[merged.length - 1];
           const gap = ov.start - prev.end;
           if (gap <= JOINT + 2) {
-            if (prev.isFullTier && ov.isFullTier) {
-              merged.push({ ...ov });
-            } else {
-              prev.end = Math.max(prev.end, ov.end);
-              prev.isFullTier = prev.isFullTier && ov.isFullTier;
-            }
-          } else {
-            merged.push({ ...ov });
-          }
+            if (prev.isFullTier && ov.isFullTier) merged.push({ ...ov });
+            else { prev.end = Math.max(prev.end, ov.end); prev.isFullTier = prev.isFullTier && ov.isFullTier; }
+          } else merged.push({ ...ov });
         }
-        for (const m of merged) {
-          entities.push(dxfLine(junctionX, m.start + dy, junctionX, m.end + dy, 'OMEGA', 4));
-        }
+        for (const m of merged) dxf.addLine(junctionX, m.start + dy, junctionX, m.end + dy, 'OMEGA', 4);
       }
 
-      // Gap ZED at window junctions
+      // Gap ZED
       const leftIntervals = col.map(p => [p.ymin, p.ymax]);
       const rightIntervals = nextCol.map(p => [p.ymin, p.ymax]);
       const { leftGaps, rightGaps } = getGaps(leftIntervals, rightIntervals);
-      for (const [gs, ge] of rightGaps) {
-        if (Math.round(ge - gs) >= 100) {
-          entities.push(dxfLine(junctionX, gs + dy, junctionX, ge + dy, 'ZED_BORD', 6));
-        }
-      }
-      for (const [gs, ge] of leftGaps) {
-        if (Math.round(ge - gs) >= 100) {
-          entities.push(dxfLine(junctionX, gs + dy, junctionX, ge + dy, 'ZED_BORD', 6));
-        }
-      }
+      for (const [gs, ge] of rightGaps) { if (Math.round(ge - gs) >= 100) dxf.addLine(junctionX, gs + dy, junctionX, ge + dy, 'ZED_BORD', 6); }
+      for (const [gs, ge] of leftGaps) { if (Math.round(ge - gs) >= 100) dxf.addLine(junctionX, gs + dy, junctionX, ge + dy, 'ZED_BORD', 6); }
     }
 
-    // ── Bandeau panels ──
+    // ── Bandeau ──
     const banSorted = [...bandeauPanels].sort((a, b) => a.xmin - b.xmin);
-
-    // Bandeau entraxe ZED
     for (const bp of bandeauPanels) {
       const bw = Math.round(bp.xmax - bp.xmin);
       const nz = Math.max(0, Math.ceil(bw / ENTRAXE_BANDEAU) - 1);
       if (nz > 0) {
         const step = bw / (nz + 1);
-        for (let z = 1; z <= nz; z++) {
-          const zx = bp.xmin + z * step + dx;
-          entities.push(dxfLine(zx, bp.ymin + dy, zx, bp.ymax + dy, 'ZED_BANDEAU', 2));
-        }
+        for (let z = 1; z <= nz; z++) dxf.addLine(bp.xmin + z * step + dx, bp.ymin + dy, bp.xmin + z * step + dx, bp.ymax + dy, 'ZED_BANDEAU', 2);
       }
     }
-
-    // Bandeau-bandeau junction OMEGA
     for (let bi = 0; bi < banSorted.length - 1; bi++) {
       const gap = banSorted[bi + 1].xmin - banSorted[bi].xmax;
       if (gap <= MAX_GAP) {
         const jx = (banSorted[bi].xmax + banSorted[bi + 1].xmin) / 2 + dx;
         const jymin = Math.max(banSorted[bi].ymin, banSorted[bi + 1].ymin);
         const jymax = Math.min(banSorted[bi].ymax, banSorted[bi + 1].ymax);
-        entities.push(dxfLine(jx, jymin + dy, jx, jymax + dy, 'OMEGA_BANDEAU', 4));
+        dxf.addLine(jx, jymin + dy, jx, jymax + dy, 'OMEGA_BANDEAU', 4);
       }
     }
 
     yOffset += facH + SPACING + titleH * 2;
   }
 
-  const dxf = generateDxfString(layers, entities);
   const nom = chantier.nom || 'calpinage';
-  downloadDxf(dxf, nom.replace(/[^a-zA-Z0-9]/g, '_') + '_ossature.dxf');
+  downloadDxf(dxf.toString(), nom.replace(/[^a-zA-Z0-9]/g, '_') + '_ossature.dxf');
 }
 
 // ============================================================
