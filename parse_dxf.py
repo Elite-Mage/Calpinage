@@ -137,37 +137,46 @@ def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600):
     (Oméga et Zed) par façade.
 
     Logique :
-    - Les panneaux sont regroupés en colonnes verticales (même position X).
-    - OMÉGA (jonction entre 2 panneaux côte à côte) :
-      - Bords extrêmes de façade (gauche/droite)
-      - Entre deux colonnes adjacentes là où les deux ont des panneaux
-    - ZED (bords d'ouverture + entraxe) :
-      - Bord d'ouverture : là où une seule colonne a un panneau (fenêtre/porte)
-      - Entraxe : support intermédiaire quand la largeur du panneau > entraxe_max
+    - OMÉGA = jonction entre 2 panneaux adjacents (joint 8mm)
+      - Panneaux plein : oméga séparé par étage (RDC/N1 ne fusionnent pas)
+      - Pièces fenêtre : oméga fusionné à travers le joint inter-étage
+      - Bandeau : oméga aux jonctions régulières sous le bandeau
+    - ZED = bord libre (ouverture) + entraxe support
+      - Pas de ZED aux bords de façade (gauche/droite)
+      - Entraxe régulier : 600mm, bandeau : 400mm
+      - Bord libre : aux ouvertures (fenêtres, portes)
 
     Retourne un dict {facade_name: {"omega_mm", "zed_mm", "omega_ml", "zed_ml",
                                      "omega_details": {h: qty}, "zed_details": {h: qty}}}
     """
+    JOINT = 8
+    MAX_GAP = 20
+    BANDEAU_H = 1064
+    BANDEAU_TOL = 15
+    ENTRAXE_BANDEAU = 800
+
     def nearest_facade(xcenter):
         return min(facade_labels, key=lambda lbl: abs(lbl[0] - xcenter))[1]
 
-    by_facade = defaultdict(list)
+    # Detect full tier heights from color 25 (RDC) and color 30 (N1)
+    from collections import Counter as _Counter
+    rdc_heights = _Counter()
+    n1_heights = _Counter()
     for r in rects_spatial:
-        fname = nearest_facade((r["xmin"] + r["xmax"]) / 2)
-        by_facade[fname].append(r)
+        h = round(r["ymax"] - r["ymin"])
+        if h > 2000:
+            if r.get("color") == 25:
+                rdc_heights[h] += 1
+            if r.get("color") == 30:
+                n1_heights[h] += 1
+    rdc_height = rdc_heights.most_common(1)[0][0] if rdc_heights else 2550
+    n1_height = n1_heights.most_common(1)[0][0] if n1_heights else 3650
 
-    result = {}
-    for fname in sorted(by_facade.keys()):
-        panels = by_facade[fname]
-
-        # Regrouper en colonnes par position X (tolérance 10mm)
+    def build_columns(panels):
         columns = defaultdict(list)
         for p in panels:
             col_key = round(p["xmin"] / 10) * 10
             columns[col_key].append(p)
-
-        # Dédupliquer les panneaux par colonne (couches DXF superposées)
-        # et retirer les sous-panneaux englobés par un panneau plus grand
         for col_key in columns:
             seen = set()
             unique = []
@@ -176,7 +185,6 @@ def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600):
                 if sig not in seen:
                     seen.add(sig)
                     unique.append(p)
-            # Retirer les panneaux strictement englobés par un autre
             filtered = []
             unique.sort(key=lambda p: p["ymax"] - p["ymin"], reverse=True)
             for p in unique:
@@ -188,77 +196,159 @@ def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600):
                 if not englobed:
                     filtered.append(p)
             columns[col_key] = filtered
+        return sorted(columns.items())
 
-        sorted_cols = sorted(columns.items())
+    def get_gaps(left_intervals, right_intervals):
+        """Get Y segments where one side has panel but other doesn't."""
+        events = []
+        for s, e in left_intervals:
+            events.append((s, "L+"))
+            events.append((e, "L-"))
+        for s, e in right_intervals:
+            events.append((s, "R+"))
+            events.append((e, "R-"))
+        events.sort(key=lambda x: (x[0], x[1]))
+        left_gaps, right_gaps = [], []
+        l_count = r_count = 0
+        prev_y = None
+        for y, ev in events:
+            if prev_y is not None and y > prev_y:
+                if l_count > 0 and r_count == 0:
+                    right_gaps.append((prev_y, y))
+                elif r_count > 0 and l_count == 0:
+                    left_gaps.append((prev_y, y))
+            if ev == "L+":
+                l_count += 1
+            elif ev == "L-":
+                l_count -= 1
+            elif ev == "R+":
+                r_count += 1
+            elif ev == "R-":
+                r_count -= 1
+            prev_y = y
+        return left_gaps, right_gaps
+
+    by_facade = defaultdict(list)
+    for r in rects_spatial:
+        fname = nearest_facade((r["xmin"] + r["xmax"]) / 2)
+        by_facade[fname].append(r)
+
+    result = {}
+    for fname in sorted(by_facade.keys()):
+        all_panels = by_facade[fname]
+
+        # Separate bandeau from regular (use facade height, not min dimension)
+        regular_panels = []
+        bandeau_panels = []
+        for p in all_panels:
+            facade_h = round(p["ymax"] - p["ymin"])
+            if abs(facade_h - BANDEAU_H) <= BANDEAU_TOL:
+                bandeau_panels.append(p)
+            else:
+                regular_panels.append(p)
+
         total_omega_mm = 0
         total_zed_mm = 0
-        omega_details = defaultdict(int)  # hauteur → quantité
+        omega_details = defaultdict(int)
         zed_details = defaultdict(int)
 
-        for i, (col_x, col_panels) in enumerate(sorted_cols):
-            col_panels_sorted = sorted(col_panels, key=lambda p: p["ymin"])
+        def add_omega(h):
+            nonlocal total_omega_mm
+            total_omega_mm += h
+            omega_details[h] += 1
 
-            # ── ZED d'entraxe : support intermédiaire par panneau ──
-            for p in col_panels_sorted:
+        def add_zed(h):
+            nonlocal total_zed_mm
+            total_zed_mm += h
+            zed_details[h] += 1
+
+        # --- Regular panels ---
+        sorted_cols = build_columns(regular_panels)
+        for i, (col_x, col_panels) in enumerate(sorted_cols):
+            col_sorted = sorted(col_panels, key=lambda p: p["ymin"])
+
+            # Entraxe ZED for regular panels
+            for p in col_sorted:
                 pw = round(p["xmax"] - p["xmin"])
                 ph = round(p["ymax"] - p["ymin"])
                 nb_zed = max(0, math.ceil(pw / entraxe_max) - 1)
-                if nb_zed > 0:
-                    total_zed_mm += nb_zed * ph
-                    zed_details[ph] += nb_zed
+                for _ in range(nb_zed):
+                    add_zed(ph)
 
-            # ── OMÉGA / ZED aux jonctions entre colonnes ──
-            if i == 0:
-                # Bord gauche de la façade → oméga par panneau
-                for p in col_panels_sorted:
-                    ph = round(p["ymax"] - p["ymin"])
-                    total_omega_mm += ph
-                    omega_details[ph] += 1
+            if i >= len(sorted_cols) - 1:
+                continue
 
-            if i < len(sorted_cols) - 1:
-                _, next_col_panels = sorted_cols[i + 1]
-                next_sorted = sorted(next_col_panels, key=lambda p: p["ymin"])
+            _, next_col_panels = sorted_cols[i + 1]
+            next_sorted = sorted(next_col_panels, key=lambda p: p["ymin"])
+            left_xmax = max(p["xmax"] for p in col_sorted)
+            right_xmin = min(p["xmin"] for p in next_sorted)
+            x_gap = right_xmin - left_xmax
 
-                # Pour chaque panneau de la colonne courante :
-                # vérifier le recouvrement avec les panneaux de la colonne suivante
-                for p in col_panels_sorted:
-                    p_ymin, p_ymax = p["ymin"], p["ymax"]
-                    overlap = 0
-                    for np in next_sorted:
-                        os = max(p_ymin, np["ymin"])
-                        oe = min(p_ymax, np["ymax"])
-                        if oe > os:
-                            overlap += oe - os
-                    non_overlap = (p_ymax - p_ymin) - overlap
-                    if overlap > 0:
-                        h = round(overlap)
-                        total_omega_mm += h
-                        omega_details[h] += 1
-                    if non_overlap > 10:
-                        h = round(non_overlap)
-                        total_zed_mm += h
-                        zed_details[h] += 1
+            if x_gap > MAX_GAP:
+                # Opening - free edge ZED
+                for p in col_sorted:
+                    add_zed(round(p["ymax"] - p["ymin"]))
+                for p in next_sorted:
+                    add_zed(round(p["ymax"] - p["ymin"]))
+                continue
 
-                # Panneaux de la colonne suivante non couverts par la courante
-                for np in next_sorted:
-                    np_ymin, np_ymax = np["ymin"], np["ymax"]
-                    overlap = 0
-                    for p in col_panels_sorted:
-                        os = max(np_ymin, p["ymin"])
-                        oe = min(np_ymax, p["ymax"])
-                        if oe > os:
-                            overlap += oe - os
-                    non_overlap = (np_ymax - np_ymin) - overlap
-                    if non_overlap > 10:
-                        h = round(non_overlap)
-                        total_zed_mm += h
-                        zed_details[h] += 1
-            else:
-                # Bord droit de la façade → oméga par panneau
-                for p in col_panels_sorted:
-                    ph = round(p["ymax"] - p["ymin"])
-                    total_omega_mm += ph
-                    omega_details[ph] += 1
+            # Omega: per-panel overlaps with tier splitting
+            overlaps = []
+            for pl in col_sorted:
+                for pr in next_sorted:
+                    ov_start = max(pl["ymin"], pr["ymin"])
+                    ov_end = min(pl["ymax"], pr["ymax"])
+                    if ov_end - ov_start > 1:
+                        lh = round(pl["ymax"] - pl["ymin"])
+                        rh = round(pr["ymax"] - pr["ymin"])
+                        is_full = (abs(lh - rdc_height) <= 15 or abs(lh - n1_height) <= 15) and \
+                                  (abs(rh - rdc_height) <= 15 or abs(rh - n1_height) <= 15)
+                        overlaps.append((ov_start, ov_end, is_full))
+
+            overlaps.sort()
+            if overlaps:
+                merged = [list(overlaps[0])]
+                for ov in overlaps[1:]:
+                    prev = merged[-1]
+                    gap = ov[0] - prev[1]
+                    if gap <= JOINT + 2:
+                        if prev[2] and ov[2]:
+                            merged.append(list(ov))  # Split at tier boundary
+                        else:
+                            prev[1] = max(prev[1], ov[1])  # Merge window pieces
+                            prev[2] = prev[2] and ov[2]
+                    else:
+                        merged.append(list(ov))
+                for start, end, _ in merged:
+                    add_omega(round(end - start))
+
+            # Gap ZED (free edges at window junctions)
+            left_intervals = [(p["ymin"], p["ymax"]) for p in col_sorted]
+            right_intervals = [(p["ymin"], p["ymax"]) for p in next_sorted]
+            left_gaps, right_gaps = get_gaps(left_intervals, right_intervals)
+            for gs, ge in right_gaps:
+                h = round(ge - gs)
+                if h >= 100:
+                    add_zed(h)
+            for gs, ge in left_gaps:
+                h = round(ge - gs)
+                if h >= 100:
+                    add_zed(h)
+
+        # --- Bandeau-bandeau junction OMEGAs (only between different bandeau panels) ---
+        ban_sorted = sorted(bandeau_panels, key=lambda p: p["xmin"])
+        for j in range(len(ban_sorted) - 1):
+            gap = ban_sorted[j + 1]["xmin"] - ban_sorted[j]["xmax"]
+            if gap <= MAX_GAP:
+                add_omega(round(ban_sorted[j]["ymax"] - ban_sorted[j]["ymin"]))
+
+        # --- Bandeau entraxe ZED (closer spacing for shorter panels) ---
+        for bp in bandeau_panels:
+            bw = round(bp["xmax"] - bp["xmin"])
+            bh = round(bp["ymax"] - bp["ymin"])
+            nb_zed = max(0, math.ceil(bw / ENTRAXE_BANDEAU) - 1)
+            for _ in range(nb_zed):
+                add_zed(bh)
 
         result[fname] = {
             "omega_mm": round(total_omega_mm),
