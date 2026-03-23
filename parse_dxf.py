@@ -49,7 +49,7 @@ ACI_COLOR_MAP = {
     5:   {"name": "Panneaux Bleu",          "color": "#3498db", "stock_w": 3650, "niveau": ""},
     6:   {"name": "Panneaux Magenta",       "color": "#9b59b6", "stock_w": 3650, "niveau": ""},
     7:   {"name": "Panneaux Blanc/Noir",    "color": "#aaaaaa", "stock_w": 3650, "niveau": ""},
-    114: {"name": "Panneaux Vert",          "color": "#2ecc71", "stock_w": 3650, "niveau": ""},
+    114: {"name": "Panneaux Blanc/Noir",    "color": "#aaaaaa", "stock_w": 3650, "niveau": ""},
 }
 
 def round_mm(v):
@@ -411,6 +411,9 @@ def parse_dxf_file(filepath):
 
     def add_rect(xmin, xmax, ymin, ymax, color_aci):
         """Ajoute un rectangle avec dédoublonnage spatial (tolérance 5mm)."""
+        # Remap ACI 114 → 7 (blanc)
+        if color_aci == 114:
+            color_aci = 7
         raw_w = xmax - xmin
         raw_h = ymax - ymin
         if raw_w < 10 or raw_h < 10:

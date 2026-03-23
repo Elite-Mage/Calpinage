@@ -2073,7 +2073,7 @@ const ACI_COLOR_MAP_JS = {
   5:  { name: 'Panneaux Bleu',         color: '#3498db', stock_w: 3650, niveau: '' },
   6:  { name: 'Panneaux Magenta',      color: '#9b59b6', stock_w: 3650, niveau: '' },
   7:  { name: 'Panneaux Blanc/Noir',   color: '#aaaaaa', stock_w: 3650, niveau: '' },
-  114: { name: 'Panneaux Vert',        color: '#2ecc71', stock_w: 3650, niveau: '' },
+  114: { name: 'Panneaux Blanc/Noir',   color: '#aaaaaa', stock_w: 3650, niveau: '' },
 };
 
 function parseDxfClientSide(text, fileName) {
@@ -2387,6 +2387,8 @@ function parseDxfClientSide(text, fileName) {
     if (!color || color === 256) {
       color = (layerName && layerColors[layerName]) || 256;
     }
+    // Remap ACI 114 → 7 (blanc)
+    if (color === 114) color = 7;
     // Dédoublonnage spatial : ignorer si un rectangle quasi-identique existe déjà
     const TOL = 5; // tolérance 5mm
     for (const existing of rectsSpatial) {
