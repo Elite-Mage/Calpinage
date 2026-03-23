@@ -2073,6 +2073,7 @@ const ACI_COLOR_MAP_JS = {
   5:  { name: 'Panneaux Bleu',         color: '#3498db', stock_w: 3650, niveau: '' },
   6:  { name: 'Panneaux Magenta',      color: '#9b59b6', stock_w: 3650, niveau: '' },
   7:  { name: 'Panneaux Blanc/Noir',   color: '#aaaaaa', stock_w: 3650, niveau: '' },
+  114: { name: 'Panneaux Vert',        color: '#2ecc71', stock_w: 3650, niveau: '' },
 };
 
 function parseDxfClientSide(text, fileName) {
@@ -2414,6 +2415,37 @@ function parseDxfClientSide(text, fileName) {
     addRect(lr.xmin, lr.xmax, lr.ymin, lr.ymax, lr.color, lr.layer);
   }
 
+  // ── Dédoublonnage englobé : supprimer les petits panneaux contenus dans un plus grand de même couleur ──
+  const englobedIndices = new Set();
+  for (let ri = 0; ri < rectsSpatial.length; ri++) {
+    if (englobedIndices.has(ri)) continue;
+    const r = rectsSpatial[ri];
+    const rArea = (r.xmax - r.xmin) * (r.ymax - r.ymin);
+    for (let rj = 0; rj < rectsSpatial.length; rj++) {
+      if (ri === rj || englobedIndices.has(rj)) continue;
+      const o = rectsSpatial[rj];
+      if (o.color !== r.color) continue;
+      const oArea = (o.xmax - o.xmin) * (o.ymax - o.ymin);
+      if (oArea >= rArea) continue; // o doit être plus petit que r
+      if (o.xmin >= r.xmin - 2 && o.xmax <= r.xmax + 2 &&
+          o.ymin >= r.ymin - 2 && o.ymax <= r.ymax + 2) {
+        englobedIndices.add(rj);
+      }
+    }
+  }
+  if (englobedIndices.size > 0) {
+    const keep = [];
+    const keepSpatial = [];
+    for (let ri = 0; ri < rectsSpatial.length; ri++) {
+      if (!englobedIndices.has(ri)) {
+        keep.push(rects[ri]);
+        keepSpatial.push(rectsSpatial[ri]);
+      }
+    }
+    rects.length = 0; rects.push(...keep);
+    rectsSpatial.length = 0; rectsSpatial.push(...keepSpatial);
+  }
+
   // ── Diagnostic : log les entités trouvées ──
   const entityCounts = {};
   for (const e of entities) {
@@ -2424,6 +2456,7 @@ function parseDxfClientSide(text, fileName) {
   console.log('[DXF Parser] POLYLINE rectangles:', entities.filter(e => e.type === 'POLYLINE' && e.vertices.length >= 3).length);
   console.log('[DXF Parser] LINE rectangles assemblés:', lineRects.length);
   console.log('[DXF Parser] Doublons spatiaux filtrés:', _dupCount);
+  console.log('[DXF Parser] Panneaux englobés supprimés:', englobedIndices.size);
   console.log('[DXF Parser] Total rectangles extraits:', rects.length);
   console.log('[DXF Parser] Couleurs calques:', JSON.stringify(layerColors));
   console.log('[DXF Parser] Rectangles par couleur:', rects.reduce((acc, r) => { acc[r.color] = (acc[r.color] || 0) + 1; return acc; }, {}));
