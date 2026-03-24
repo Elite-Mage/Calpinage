@@ -49,6 +49,7 @@ ACI_COLOR_MAP = {
     5:   {"name": "Panneaux Bleu",          "color": "#3498db", "stock_w": 3650, "niveau": ""},
     6:   {"name": "Panneaux Magenta",       "color": "#9b59b6", "stock_w": 3650, "niveau": ""},
     7:   {"name": "Panneaux Blanc/Noir",    "color": "#aaaaaa", "stock_w": 3650, "niveau": ""},
+    114: {"name": "Panneaux Blanc/Noir",    "color": "#aaaaaa", "stock_w": 3650, "niveau": ""},
 }
 
 def round_mm(v):
@@ -410,6 +411,9 @@ def parse_dxf_file(filepath):
 
     def add_rect(xmin, xmax, ymin, ymax, color_aci):
         """Ajoute un rectangle avec dédoublonnage spatial (tolérance 5mm)."""
+        # Remap ACI 114 → 7 (blanc)
+        if color_aci == 114:
+            color_aci = 7
         raw_w = xmax - xmin
         raw_h = ymax - ymin
         if raw_w < 10 or raw_h < 10:
@@ -429,8 +433,13 @@ def parse_dxf_file(filepath):
         """Traite une entité DXF (supporte offset pour les INSERT/blocks)."""
         def _resolve(e):
             c = resolve_color(e)
-            if c == 0 and parent_color:  # BYBLOCK
-                c = parent_color
+            if c == 0:  # BYBLOCK
+                if parent_color:
+                    c = parent_color
+                else:
+                    # BYBLOCK in modelspace (no parent INSERT) → resolve to layer color
+                    layer_name = e.dxf.get("layer", "0")
+                    c = layer_colors.get(layer_name, 7)
             if c == 256 and parent_layer:
                 c = layer_colors.get(parent_layer, 256)
             return c
@@ -506,6 +515,27 @@ def parse_dxf_file(filepath):
                             has_right = True
                 if has_left and has_right:
                     add_rect(h1xmin, h1xmax, ymin, ymax, color_aci)
+
+    # 2c. Dédoublonnage englobé : supprimer les petits panneaux contenus dans un plus grand de même couleur
+    englobed = set()
+    for i, r in enumerate(rects_spatial):
+        if i in englobed:
+            continue
+        r_area = (r["xmax"] - r["xmin"]) * (r["ymax"] - r["ymin"])
+        for j, o in enumerate(rects_spatial):
+            if i == j or j in englobed:
+                continue
+            if o["color"] != r["color"]:
+                continue
+            o_area = (o["xmax"] - o["xmin"]) * (o["ymax"] - o["ymin"])
+            if o_area >= r_area:
+                continue
+            if (o["xmin"] >= r["xmin"] - 2 and o["xmax"] <= r["xmax"] + 2 and
+                    o["ymin"] >= r["ymin"] - 2 and o["ymax"] <= r["ymax"] + 2):
+                englobed.add(j)
+    if englobed:
+        rects[:] = [r for i, r in enumerate(rects) if i not in englobed]
+        rects_spatial[:] = [r for i, r in enumerate(rects_spatial) if i not in englobed]
 
     # 3. Assigne chaque rectangle à la façade la plus proche (par X)
     def nearest_facade(xcenter):
@@ -602,6 +632,8 @@ def parse_dxf_file(filepath):
         "nextGroupId": gid,
         "activeGroupId": 1,
         "ossature_facades": ossature,
+        "rectsSpatial": rects_spatial,
+        "facadeLabels": facade_labels,
     }
 
 # ─── Génération Excel ─────────────────────────────────────────────────────────
