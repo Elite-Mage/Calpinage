@@ -2510,28 +2510,69 @@ function parseDxfClientSide(text, fileName) {
   console.log('[DXF Parser] Couleurs calques:', JSON.stringify(layerColors));
   console.log('[DXF Parser] Rectangles par couleur:', rects.reduce((acc, r) => { acc[r.color] = (acc[r.color] || 0) + 1; return acc; }, {}));
 
-  // Auto-number facades if no text labels found
+  // Auto-number facades: assign each panel directly via Y-row + X-gap clustering
+  const panelFacadeMap = {}; // rectsSpatial index → facade name
   if (autoNumberFacades && rectsSpatial.length > 0) {
-    const xs = [...new Set(rectsSpatial.map(r => Math.round(r.xmin)))].sort((a, b) => a - b);
-    const GAP_THRESHOLD = 500;
-    const groupsX = [[xs[0]]];
-    for (let k = 1; k < xs.length; k++) {
-      if (xs[k] - xs[k - 1] > GAP_THRESHOLD) groupsX.push([xs[k]]);
-      else groupsX[groupsX.length - 1].push(xs[k]);
+    // Step 1: group panels (with index) into Y rows
+    const indexed = rectsSpatial.map((r, i) => ({ i, r })).sort((a, b) => a.r.ymin - b.r.ymin);
+    const yRows = [[indexed[0]]];
+    let curYmax = indexed[0].r.ymax;
+    for (let k = 1; k < indexed.length; k++) {
+      if (indexed[k].r.ymin <= curYmax + 20) {
+        curYmax = Math.max(curYmax, indexed[k].r.ymax);
+        yRows[yRows.length - 1].push(indexed[k]);
+      } else {
+        yRows.push([indexed[k]]);
+        curYmax = indexed[k].r.ymax;
+      }
     }
-    for (let idx = 0; idx < groupsX.length; idx++) {
-      const gx = groupsX[idx];
-      const center = (Math.min(...gx) + Math.max(...gx)) / 2;
-      facadeLabels.push([center, `Façade ${idx + 1}`]);
+    // Step 2: within each Y row, find true X gaps and assign directly
+    let facadeIdx = 1;
+    for (const rowItems of yRows) {
+      rowItems.sort((a, b) => a.r.xmin - b.r.xmin);
+      const subGroups = [[rowItems[0]]];
+      let maxXmax = rowItems[0].r.xmax;
+      for (let k = 1; k < rowItems.length; k++) {
+        if (rowItems[k].r.xmin > maxXmax + 50) {
+          subGroups.push([rowItems[k]]);
+        } else {
+          subGroups[subGroups.length - 1].push(rowItems[k]);
+        }
+        maxXmax = Math.max(maxXmax, rowItems[k].r.xmax);
+      }
+      for (const sg of subGroups) {
+        const fname = `Façade ${facadeIdx}`;
+        const cx = (Math.min(...sg.map(x => x.r.xmin)) + Math.max(...sg.map(x => x.r.xmax))) / 2;
+        const cy = (Math.min(...sg.map(x => x.r.ymin)) + Math.max(...sg.map(x => x.r.ymax))) / 2;
+        facadeLabels.push([[cx, cy], fname]);
+        for (const item of sg) panelFacadeMap[item.i] = fname;
+        facadeIdx++;
+      }
     }
   }
   if (facadeLabels.length === 0) facadeLabels.push([0, 'Façade 1']);
 
-  // Classify subtype by position (Bandeau Toiture = top panel, nothing above, h < 1600mm)
+  // Get facade for a panel: direct if auto-numbered, else by proximity to TEXT labels
+  function getFacade(idx, r) {
+    if (panelFacadeMap[idx] !== undefined) return panelFacadeMap[idx];
+    if (Array.isArray(facadeLabels[0][0])) {
+      const cx = (r.xmin + r.xmax) / 2, cy = (r.ymin + r.ymax) / 2;
+      return facadeLabels.reduce((best, lbl) => {
+        const d = (lbl[0][0] - cx)**2 + (lbl[0][1] - cy)**2;
+        const bd = (best[0][0] - cx)**2 + (best[0][1] - cy)**2;
+        return d < bd ? lbl : best;
+      })[1];
+    }
+    return nearestFacade((r.xmin + r.xmax) / 2);
+  }
+
+  // Classify subtype by position:
+  //   Bandeau Toiture: top panel, nothing above, h < 1600mm
+  //   Plein: h >= 1600mm
+  //   Pièce spéciale: h < 1600mm with panel above
   function classifySubtypeByPosition(panel, allPanelsFacade) {
-    const BANDEAU_MAX_H = 1600;
     const ph = Math.round(panel.ymax - panel.ymin);
-    if (ph >= BANDEAU_MAX_H) return 'Plein';
+    if (ph >= 1600) return 'Plein';
     let hasAbove = false;
     for (const other of allPanelsFacade) {
       if (other === panel) continue;
@@ -2541,15 +2582,15 @@ function parseDxfClientSide(text, fileName) {
       }
     }
     if (!hasAbove) return 'Bandeau Toiture';
-    return 'Plein';
+    return 'Pièce spéciale';
   }
 
   // Group panels by facade for position-based classification
   const panelsByFacade = {};
-  for (const r of rectsSpatial) {
-    const fn = nearestFacade((r.xmin + r.xmax) / 2);
+  for (let i = 0; i < rectsSpatial.length; i++) {
+    const fn = getFacade(i, rectsSpatial[i]);
     if (!panelsByFacade[fn]) panelsByFacade[fn] = [];
-    panelsByFacade[fn].push(r);
+    panelsByFacade[fn].push(rectsSpatial[i]);
   }
 
   // Group by (color, facade, subtype) -> counter
@@ -2557,7 +2598,7 @@ function parseDxfClientSide(text, fileName) {
   for (let ri = 0; ri < rects.length; ri++) {
     const r = rects[ri];
     const spatial = rectsSpatial[ri];
-    const facade = nearestFacade(r.xcenter);
+    const facade = getFacade(ri, spatial);
     const subtype = classifySubtypeByPosition(spatial, panelsByFacade[facade] || []);
     const key = `${r.color}|${facade}|${subtype}`;
     if (!dataMap[key]) dataMap[key] = { color: r.color, facade, subtype, dims: {} };
@@ -2626,10 +2667,10 @@ function parseDxfClientSide(text, fileName) {
     const BANDEAU_TOITURE_MAX_H = 1600;
 
     const byFacade = {};
-    for (const r of rSpatial) {
-      const fn = nearestFacade((r.xmin + r.xmax) / 2);
+    for (let i = 0; i < rSpatial.length; i++) {
+      const fn = getFacade(i, rSpatial[i]);
       if (!byFacade[fn]) byFacade[fn] = [];
-      byFacade[fn].push(r);
+      byFacade[fn].push(rSpatial[i]);
     }
 
     function buildColumns(panels) {
