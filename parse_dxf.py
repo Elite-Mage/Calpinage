@@ -660,69 +660,59 @@ def generate_excel(data, out_path):
     wb = openpyxl.Workbook()
     wb.remove(wb.active)  # retire la feuille par défaut
 
+    # ── 1. Feuille Récapitulatif ────────────────────────────────────────────
+    ws_recap = wb.create_sheet("Récapitulatif")
+    title = data["chantier"]["nom"] + " — Récapitulatif"
+    ws_recap.append([title])
+    ws_recap["A1"].font = Font(bold=True, size=13)
+
     facades_order = []
     for g in data["groups"]:
         for ss in g["subsections"]:
             if ss["name"] not in facades_order:
                 facades_order.append(ss["name"])
 
-    # ── 1. Feuille Récapitulatif ────────────────────────────────────────────
-    ws_recap = wb.create_sheet("Récapitulatif")
-    title = data["chantier"]["nom"] + " — Récapitulatif"
-    ws_recap.append([title])
-    ws_recap["A1"].font = Font(bold=True, size=13)
-    ws_recap.append(["Catégorie", "Larg. (mm)", "Haut. (mm)"] + facades_order)
-    for col in range(1, 4 + len(facades_order)):
+    ws_recap.append(["Couleur", "Façade", "Sous-type", "Larg. (mm)", "Haut. (mm)", "Quantité", "Surface unit. (m²)", "Surface totale (m²)"])
+    for col in range(1, 9):
         ws_recap.cell(2, col).font = Font(bold=True)
         ws_recap.cell(2, col).fill = PatternFill("solid", fgColor="FFE0E0E0")
         ws_recap.cell(2, col).border = _border()
 
-    # Collecte toutes les lignes du récap
-    recap_rows = defaultdict(lambda: {f: 0 for f in facades_order})
-    recap_keys = []  # (categorie, w, h) dans l'ordre de rencontre
-
+    grand_total = 0.0
     for g in data["groups"]:
-        niv = ACI_COLOR_MAP.get(
-            next((k for k, v in ACI_COLOR_MAP.items() if v["color"] == g["color"]), None),
-            {}
-        ).get("niveau", "")
+        fill = _header_fill(g["color"])
         for ss in g["subsections"]:
             for st in ss["panelSubtypes"]:
                 for p in st["pieces"]:
-                    if st["name"] == "Plein":
-                        cat = f"Plein {niv}".strip()
-                        col1, col2 = p["h"], p["w"]  # façade h, stock w
-                    elif st["name"] == "Bandeau Haut":
-                        cat = "Bandeau Haut"
-                        col1, col2 = p["w"], p["h"]
-                    else:
-                        cat = f"{st['name']} {niv}".strip()
-                        col1, col2 = min(p["w"], p["h"]), max(p["w"], p["h"])
-                    key = (cat, col1, col2)
-                    if key not in recap_keys:
-                        recap_keys.append(key)
-                    recap_rows[key][ss["name"]] += p["qty"]
+                    c1, c2 = p["w"], p["h"]
+                    s_unit = round(c1 * c2 / 1_000_000, 4)
+                    s_tot = round(s_unit * p["qty"], 4)
+                    grand_total += s_tot
+                    ws_recap.append([g["name"], ss["name"], st["name"], c1, c2, p["qty"], s_unit, s_tot])
+                    r = ws_recap.max_row
+                    for col in range(1, 9):
+                        ws_recap.cell(r, col).border = _border()
+                    ws_recap.cell(r, 1).fill = fill
 
-    for cat, c1, c2 in recap_keys:
-        row = [cat, c1, c2] + [recap_rows[(cat, c1, c2)].get(f, 0) for f in facades_order]
-        ws_recap.append(row)
-        r = ws_recap.max_row
-        for col in range(1, 4 + len(facades_order)):
-            ws_recap.cell(r, col).border = _border()
+    ws_recap.append(["TOTAL", None, None, None, None, None, None, round(grand_total, 4)])
+    r = ws_recap.max_row
+    for col in range(1, 9):
+        ws_recap.cell(r, col).font = Font(bold=True)
+        ws_recap.cell(r, col).fill = PatternFill("solid", fgColor="FFDDDDDD")
+        ws_recap.cell(r, col).border = _border()
 
-    ws_recap.column_dimensions["A"].width = 28
-    ws_recap.column_dimensions["B"].width = 14
-    ws_recap.column_dimensions["C"].width = 14
-    for i in range(len(facades_order)):
-        ws_recap.column_dimensions[get_column_letter(4 + i)].width = 14
+    for i, w in enumerate([28, 20, 20, 14, 14, 10, 16, 16], 1):
+        ws_recap.column_dimensions[get_column_letter(i)].width = w
 
-    # ── 2. Feuille par façade ───────────────────────────────────────────────
-    for facade_name in facades_order:
-        ws = wb.create_sheet(facade_name)
-        ws.append([facade_name])
+    # ── 2. Une feuille par couleur (groupe), triée : couleur → façade → sous-type ──
+    for g in data["groups"]:
+        import re
+        sheet_name = re.sub(r'[\\/*?\[\]:]', '_', g["name"])[:31]  # Excel forbidden chars
+        ws = wb.create_sheet(sheet_name)
+        ws.append([g["name"]])
         ws["A1"].font = Font(bold=True, size=12)
 
-        headers = ["Catégorie", "Largeur façade (mm)", "Hauteur panneau (mm)",
+        headers = ["Façade", "Sous-type", "Largeur (mm)", "Hauteur (mm)",
                    "Quantité", "Surface unitaire (m²)", "Surface totale (m²)"]
         ws.append(headers)
         for col in range(1, len(headers) + 1):
@@ -731,48 +721,31 @@ def generate_excel(data, out_path):
             ws.cell(2, col).border = _border()
 
         total_surface = 0.0
+        fill = _header_fill(g["color"])
 
-        for g in data["groups"]:
-            ss = next((s for s in g["subsections"] if s["name"] == facade_name), None)
-            if ss is None:
-                continue
-            niv = ACI_COLOR_MAP.get(
-                next((k for k, v in ACI_COLOR_MAP.items() if v["color"] == g["color"]), None),
-                {}
-            ).get("niveau", "")
-            fill = _header_fill(g["color"])
-
+        for ss in g["subsections"]:
             for st in ss["panelSubtypes"]:
                 for p in st["pieces"]:
-                    if st["name"] == "Plein":
-                        cat = f"Plein {niv}".strip()
-                        c1, c2 = p["h"], p["w"]
-                    elif st["name"] == "Bandeau Haut":
-                        cat = "Bandeau Haut"
-                        c1, c2 = p["w"], p["h"]
-                    else:
-                        cat = f"{st['name']} {niv}".strip()
-                        c1, c2 = min(p["w"], p["h"]), max(p["w"], p["h"])
+                    c1, c2 = p["w"], p["h"]
                     s_unit = round(c1 * c2 / 1_000_000, 4)
                     s_tot = round(s_unit * p["qty"], 4)
                     total_surface += s_tot
-                    ws.append([cat, c1, c2, p["qty"], s_unit, s_tot])
+                    ws.append([ss["name"], st["name"], c1, c2, p["qty"], s_unit, s_tot])
                     r = ws.max_row
-                    for col in range(1, 7):
+                    for col in range(1, 8):
                         ws.cell(r, col).border = _border()
                     ws.cell(r, 1).fill = fill
 
         # Ligne total
-        ws.append(["TOTAL FAÇADE", None, None, None, None, round(total_surface, 4)])
+        ws.append(["TOTAL " + g["name"], None, None, None, None, None, round(total_surface, 4)])
         r = ws.max_row
-        for col in range(1, 7):
+        for col in range(1, 8):
             ws.cell(r, col).font = Font(bold=True)
             ws.cell(r, col).fill = PatternFill("solid", fgColor="FFDDDDDD")
             ws.cell(r, col).border = _border()
 
-        ws.column_dimensions["A"].width = 28
-        for col_letter in ["B", "C", "D", "E", "F"]:
-            ws.column_dimensions[col_letter].width = 20
+        for i, w in enumerate([20, 20, 14, 14, 10, 16, 16], 1):
+            ws.column_dimensions[get_column_letter(i)].width = w
 
     # ── 3. Feuille Ossature ────────────────────────────────────────────────
     ossature = data.get("ossature_facades", {})

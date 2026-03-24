@@ -1727,7 +1727,29 @@ function exportExcel() {
   if (!allResults) return;
   const nom = chantier.nom || 'Chantier';
   const date = chantier.date || new Date().toISOString().slice(0,10);
-  let rows = '<tr><th>Type</th><th>Ref.Fourn.</th><th>Coloris</th><th>Ep.(mm)</th><th>Facade</th><th>Panneau</th><th>Format</th><th>Ref.Piece</th><th>Piece L</th><th>Piece H</th><th>Rotation</th><th>Pos X</th><th>Pos Y</th></tr>';
+
+  // ── 1. Récapitulatif : couleur → façade → sous-type ──
+  let recapRows = '<tr><th colspan="8" style="background:#333;color:#fff;font-size:14px;">RÉCAPITULATIF — ' + nom + '</th></tr>';
+  recapRows += '<tr><th>Couleur</th><th>Façade</th><th>Sous-type</th><th>Largeur (mm)</th><th>Hauteur (mm)</th><th>Quantité</th><th>Surface unit. (m²)</th><th>Surface totale (m²)</th></tr>';
+  let grandTotal = 0;
+  for (const g of groups) {
+    for (const sub of g.subsections) {
+      for (const st of (sub.panelSubtypes || [])) {
+        const sortedPieces = [...st.pieces].sort((a, b) => b.w * b.h - a.w * a.h);
+        for (const p of sortedPieces) {
+          const sUnit = (p.w * p.h / 1e6).toFixed(4);
+          const sTot = (p.w * p.h * p.qty / 1e6).toFixed(4);
+          grandTotal += p.w * p.h * p.qty / 1e6;
+          recapRows += `<tr><td style="background:${g.color}22;">${g.name}</td><td>${sub.name}</td><td>${st.name}</td><td>${p.w}</td><td>${p.h}</td><td>${p.qty}</td><td>${sUnit}</td><td>${sTot}</td></tr>`;
+        }
+      }
+    }
+  }
+  recapRows += `<tr style="font-weight:bold;background:#eee;"><td>TOTAL</td><td></td><td></td><td></td><td></td><td></td><td></td><td>${grandTotal.toFixed(4)}</td></tr>`;
+
+  // ── 2. Détail découpe : couleur → panneau → pièces ──
+  let rows = '<tr><th colspan="13" style="background:#333;color:#fff;font-size:14px;">DÉTAIL DÉCOUPE</th></tr>';
+  rows += '<tr><th>Type</th><th>Ref.Fourn.</th><th>Coloris</th><th>Ep.(mm)</th><th>Facade</th><th>Panneau</th><th>Format</th><th>Ref.Piece</th><th>Piece L</th><th>Piece H</th><th>Rotation</th><th>Pos X</th><th>Pos Y</th></tr>';
   for (const g of groups) {
     const result = allResults[g.id];
     if (!result) continue;
@@ -1737,7 +1759,8 @@ function exportExcel() {
       }
     }
   }
-  // ── Ossature par façade ──
+
+  // ── 3. Ossature par façade ──
   const ossData = calcOssature();
   let ossRows = '<tr><th colspan="4" style="background:#333;color:#fff;font-size:14px;">OSSATURE PAR FAÇADE</th></tr>';
   ossRows += '<tr><th>Façade</th><th>Oméga (ml)</th><th>Zed (ml)</th><th>Total (ml)</th></tr>';
@@ -1754,7 +1777,7 @@ function exportExcel() {
   }
   ossRows += `<tr style="font-weight:bold;background:#eee;"><td>TOTAL</td><td>${grandOmML.toFixed(2)}</td><td>${grandZdML.toFixed(2)}</td><td>${(grandOmML+grandZdML).toFixed(2)}</td></tr>`;
 
-  const xlsHtml = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"></head><body><table>${rows}</table><br/><table>${ossRows}</table></body></html>`;
+  const xlsHtml = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"></head><body><table>${recapRows}</table><br/><table>${rows}</table><br/><table>${ossRows}</table></body></html>`;
   const blob = new Blob(['\uFEFF' + xlsHtml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
