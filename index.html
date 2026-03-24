@@ -331,13 +331,6 @@
   .result-group-header .name { font-size: 16px; font-weight: 800; }
   .result-group-header .info { font-size: 12px; color: var(--text3); margin-left: auto; }
 
-  /* RESULT SUBTYPE HEADER (Bandeau Toiture / Plein / Pièce spéciale) */
-  .result-subtype-header {
-    font-size: 11px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
-    color: var(--text4); padding: 6px 4px 3px; margin-top: 10px; margin-bottom: 4px;
-    border-bottom: 1px solid var(--border);
-  }
-
   /* RESULT SUBSECTION HEADER */
   .result-subsection-header {
     display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 7px;
@@ -1236,8 +1229,7 @@ function expandPieces(pcs) {
 function allFittingStocks(activeStocks, pw, ph, kerf) {
   const fits = [], w = pw - kerf, h = ph - kerf;
   for (const s of activeStocks) {
-    if (((s.w >= pw || s.w >= w) && (s.h >= ph || s.h >= h)) ||
-        ((s.w >= ph || s.w >= h) && (s.h >= pw || s.h >= w))) fits.push(s);
+    if ((s.w >= pw || s.w >= w) && (s.h >= ph || s.h >= h)) fits.push(s);
   }
   return fits.sort((a, b) => a.w * a.h - b.w * b.h);
 }
@@ -1271,7 +1263,6 @@ function heuristicBestAreaFit(freeRects, pw, ph, kerf) {
   for (let i = 0; i < freeRects.length; i++) {
     const r = freeRects[i];
     if (fitsInRect(r.w, r.h, pw, ph, kerf)) { const a = r.w*r.h - w*h; if (a < bestW) { bestW=a; bestIdx=i; bestR=false; } }
-    if (fitsInRect(r.w, r.h, ph, pw, kerf)) { const a = r.w*r.h - w*h; if (a < bestW) { bestW=a; bestIdx=i; bestR=true; } }
   }
   return { idx: bestIdx, rotated: bestR };
 }
@@ -1280,7 +1271,6 @@ function heuristicBestShortSideFit(freeRects, pw, ph, kerf) {
   for (let i = 0; i < freeRects.length; i++) {
     const r = freeRects[i];
     if (fitsInRect(r.w, r.h, pw, ph, kerf)) { const s = Math.min(r.w-pw, r.h-ph); if (s < bestS) { bestS=s; bestIdx=i; bestR=false; } }
-    if (fitsInRect(r.w, r.h, ph, pw, kerf)) { const s = Math.min(r.w-ph, r.h-pw); if (s < bestS) { bestS=s; bestIdx=i; bestR=true; } }
   }
   return { idx: bestIdx, rotated: bestR };
 }
@@ -1289,7 +1279,6 @@ function heuristicBottomLeft(freeRects, pw, ph, kerf) {
   for (let i = 0; i < freeRects.length; i++) {
     const r = freeRects[i];
     if (fitsInRect(r.w, r.h, pw, ph, kerf)) { if (r.y < bestY || (r.y===bestY && r.x < bestX)) { bestY=r.y; bestX=r.x; bestIdx=i; bestR=false; } }
-    if (fitsInRect(r.w, r.h, ph, pw, kerf)) { if (r.y < bestY || (r.y===bestY && r.x < bestX)) { bestY=r.y; bestX=r.x; bestIdx=i; bestR=true; } }
   }
   return { idx: bestIdx, rotated: bestR };
 }
@@ -1395,55 +1384,15 @@ function optimize() {
     const allPieces = getAllGroupPieces(g);
     if (!allPieces.length) { allResults[g.id] = { panels: [], unplaced: [], allPieces: [], subsectionColorMap: {} }; continue; }
     hasAny = true;
-
+    const expanded = expandPieces(allPieces);
+    const result = optimizePack(activeStocks, expanded, kerf);
     // Map subsectionId -> color
     const subsectionColorMap = {};
     g.subsections.forEach((sub, i) => { subsectionColorMap[sub.id] = PIECE_COLORS[i % PIECE_COLORS.length]; });
-    // colorMap by global pieceTypeIdx -> subsection color
+    // colorMap by pieceTypeIdx -> subsection color
     const colorMap = {};
     allPieces.forEach((p, i) => { colorMap[i] = subsectionColorMap[p.subsectionId]; });
-
-    // Group pieces by subtype name, preserving global index for colorMap
-    const bySubtype = {};
-    allPieces.forEach((p, globalIdx) => {
-      const stName = p.subtypeName || 'Autre';
-      if (!bySubtype[stName]) bySubtype[stName] = [];
-      bySubtype[stName].push({ piece: p, globalIdx });
-    });
-
-    // Optimize each subtype independently so pieces get the most suitable stock
-    const ST_ORDER = ['Bandeau Toiture', 'Plein', 'Pièce spéciale'];
-    const orderedNames = [
-      ...ST_ORDER.filter(n => bySubtype[n]),
-      ...Object.keys(bySubtype).filter(n => !ST_ORDER.includes(n)),
-    ];
-
-    const mergedPanels = [];
-    const mergedUnplaced = [];
-
-    for (const stName of orderedNames) {
-      const entries = bySubtype[stName];
-      // Expand using global index as pieceTypeIdx so colorMap lookup works after merge
-      const expanded = [];
-      let localIdx = 0;
-      for (const { piece, globalIdx } of entries) {
-        for (let q = 0; q < piece.qty; q++) {
-          expanded.push({ ...piece, pieceTypeIdx: globalIdx, globalIdx: localIdx++ });
-        }
-      }
-      const result = optimizePack(activeStocks, expanded, kerf);
-      result.panels.forEach(p => { p.subtypeLabel = stName; });
-      mergedPanels.push(...result.panels);
-      mergedUnplaced.push(...result.unplaced);
-    }
-
-    // Re-number panels and placements across merged subtypes
-    mergedPanels.forEach((p, i) => {
-      p.idx = i + 1;
-      p.placements.forEach((pl, j) => { pl.pieceNum = j + 1; });
-    });
-
-    allResults[g.id] = { panels: mergedPanels, unplaced: mergedUnplaced, allPieces, subsectionColorMap, colorMap };
+    allResults[g.id] = { ...result, allPieces, subsectionColorMap, colorMap };
   }
 
   if (!hasAny) { alert('Ajoute des pieces dans au moins un type !'); return; }
@@ -1497,12 +1446,7 @@ function renderAllResults() {
       <span class="info">${result.panels.length} panneau${result.panels.length>1?'x':''} &mdash; chute ${groupWaste}%</span>
     </div>`;
 
-    let lastSubtypeLabel = null;
     for (const panel of result.panels) {
-      if (panel.subtypeLabel && panel.subtypeLabel !== lastSubtypeLabel) {
-        html += `<div class="result-subtype-header">${panel.subtypeLabel}</div>`;
-        lastSubtypeLabel = panel.subtypeLabel;
-      }
       html += renderPanelCard(panel, result.colorMap, g, result.subsectionColorMap);
     }
 
