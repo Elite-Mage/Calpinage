@@ -696,6 +696,7 @@ def parse_dxf_file(filepath):
         "ossature_facades": ossature,
         "rectsSpatial": rects_spatial,
         "facadeLabels": facade_labels,
+        "panelFacadeMap": panel_facade_map,
     }
 
 # ─── Génération Excel ─────────────────────────────────────────────────────────

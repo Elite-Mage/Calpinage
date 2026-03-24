@@ -821,6 +821,7 @@ let devisConfig = { prixMO: '' };
 let fixationConfig = { prixFixation: '' };
 let projectRectsSpatial = []; // Stored spatial rectangles from DXF parsing
 let projectFacadeLabels = []; // Stored facade labels from DXF parsing
+let projectPanelFacadeMap = {}; // Direct panel→facade assignment from clustering
 
 // ============================================================
 // STOCK
@@ -1950,6 +1951,7 @@ function applyProjectData(data) {
   }
   if (data.rectsSpatial) projectRectsSpatial = data.rectsSpatial;
   if (data.facadeLabels) projectFacadeLabels = data.facadeLabels;
+  if (data.panelFacadeMap) projectPanelFacadeMap = data.panelFacadeMap;
   allResults = null;
   document.getElementById('summaryCard').style.display = 'none';
   document.getElementById('orderCard').style.display = 'none';
@@ -2848,6 +2850,7 @@ function parseDxfClientSide(text, fileName) {
     ossature_facades: ossature,
     rectsSpatial,
     facadeLabels,
+    panelFacadeMap,
   };
 }
 
@@ -3212,15 +3215,6 @@ function calcOssature() {
     const JOINT = 8, MAX_GAP = 20;
     const BANDEAU_TOITURE_MAX_H = 1600;
 
-    const fLabels = projectFacadeLabels && projectFacadeLabels.length ? projectFacadeLabels : [[0, 'Façade 1']];
-    function nearestFacade(xcenter) {
-      let best = fLabels[0];
-      for (const lbl of fLabels) {
-        if (Math.abs(lbl[0] - xcenter) < Math.abs(best[0] - xcenter)) best = lbl;
-      }
-      return best[1];
-    }
-
     function buildColumns(panels) {
       const columns = {};
       for (const p of panels) {
@@ -3268,12 +3262,7 @@ function calcOssature() {
       return { leftGaps, rightGaps };
     }
 
-    const byFacade = {};
-    for (const r of projectRectsSpatial) {
-      const fn = nearestFacade((r.xmin + r.xmax) / 2);
-      if (!byFacade[fn]) byFacade[fn] = [];
-      byFacade[fn].push(r);
-    }
+    const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
 
     for (const [fname, allPanels] of Object.entries(byFacade)) {
       const regularPanels = [], bandeauPanels = [];
@@ -4216,7 +4205,18 @@ function downloadDxf(content, filename) {
 // Group rects by facade and return sorted facade data
 function groupRectsByFacade(rectsSpatial, facadeLabels) {
   const fLabels = facadeLabels && facadeLabels.length ? facadeLabels : [[0, 'Facade']];
-  function nearestFacade(xcenter) {
+  const pfm = projectPanelFacadeMap || {};
+  function nearestFacade(xcenter, ycenter) {
+    if (Array.isArray(fLabels[0][0])) {
+      if (ycenter !== undefined) {
+        return fLabels.reduce((best, lbl) => {
+          const d = (lbl[0][0] - xcenter)**2 + (lbl[0][1] - ycenter)**2;
+          const bd = (best[0][0] - xcenter)**2 + (best[0][1] - ycenter)**2;
+          return d < bd ? lbl : best;
+        })[1];
+      }
+      return fLabels.reduce((best, lbl) => Math.abs(lbl[0][0] - xcenter) < Math.abs(best[0][0] - xcenter) ? lbl : best)[1];
+    }
     let best = fLabels[0];
     for (const lbl of fLabels) {
       if (Math.abs(lbl[0] - xcenter) < Math.abs(best[0] - xcenter)) best = lbl;
@@ -4224,8 +4224,9 @@ function groupRectsByFacade(rectsSpatial, facadeLabels) {
     return best[1];
   }
   const byFacade = {};
-  for (const r of rectsSpatial) {
-    const fn = nearestFacade((r.xmin + r.xmax) / 2);
+  for (let i = 0; i < rectsSpatial.length; i++) {
+    const r = rectsSpatial[i];
+    const fn = (pfm[i] !== undefined) ? pfm[i] : nearestFacade((r.xmin + r.xmax) / 2, (r.ymin + r.ymax) / 2);
     if (!byFacade[fn]) byFacade[fn] = [];
     byFacade[fn].push(r);
   }
