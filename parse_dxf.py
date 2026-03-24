@@ -138,7 +138,7 @@ def dwg_to_dxf(dwg_path):
 
 # ─── Calcul ossature par façade (analyse spatiale) ────────────────────────────
 
-def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600):
+def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600, panel_facade_map=None):
     """
     Analyse la disposition spatiale des panneaux pour calculer l'ossature
     (Oméga et Zed) par façade.
@@ -223,10 +223,13 @@ def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600):
         return left_gaps, right_gaps
 
     by_facade = defaultdict(list)
-    for r in rects_spatial:
-        cx = (r["xmin"] + r["xmax"]) / 2
-        cy = (r["ymin"] + r["ymax"]) / 2
-        fname = nearest_facade_oss(cx, cy)
+    for i, r in enumerate(rects_spatial):
+        if panel_facade_map and i in panel_facade_map:
+            fname = panel_facade_map[i]
+        else:
+            cx = (r["xmin"] + r["xmax"]) / 2
+            cy = (r["ymin"] + r["ymax"]) / 2
+            fname = nearest_facade_oss(cx, cy)
         by_facade[fname].append(r)
 
     result = {}
@@ -545,75 +548,77 @@ def parse_dxf_file(filepath):
         rects_spatial[:] = [r for i, r in enumerate(rects_spatial) if i not in englobed]
 
     # 3. Auto-numérotation des façades si pas de texte dans le DXF
+    #    Assigne directement chaque panneau à sa façade via Y-row + X-gap
+    panel_facade_map = {}  # index rects_spatial → nom façade
     if auto_number_facades:
         if rects_spatial:
-            # Étape 1 : grouper les panneaux en rangées Y (panneaux connectés en Y avec tolérance 20mm)
-            sorted_by_y = sorted(rects_spatial, key=lambda r: r["ymin"])
+            # Étape 1 : grouper en rangées Y (panneaux connectés avec tolérance 20mm)
+            indexed = list(enumerate(rects_spatial))
+            indexed.sort(key=lambda x: x[1]["ymin"])
             y_rows = []
-            cur_row = [sorted_by_y[0]]
-            cur_ymax = sorted_by_y[0]["ymax"]
-            for r in sorted_by_y[1:]:
-                if r["ymin"] <= cur_ymax + 20:
-                    cur_ymax = max(cur_ymax, r["ymax"])
-                    cur_row.append(r)
+            cur_row = [indexed[0]]
+            cur_ymax = indexed[0][1]["ymax"]
+            for item in indexed[1:]:
+                if item[1]["ymin"] <= cur_ymax + 20:
+                    cur_ymax = max(cur_ymax, item[1]["ymax"])
+                    cur_row.append(item)
                 else:
                     y_rows.append(cur_row)
-                    cur_row = [r]
-                    cur_ymax = r["ymax"]
+                    cur_row = [item]
+                    cur_ymax = item[1]["ymax"]
             y_rows.append(cur_row)
 
             # Étape 2 : dans chaque rangée Y, détecter les gaps X réels (sweep line)
             facade_labels = []
             facade_idx = 1
-            for row_panels in y_rows:
-                row_panels.sort(key=lambda r: r["xmin"])
-                # Sweep pour trouver les vrais gaps X (où aucun panneau ne couvre)
-                sub_groups = [[row_panels[0]]]
-                max_xmax = row_panels[0]["xmax"]
-                for r in row_panels[1:]:
-                    if r["xmin"] > max_xmax + 50:
-                        sub_groups.append([r])
+            for row_items in y_rows:
+                row_items.sort(key=lambda x: x[1]["xmin"])
+                sub_groups = [[row_items[0]]]
+                max_xmax = row_items[0][1]["xmax"]
+                for item in row_items[1:]:
+                    if item[1]["xmin"] > max_xmax + 50:
+                        sub_groups.append([item])
                     else:
-                        sub_groups[-1].append(r)
-                    max_xmax = max(max_xmax, r["xmax"])
+                        sub_groups[-1].append(item)
+                    max_xmax = max(max_xmax, item[1]["xmax"])
 
                 for sg in sub_groups:
-                    # Centre de la façade en X et Y
-                    cx = (min(r["xmin"] for r in sg) + max(r["xmax"] for r in sg)) / 2
-                    cy = (min(r["ymin"] for r in sg) + max(r["ymax"] for r in sg)) / 2
-                    facade_labels.append(((cx, cy), f"Façade {facade_idx}"))
+                    fname = f"Façade {facade_idx}"
+                    cx = (min(r["xmin"] for _, r in sg) + max(r["xmax"] for _, r in sg)) / 2
+                    cy = (min(r["ymin"] for _, r in sg) + max(r["ymax"] for _, r in sg)) / 2
+                    facade_labels.append(((cx, cy), fname))
+                    for idx, _ in sg:
+                        panel_facade_map[idx] = fname
                     facade_idx += 1
         else:
             facade_labels = [((0.0, 0.0), "Façade 1")]
 
-    # Adapter nearest_facade pour supporter des labels 2D (x,y) ou 1D (x seul)
+    # nearest_facade pour les labels TEXT du DXF (1D) ou fallback
     def nearest_facade(xcenter, ycenter=None):
         if not facade_labels:
             return "Façade 1"
         if isinstance(facade_labels[0][0], (tuple, list)):
-            # Labels 2D : (cx, cy)
-            if ycenter is None:
-                return min(facade_labels, key=lambda lbl: abs(lbl[0][0] - xcenter))[1]
-            return min(facade_labels, key=lambda lbl: (lbl[0][0] - xcenter)**2 + (lbl[0][1] - ycenter)**2)[1]
-        else:
-            # Labels 1D : x seul (issu du DXF TEXT)
-            return min(facade_labels, key=lambda lbl: abs(lbl[0] - xcenter))[1]
+            if ycenter is not None:
+                return min(facade_labels, key=lambda lbl: (lbl[0][0] - xcenter)**2 + (lbl[0][1] - ycenter)**2)[1]
+            return min(facade_labels, key=lambda lbl: abs(lbl[0][0] - xcenter))[1]
+        return min(facade_labels, key=lambda lbl: abs(lbl[0] - xcenter))[1]
+
+    # Fonction d'assignation : directe si auto-numéroté, sinon par proximité TEXT
+    def get_facade(idx, r):
+        if idx in panel_facade_map:
+            return panel_facade_map[idx]
+        return nearest_facade((r["xmin"] + r["xmax"]) / 2, (r["ymin"] + r["ymax"]) / 2)
 
     # 4. Classifie les panneaux par façade pour déterminer les sous-types par position
     panels_by_facade = defaultdict(list)
     for i, r in enumerate(rects_spatial):
-        cx = (r["xmin"] + r["xmax"]) / 2
-        cy = (r["ymin"] + r["ymax"]) / 2
-        fname = nearest_facade(cx, cy)
-        panels_by_facade[fname].append(r)
+        panels_by_facade[get_facade(i, r)].append(r)
 
     # 5. Regroupe par (couleur ACI, façade) → compteur (w, h) avec sous-type positionnel
     data = defaultdict(lambda: defaultdict(lambda: defaultdict(Counter)))
     for i, r in enumerate(rects):
         spatial = rects_spatial[i]
-        cx = (spatial["xmin"] + spatial["xmax"]) / 2
-        cy = (spatial["ymin"] + spatial["ymax"]) / 2
-        facade = nearest_facade(cx, cy)
+        facade = get_facade(i, spatial)
         subtype = classify_subtype_by_position(spatial, panels_by_facade[facade])
         data[r["color"]][facade][subtype][(r["w"], r["h"])] += 1
 
@@ -678,7 +683,7 @@ def parse_dxf_file(filepath):
     base_name = os.path.splitext(os.path.basename(filepath))[0]
 
     # Calcul ossature par façade (analyse spatiale)
-    ossature = calc_ossature_facades(rects_spatial, facade_labels)
+    ossature = calc_ossature_facades(rects_spatial, facade_labels, panel_facade_map=panel_facade_map)
 
     return {
         "version": "6.0",
