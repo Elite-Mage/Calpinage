@@ -572,7 +572,7 @@ def parse_dxf_file(filepath):
 
             # Regroupe par sous-type
             subtype_pieces = defaultdict(list)
-            for (w, h), qty in sorted(dim_counter.items()):
+            for (w, h), qty in sorted(dim_counter.items(), key=lambda x: x[0][0] * x[0][1], reverse=True):
                 st = classify_subtype(w, h, stock_w)
                 subtype_pieces[st].append({"w": w, "h": h, "qty": qty})
 
@@ -628,12 +628,8 @@ def parse_dxf_file(filepath):
     return {
         "version": "6.0",
         "chantier": {"nom": base_name, "date": today},
-        "stockPanels": [
-            {"id": 1, "w": 3650, "h": 1860, "active": True},
-            {"id": 2, "w": 2550, "h": 1860, "active": True},
-            {"id": 3, "w": 4270, "h": 2130, "active": True},
-        ],
-        "nextStockId": 4,
+        "stockPanels": [],
+        "nextStockId": 1,
         "groups": groups,
         "nextGroupId": gid,
         "activeGroupId": 1,
