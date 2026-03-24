@@ -1229,7 +1229,10 @@ function expandPieces(pcs) {
 function allFittingStocks(activeStocks, pw, ph, kerf) {
   const fits = [], w = pw - kerf, h = ph - kerf;
   for (const s of activeStocks) {
+    // Stock en orientation naturelle
     if ((s.w >= pw || s.w >= w) && (s.h >= ph || s.h >= h)) fits.push(s);
+    // Stock pivoté (le panneau fournisseur peut être posé dans les deux sens)
+    else if ((s.h >= pw || s.h >= w) && (s.w >= ph || s.w >= h)) fits.push({ ...s, w: s.h, h: s.w });
   }
   return fits.sort((a, b) => a.w * a.h - b.w * b.h);
 }
