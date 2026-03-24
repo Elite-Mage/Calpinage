@@ -2675,34 +2675,6 @@ function parseDxfClientSide(text, fileName) {
       byFacade[fn].push(rSpatial[i]);
     }
 
-    function buildColumns(panels) {
-      const columns = {};
-      for (const p of panels) {
-        const ck = Math.round(p.xmin / 10) * 10;
-        if (!columns[ck]) columns[ck] = [];
-        columns[ck].push(p);
-      }
-      for (const ck of Object.keys(columns)) {
-        const seen = new Set();
-        let unique = [];
-        for (const p of columns[ck]) {
-          const sig = `${Math.round(p.ymin)}_${Math.round(p.ymax)}`;
-          if (!seen.has(sig)) { seen.add(sig); unique.push(p); }
-        }
-        unique.sort((a, b) => (b.ymax - b.ymin) - (a.ymax - a.ymin));
-        const filtered = [];
-        for (const p of unique) {
-          let englobed = false;
-          for (const big of filtered) {
-            if (p.ymin >= big.ymin - 1 && p.ymax <= big.ymax + 1) { englobed = true; break; }
-          }
-          if (!englobed) filtered.push(p);
-        }
-        columns[ck] = filtered;
-      }
-      return Object.keys(columns).map(Number).sort((a, b) => a - b).map(k => columns[k]);
-    }
-
     function getGaps(leftIntervals, rightIntervals) {
       const events = [];
       for (const [s, e] of leftIntervals) { events.push([s, 'L+']); events.push([e, 'L-']); }
@@ -2725,11 +2697,12 @@ function parseDxfClientSide(text, fileName) {
     const result = {};
     for (const fname of Object.keys(byFacade).sort()) {
       const allPanels = byFacade[fname];
-      // Separate bandeau toiture from regular (by position: top, nothing above, h < 1600mm)
-      const regularPanels = [], bandeauPanels = [];
+
+      // Classify bandeau toiture for entraxe only (h < 1600mm, nothing above)
+      const bandeauSet = new Set();
       for (const p of allPanels) {
         const ph = Math.round(p.ymax - p.ymin);
-        if (ph >= BANDEAU_TOITURE_MAX_H) { regularPanels.push(p); continue; }
+        if (ph >= BANDEAU_TOITURE_MAX_H) continue;
         let hasAbove = false;
         for (const other of allPanels) {
           if (other === p) continue;
@@ -2738,8 +2711,7 @@ function parseDxfClientSide(text, fileName) {
             if (overlapX > 5) { hasAbove = true; break; }
           }
         }
-        if (!hasAbove) bandeauPanels.push(p);
-        else regularPanels.push(p);
+        if (!hasAbove) bandeauSet.add(p);
       }
 
       let omegaMM = 0, zedMM = 0;
@@ -2747,84 +2719,71 @@ function parseDxfClientSide(text, fileName) {
       function addOmega(h) { omegaMM += h; omegaDetails[h] = (omegaDetails[h] || 0) + 1; }
       function addZed(h) { zedMM += h; zedDetails[h] = (zedDetails[h] || 0) + 1; }
 
-      // --- Regular panels ---
-      const sortedCols = buildColumns(regularPanels);
-      for (let ci = 0; ci < sortedCols.length; ci++) {
-        const col = sortedCols[ci].sort((a, b) => a.ymin - b.ymin);
+      // Entraxe ZED (per panel)
+      for (const p of allPanels) {
+        const pw = Math.round(p.xmax - p.xmin);
+        const ph = Math.round(p.ymax - p.ymin);
+        const ent = bandeauSet.has(p) ? ENTRAXE_BANDEAU : ENTRAXE_REGULAR;
+        const nz = Math.max(0, Math.ceil(pw / ent) - 1);
+        if (nz > 0) for (let z = 0; z < nz; z++) addZed(ph);
+      }
 
-        // Entraxe ZED for regular panels
-        for (const p of col) {
-          const pw = Math.round(p.xmax - p.xmin);
-          const ph = Math.round(p.ymax - p.ymin);
-          const nz = Math.max(0, Math.ceil(pw / ENTRAXE_REGULAR) - 1);
-          if (nz > 0) for (let z = 0; z < nz; z++) addZed(ph);
+      // Pairwise junction detection for omega and gap-zed
+      const junctions = {};
+      const hasRightNeighbor = new Set(), hasLeftNeighbor = new Set();
+      for (const p of allPanels) {
+        for (const q of allPanels) {
+          if (q === p) continue;
+          const gap = q.xmin - p.xmax;
+          if (gap >= -5 && gap <= MAX_GAP && q.xmin > p.xmin + 20) {
+            const jx = Math.round((p.xmax + q.xmin) / 2);
+            if (!junctions[jx]) junctions[jx] = { left: [], right: [] };
+            junctions[jx].left.push(p);
+            junctions[jx].right.push(q);
+            hasRightNeighbor.add(p);
+            hasLeftNeighbor.add(q);
+          }
         }
+      }
 
-        if (ci >= sortedCols.length - 1) continue;
-        const nextCol = sortedCols[ci + 1].sort((a, b) => a.ymin - b.ymin);
-        const leftXmax = Math.max(...col.map(p => p.xmax));
-        const rightXmin = Math.min(...nextCol.map(p => p.xmin));
-        const xGap = rightXmin - leftXmax;
-
-        if (xGap > MAX_GAP) {
-          // Opening - free edge ZED on panels facing the opening
-          for (const p of col) addZed(Math.round(p.ymax - p.ymin));
-          for (const p of nextCol) addZed(Math.round(p.ymax - p.ymin));
-          continue;
-        }
-
-        // Adjacent - compute omega (always continuous, merge across floor joints)
+      for (const jx of Object.keys(junctions).map(Number).sort((a, b) => a - b)) {
+        const { left, right } = junctions[jx];
         const overlaps = [];
-        for (const pl of col) {
-          for (const pr of nextCol) {
+        for (const pl of left) {
+          for (const pr of right) {
             const ovStart = Math.max(pl.ymin, pr.ymin);
             const ovEnd = Math.min(pl.ymax, pr.ymax);
-            if (ovEnd - ovStart > 1) {
-              overlaps.push({ start: ovStart, end: ovEnd });
-            }
+            if (ovEnd - ovStart > 1) overlaps.push({ start: ovStart, end: ovEnd });
           }
         }
         overlaps.sort((a, b) => a.start - b.start);
-
         if (overlaps.length > 0) {
           const merged = [{ ...overlaps[0] }];
           for (let oi = 1; oi < overlaps.length; oi++) {
             const ov = overlaps[oi];
             const prev = merged[merged.length - 1];
-            const gap = ov.start - prev.end;
-            if (gap <= MAX_GAP) {
-              prev.end = Math.max(prev.end, ov.end); // Always merge
-            } else {
-              merged.push({ ...ov });
-            }
+            if (ov.start <= prev.end + MAX_GAP) prev.end = Math.max(prev.end, ov.end);
+            else merged.push({ ...ov });
           }
           for (const m of merged) addOmega(Math.round(m.end - m.start));
         }
-
-        // Gap ZED (free edges at window junctions)
-        const leftIntervals = col.map(p => [p.ymin, p.ymax]);
-        const rightIntervals = nextCol.map(p => [p.ymin, p.ymax]);
-        const { leftGaps, rightGaps } = getGaps(leftIntervals, rightIntervals);
+        const leftI = [...new Set(left.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
+        const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
+        const { leftGaps, rightGaps } = getGaps(leftI, rightI);
         for (const [gs, ge] of rightGaps) { const h = Math.round(ge - gs); if (h >= 100) addZed(h); }
         for (const [gs, ge] of leftGaps) { const h = Math.round(ge - gs); if (h >= 100) addZed(h); }
-
       }
 
-      // --- Bandeau-bandeau junction OMEGAs (only between different bandeau panels) ---
-      const banSorted = [...bandeauPanels].sort((a, b) => a.xmin - b.xmin);
-      for (let bi = 0; bi < banSorted.length - 1; bi++) {
-        const gap = banSorted[bi + 1].xmin - banSorted[bi].xmax;
-        if (gap <= MAX_GAP) {
-          addOmega(Math.round(banSorted[bi].ymax - banSorted[bi].ymin));
+      // Free edge ZED: interior panel edges with no neighbor
+      for (const p of allPanels) {
+        if (!hasRightNeighbor.has(p)) {
+          if (allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP))
+            addZed(Math.round(p.ymax - p.ymin));
         }
-      }
-
-      // --- Bandeau entraxe ZED (closer spacing for shorter panels) ---
-      for (const bp of bandeauPanels) {
-        const bw = Math.round(bp.xmax - bp.xmin);
-        const bh = Math.round(bp.ymax - bp.ymin);
-        const nz = Math.max(0, Math.ceil(bw / ENTRAXE_BANDEAU) - 1);
-        if (nz > 0) for (let z = 0; z < nz; z++) addZed(bh);
+        if (!hasLeftNeighbor.has(p)) {
+          if (allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP))
+            addZed(Math.round(p.ymax - p.ymin));
+        }
       }
 
       result[fname] = {
@@ -3215,34 +3174,6 @@ function calcOssature() {
     const JOINT = 8, MAX_GAP = 20;
     const BANDEAU_TOITURE_MAX_H = 1600;
 
-    function buildColumns(panels) {
-      const columns = {};
-      for (const p of panels) {
-        const ck = Math.round(p.xmin / 10) * 10;
-        if (!columns[ck]) columns[ck] = [];
-        columns[ck].push(p);
-      }
-      for (const ck of Object.keys(columns)) {
-        const seen = new Set();
-        let unique = [];
-        for (const p of columns[ck]) {
-          const sig = `${Math.round(p.ymin)}_${Math.round(p.ymax)}`;
-          if (!seen.has(sig)) { seen.add(sig); unique.push(p); }
-        }
-        unique.sort((a, b) => (b.ymax - b.ymin) - (a.ymax - a.ymin));
-        const filtered = [];
-        for (const p of unique) {
-          let englobed = false;
-          for (const big of filtered) {
-            if (p.ymin >= big.ymin - 1 && p.ymax <= big.ymax + 1) { englobed = true; break; }
-          }
-          if (!englobed) filtered.push(p);
-        }
-        columns[ck] = filtered;
-      }
-      return Object.keys(columns).map(Number).sort((a, b) => a - b).map(k => columns[k]);
-    }
-
     function getGaps(leftIntervals, rightIntervals) {
       const events = [];
       for (const [s, e] of leftIntervals) { events.push([s, 'L+']); events.push([e, 'L-']); }
@@ -3265,87 +3196,61 @@ function calcOssature() {
     const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
 
     for (const [fname, allPanels] of Object.entries(byFacade)) {
-      const regularPanels = [], bandeauPanels = [];
-      for (const p of allPanels) {
-        const ph = Math.round(p.ymax - p.ymin);
-        if (ph >= BANDEAU_TOITURE_MAX_H) { regularPanels.push(p); continue; }
-        let hasAbove = false;
-        for (const other of allPanels) {
-          if (other === p) continue;
-          if (other.ymin > p.ymax + 20) {
-            const overlapX = Math.min(p.xmax, other.xmax) - Math.max(p.xmin, other.xmin);
-            if (overlapX > 5) { hasAbove = true; break; }
-          }
-        }
-        if (!hasAbove) bandeauPanels.push(p);
-        else regularPanels.push(p);
-      }
-
       spatialOss[fname] = { omegaCuts: [], zedEdgeCuts: [] };
       const cuts = spatialOss[fname];
 
-      // --- Regular panels ---
-      const sortedCols = buildColumns(regularPanels);
-      for (let ci = 0; ci < sortedCols.length - 1; ci++) {
-        const col = sortedCols[ci].sort((a, b) => a.ymin - b.ymin);
-        const nextCol = sortedCols[ci + 1].sort((a, b) => a.ymin - b.ymin);
-        const leftXmax = Math.max(...col.map(p => p.xmax));
-        const rightXmin = Math.min(...nextCol.map(p => p.xmin));
-        const xGap = rightXmin - leftXmax;
-
-        if (xGap > MAX_GAP) {
-          // Opening - free edge ZED
-          for (const p of col) cuts.zedEdgeCuts.push({ len: Math.round(p.ymax - p.ymin), ref: 'bord ouverture' });
-          for (const p of nextCol) cuts.zedEdgeCuts.push({ len: Math.round(p.ymax - p.ymin), ref: 'bord ouverture' });
-          continue;
+      // Pairwise junction detection
+      const junctions = {};
+      const hasRightN = new Set(), hasLeftN = new Set();
+      for (const p of allPanels) {
+        for (const q of allPanels) {
+          if (q === p) continue;
+          const gap = q.xmin - p.xmax;
+          if (gap >= -5 && gap <= MAX_GAP && q.xmin > p.xmin + 20) {
+            const jx = Math.round((p.xmax + q.xmin) / 2);
+            if (!junctions[jx]) junctions[jx] = { left: [], right: [] };
+            junctions[jx].left.push(p);
+            junctions[jx].right.push(q);
+            hasRightN.add(p);
+            hasLeftN.add(q);
+          }
         }
+      }
 
-        // Omega: always continuous (merge across floor joints)
+      for (const jx of Object.keys(junctions).map(Number).sort((a, b) => a - b)) {
+        const { left, right } = junctions[jx];
         const overlaps = [];
-        for (const pl of col) {
-          for (const pr of nextCol) {
+        for (const pl of left) {
+          for (const pr of right) {
             const ovStart = Math.max(pl.ymin, pr.ymin);
             const ovEnd = Math.min(pl.ymax, pr.ymax);
-            if (ovEnd - ovStart > 1) {
-              overlaps.push({ start: ovStart, end: ovEnd });
-            }
+            if (ovEnd - ovStart > 1) overlaps.push({ start: ovStart, end: ovEnd });
           }
         }
         overlaps.sort((a, b) => a.start - b.start);
-
         if (overlaps.length > 0) {
           const merged = [{ ...overlaps[0] }];
           for (let oi = 1; oi < overlaps.length; oi++) {
             const ov = overlaps[oi];
             const prev = merged[merged.length - 1];
-            const gap = ov.start - prev.end;
-            if (gap <= MAX_GAP) {
-              prev.end = Math.max(prev.end, ov.end); // Always merge
-            } else {
-              merged.push({ ...ov });
-            }
+            if (ov.start <= prev.end + MAX_GAP) prev.end = Math.max(prev.end, ov.end);
+            else merged.push({ ...ov });
           }
-          for (const m of merged) {
-            cuts.omegaCuts.push({ len: Math.round(m.end - m.start), ref: 'jonction', structural: true });
-          }
+          for (const m of merged) cuts.omegaCuts.push({ len: Math.round(m.end - m.start), ref: 'jonction', structural: true });
         }
-
-        // Gap ZED (free edges at window positions)
-        const leftIntervals = col.map(p => [p.ymin, p.ymax]);
-        const rightIntervals = nextCol.map(p => [p.ymin, p.ymax]);
-        const { leftGaps, rightGaps } = getGaps(leftIntervals, rightIntervals);
+        const leftI = [...new Set(left.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
+        const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
+        const { leftGaps, rightGaps } = getGaps(leftI, rightI);
         for (const [gs, ge] of rightGaps) { const h = Math.round(ge - gs); if (h >= 100) cuts.zedEdgeCuts.push({ len: h, ref: 'bord ouverture' }); }
         for (const [gs, ge] of leftGaps) { const h = Math.round(ge - gs); if (h >= 100) cuts.zedEdgeCuts.push({ len: h, ref: 'bord ouverture' }); }
-
       }
 
-      // --- Bandeau-bandeau junction OMEGAs (only between different bandeau panels) ---
-      const banSorted = [...bandeauPanels].sort((a, b) => a.xmin - b.xmin);
-      for (let bi = 0; bi < banSorted.length - 1; bi++) {
-        const gap = banSorted[bi + 1].xmin - banSorted[bi].xmax;
-        if (gap <= MAX_GAP) {
-          cuts.omegaCuts.push({ len: Math.round(banSorted[bi].ymax - banSorted[bi].ymin), ref: 'jonction bandeau', structural: true });
-        }
+      // Free edge ZED
+      for (const p of allPanels) {
+        if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP))
+          cuts.zedEdgeCuts.push({ len: Math.round(p.ymax - p.ymin), ref: 'bord ouverture' });
+        if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP))
+          cuts.zedEdgeCuts.push({ len: Math.round(p.ymax - p.ymin), ref: 'bord ouverture' });
       }
     }
   }
@@ -4316,34 +4221,6 @@ function exportDxfOssature() {
   const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
   const facadeNames = Object.keys(byFacade).sort();
 
-  function buildColumns(panels) {
-    const columns = {};
-    for (const p of panels) {
-      const ck = Math.round(p.xmin / 10) * 10;
-      if (!columns[ck]) columns[ck] = [];
-      columns[ck].push(p);
-    }
-    for (const ck of Object.keys(columns)) {
-      const seen = new Set();
-      let unique = [];
-      for (const p of columns[ck]) {
-        const sig = `${Math.round(p.ymin)}_${Math.round(p.ymax)}`;
-        if (!seen.has(sig)) { seen.add(sig); unique.push(p); }
-      }
-      unique.sort((a, b) => (b.ymax - b.ymin) - (a.ymax - a.ymin));
-      const filtered = [];
-      for (const p of unique) {
-        let englobed = false;
-        for (const big of filtered) {
-          if (p.ymin >= big.ymin - 1 && p.ymax <= big.ymax + 1) { englobed = true; break; }
-        }
-        if (!englobed) filtered.push(p);
-      }
-      columns[ck] = filtered;
-    }
-    return Object.keys(columns).map(Number).sort((a, b) => a - b).map(k => columns[k]);
-  }
-
   function getGaps(leftIntervals, rightIntervals) {
     const events = [];
     for (const [s, e] of leftIntervals) { events.push([s, 'L+']); events.push([e, 'L-']); }
@@ -4377,10 +4254,12 @@ function exportDxfOssature() {
 
   for (const fname of facadeNames) {
     const allPanels = byFacade[fname];
-    const regularPanels = [], bandeauPanels = [];
+
+    // Classify bandeau toiture for entraxe only
+    const bandeauSet = new Set();
     for (const p of allPanels) {
       const ph = Math.round(p.ymax - p.ymin);
-      if (ph >= BANDEAU_TOITURE_MAX_H) { regularPanels.push(p); continue; }
+      if (ph >= BANDEAU_TOITURE_MAX_H) continue;
       let hasAbove = false;
       for (const other of allPanels) {
         if (other === p) continue;
@@ -4389,8 +4268,7 @@ function exportDxfOssature() {
           if (overlapX > 5) { hasAbove = true; break; }
         }
       }
-      if (!hasAbove) bandeauPanels.push(p);
-      else regularPanels.push(p);
+      if (!hasAbove) bandeauSet.add(p);
     }
 
     let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
@@ -4413,98 +4291,82 @@ function exportDxfOssature() {
       dxf.addRect(p.xmin, p.ymin, p.xmax, p.ymax, 'PANNEAUX_REF', 9);
     }
 
-    // ── Omega and Zed for regular panels ──
-    const sortedCols = buildColumns(regularPanels);
-    for (let ci = 0; ci < sortedCols.length; ci++) {
-      const col = sortedCols[ci].sort((a, b) => a.ymin - b.ymin);
+    // ── Pairwise junction detection for omega and zed ──
+    const ZED_W = 40;
+    const OMEGA_W = 80;
 
-      // Entraxe ZED (rectangle 40mm wide)
-      const ZED_W = 40;
-      for (const p of col) {
-        const pw = Math.round(p.xmax - p.xmin);
-        const nz = Math.max(0, Math.ceil(pw / ENTRAXE_REGULAR) - 1);
-        if (nz > 0) {
-          const step = pw / (nz + 1);
-          for (let z = 1; z <= nz; z++) {
-            const cx = p.xmin + z * step;
-            dxf.addRect(cx - ZED_W/2, p.ymin, cx + ZED_W/2, p.ymax, 'ZED_ENTRAXE', 2);
-          }
+    // Entraxe ZED per panel: 600mm regular, 800mm bandeau
+    for (const p of allPanels) {
+      const pw = Math.round(p.xmax - p.xmin);
+      const ent = bandeauSet.has(p) ? ENTRAXE_BANDEAU : ENTRAXE_REGULAR;
+      const layer = bandeauSet.has(p) ? 'ZED_BANDEAU' : 'ZED_ENTRAXE';
+      const nz = Math.max(0, Math.ceil(pw / ent) - 1);
+      if (nz > 0) {
+        const step = pw / (nz + 1);
+        for (let z = 1; z <= nz; z++) {
+          const cx = p.xmin + z * step;
+          dxf.addRect(cx - ZED_W/2, p.ymin, cx + ZED_W/2, p.ymax, layer, 2);
         }
       }
+    }
 
-      if (ci >= sortedCols.length - 1) continue;
-      const nextCol = sortedCols[ci + 1].sort((a, b) => a.ymin - b.ymin);
-      const leftXmax = Math.max(...col.map(p => p.xmax));
-      const rightXmin = Math.min(...nextCol.map(p => p.xmin));
-      const xGap = rightXmin - leftXmax;
-
-      if (xGap > MAX_GAP) {
-        for (const p of col) dxf.addRect(p.xmax - ZED_W/2, p.ymin, p.xmax + ZED_W/2, p.ymax, 'ZED_BORD', 6);
-        for (const p of nextCol) dxf.addRect(p.xmin - ZED_W/2, p.ymin, p.xmin + ZED_W/2, p.ymax, 'ZED_BORD', 6);
-        continue;
+    // Pairwise junction detection
+    const junctions = {};
+    const hasRightN = new Set(), hasLeftN = new Set();
+    for (const p of allPanels) {
+      for (const q of allPanels) {
+        if (q === p) continue;
+        const gap = q.xmin - p.xmax;
+        if (gap >= -5 && gap <= MAX_GAP && q.xmin > p.xmin + 20) {
+          const jx = Math.round((p.xmax + q.xmin) / 2);
+          if (!junctions[jx]) junctions[jx] = { left: [], right: [] };
+          junctions[jx].left.push(p);
+          junctions[jx].right.push(q);
+          hasRightN.add(p);
+          hasLeftN.add(q);
+        }
       }
+    }
 
-      // OMEGA at junction (rectangle 80mm wide, always continuous)
-      const OMEGA_W = 80;
-      const junctionX = (leftXmax + rightXmin) / 2;
+    // OMEGA at junctions + gap ZED
+    for (const jx of Object.keys(junctions).map(Number).sort((a, b) => a - b)) {
+      const { left, right } = junctions[jx];
+
+      // Omega: merge Y-overlaps across floor joints
       const overlaps = [];
-      for (const pl of col) {
-        for (const pr of nextCol) {
+      for (const pl of left) {
+        for (const pr of right) {
           const ovStart = Math.max(pl.ymin, pr.ymin);
           const ovEnd = Math.min(pl.ymax, pr.ymax);
-          if (ovEnd - ovStart > 1) {
-            overlaps.push({ start: ovStart, end: ovEnd });
-          }
+          if (ovEnd - ovStart > 1) overlaps.push({ start: ovStart, end: ovEnd });
         }
       }
       overlaps.sort((a, b) => a.start - b.start);
-
       if (overlaps.length > 0) {
         const merged = [{ ...overlaps[0] }];
         for (let oi = 1; oi < overlaps.length; oi++) {
           const ov = overlaps[oi];
           const prev = merged[merged.length - 1];
-          const gap = ov.start - prev.end;
-          if (gap <= MAX_GAP) {
-            prev.end = Math.max(prev.end, ov.end); // Always merge
-          } else {
-            merged.push({ ...ov });
-          }
+          if (ov.start <= prev.end + MAX_GAP) prev.end = Math.max(prev.end, ov.end);
+          else merged.push({ ...ov });
         }
-        for (const m of merged) dxf.addRect(junctionX - OMEGA_W/2, m.start, junctionX + OMEGA_W/2, m.end, 'OMEGA', 4);
+        for (const m of merged) dxf.addRect(jx - OMEGA_W/2, m.start, jx + OMEGA_W/2, m.end, 'OMEGA', 4);
       }
 
-      // Gap ZED (rectangle 40mm wide)
-      const leftIntervals = col.map(p => [p.ymin, p.ymax]);
-      const rightIntervals = nextCol.map(p => [p.ymin, p.ymax]);
-      const { leftGaps, rightGaps } = getGaps(leftIntervals, rightIntervals);
-      for (const [gs, ge] of rightGaps) { if (Math.round(ge - gs) >= 100) dxf.addRect(junctionX - ZED_W/2, gs, junctionX + ZED_W/2, ge, 'ZED_BORD', 6); }
-      for (const [gs, ge] of leftGaps) { if (Math.round(ge - gs) >= 100) dxf.addRect(junctionX - ZED_W/2, gs, junctionX + ZED_W/2, ge, 'ZED_BORD', 6); }
+      // Gap ZED at junction (bord ouverture)
+      const leftI = [...new Set(left.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
+      const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
+      const { leftGaps, rightGaps } = getGaps(leftI, rightI);
+      for (const [gs, ge] of rightGaps) { if (Math.round(ge - gs) >= 100) dxf.addRect(jx - ZED_W/2, gs, jx + ZED_W/2, ge, 'ZED_BORD', 6); }
+      for (const [gs, ge] of leftGaps) { if (Math.round(ge - gs) >= 100) dxf.addRect(jx - ZED_W/2, gs, jx + ZED_W/2, ge, 'ZED_BORD', 6); }
     }
 
-    // ── Bandeau toiture ──
-    const banSorted = [...bandeauPanels].sort((a, b) => a.xmin - b.xmin);
-    const ZED_W_BAN = 40;
-    for (const bp of bandeauPanels) {
-      const bw = Math.round(bp.xmax - bp.xmin);
-      const nz = Math.max(0, Math.ceil(bw / ENTRAXE_BANDEAU) - 1);
-      if (nz > 0) {
-        const step = bw / (nz + 1);
-        for (let z = 1; z <= nz; z++) {
-          const cx = bp.xmin + z * step;
-          dxf.addRect(cx - ZED_W_BAN/2, bp.ymin, cx + ZED_W_BAN/2, bp.ymax, 'ZED_BANDEAU', 2);
-        }
-      }
-    }
-    for (let bi = 0; bi < banSorted.length - 1; bi++) {
-      const gap = banSorted[bi + 1].xmin - banSorted[bi].xmax;
-      if (gap <= MAX_GAP) {
-        const OMEGA_W_BAN = 80;
-        const jx = (banSorted[bi].xmax + banSorted[bi + 1].xmin) / 2;
-        const jymin = Math.max(banSorted[bi].ymin, banSorted[bi + 1].ymin);
-        const jymax = Math.min(banSorted[bi].ymax, banSorted[bi + 1].ymax);
-        dxf.addRect(jx - OMEGA_W_BAN/2, jymin, jx + OMEGA_W_BAN/2, jymax, 'OMEGA_BANDEAU', 4);
-      }
+    // Free-edge ZED (bord sans voisin, mais pas bord de façade)
+    for (const p of allPanels) {
+      if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP))
+        dxf.addRect(p.xmax - ZED_W/2, p.ymin, p.xmax + ZED_W/2, p.ymax, 'ZED_BORD', 6);
+      if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP))
+        dxf.addRect(p.xmin - ZED_W/2, p.ymin, p.xmin + ZED_W/2, p.ymax, 'ZED_BORD', 6);
     }
   }
 
