@@ -1316,10 +1316,75 @@ function placePiece(panel, piece, rectIdx, rotated, kerf, splitFn) {
   panel.freeRects.splice(rectIdx, 1, ...splitFn(r, usedW, usedH));
 }
 
+// Choisit le stock qui minimise le gaspillage RÉEL pour les pièces restantes.
+// Effectue un packing d'essai sur un panneau de chaque stock et mesure la surface emballée.
+// Si toutes les pièces restantes tiennent dans UN seul panneau → préfère le plus petit (moins de chute).
+// Sinon → préfère celui qui emballe le plus de surface par mm² de stock (moins de panneaux).
+function pickBestStockForRemaining(fits, remaining, kerf, hFn, sFn) {
+  if (fits.length === 1) return fits[0];
+  const totalArea = remaining.reduce((s, p) => s + p.w * p.h, 0);
+  const sortedRem = [...remaining].sort((a, b) => b.w * b.h - a.w * a.h);
+  let bestStock = fits[fits.length - 1], bestScore = -1;
+  for (const s of fits) {
+    const trial = { freeRects: [{x:0, y:0, w:s.w, h:s.h}], placements: [] };
+    let packed = 0;
+    for (const p of sortedRem) {
+      const pw = p.w + kerf, ph = p.h + kerf;
+      const { idx, rotated } = hFn(trial.freeRects, pw, ph, kerf);
+      if (idx !== -1) { placePiece(trial, p, idx, rotated, kerf, sFn); packed += p.w * p.h; }
+    }
+    const allFit = trial.placements.length === remaining.length;
+    // Si tout tient → score = 1e9 + ratio de remplissage (préfère le plus petit stock)
+    // Sinon       → score = ratio de remplissage (préfère le plus de pièces par mm² de stock)
+    const score = allFit ? 1e9 + totalArea / (s.w * s.h) : packed / (s.w * s.h);
+    if (score > bestScore) { bestScore = score; bestStock = s; }
+  }
+  return bestStock;
+}
+
+// Passe de compaction : tente de supprimer les panneaux peu remplis en redistribuant
+// leurs pièces dans les panneaux existants qui ont encore de l'espace libre.
+// Répète jusqu'à ce qu'aucune élimination ne soit possible.
+function compactResult(result, kerf) {
+  let panels = result.panels.map(p => ({
+    ...p,
+    freeRects: (p.freeRects || [{x:0,y:0,w:p.stock.w,h:p.stock.h}]).map(r => ({...r}))
+  }));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    panels.sort((a, b) => {
+      const uA = a.placements.reduce((s,p)=>s+p.w*p.h, 0) / (a.stock.w * a.stock.h);
+      const uB = b.placements.reduce((s,p)=>s+p.w*p.h, 0) / (b.stock.w * b.stock.h);
+      return uA - uB; // panneau le moins rempli en premier
+    });
+    for (let i = 0; i < panels.length; i++) {
+      const pieces = [...panels[i].placements].sort((a,b) => b.w*b.h - a.w*a.h);
+      const others = panels.filter((_,j) => j !== i).map(p => ({
+        ...p, freeRects: p.freeRects.map(r => ({...r})), placements: [...p.placements]
+      }));
+      let allFit = true;
+      for (const piece of pieces) {
+        const pw = piece.w + kerf, ph = piece.h + kerf;
+        let placed = false;
+        for (const op of others) {
+          const { idx, rotated } = heuristicBestAreaFit(op.freeRects, pw, ph, kerf);
+          if (idx !== -1) { placePiece(op, piece, idx, rotated, kerf, splitMaxRectShort); placed = true; break; }
+        }
+        if (!placed) { allFit = false; break; }
+      }
+      if (allFit) { panels = others; changed = true; break; }
+    }
+  }
+  panels.forEach((p, i) => { p.idx = i+1; p.placements.forEach((pl, j) => { pl.pieceNum = j+1; }); });
+  return { ...result, panels };
+}
+
 function packAttempt(activeStocks, expanded, kerf, sortFn, hFn, sFn, stockPref) {
   const sorted = [...expanded].sort(sortFn);
   const panels = [], unplaced = [];
-  for (const piece of sorted) {
+  for (let pi = 0; pi < sorted.length; pi++) {
+    const piece = sorted[pi];
     const pw = piece.w+kerf, ph = piece.h+kerf;
     let placed = false;
     for (const panel of panels) {
@@ -1331,8 +1396,9 @@ function packAttempt(activeStocks, expanded, kerf, sortFn, hFn, sFn, stockPref) 
       if (!fits.length) { unplaced.push(piece); continue; }
       let stock;
       if (stockPref === 'largest') stock = fits[fits.length-1];
+      else if (stockPref === 'dynamic') stock = pickBestStockForRemaining(fits, sorted.slice(pi), kerf, hFn, sFn);
       else if (typeof stockPref === 'number') stock = fits[Math.min(stockPref, fits.length-1)];
-      else stock = fits[0];
+      else stock = fits[0]; // 'smallest' et défaut
       const panel = { stock: {...stock, label: `${stock.w}\u00d7${stock.h}`}, idx: panels.length+1, placements: [], freeRects: [{x:0,y:0,w:stock.w,h:stock.h}] };
       panels.push(panel);
       const { idx, rotated } = hFn(panel.freeRects, pw, ph, kerf);
@@ -1355,7 +1421,7 @@ function optimizePack(activeStocks, expanded, kerf) {
   let best = null, bestScore = Infinity;
 
   function tryWithStocks(stocks) {
-    const prefs = ['smallest','largest'];
+    const prefs = ['smallest','largest','dynamic'];
     for (let i = 0; i < Math.min(stocks.length, 4); i++) prefs.push(i);
     for (const sort of SORT_STRATEGIES)
       for (const h of HEURISTICS)
@@ -1394,7 +1460,9 @@ function optimizePack(activeStocks, expanded, kerf) {
   }
 
   if (best) {
-    best.panels.forEach((p,i) => { p.idx = i+1; p.placements.forEach((pl,j) => { pl.pieceNum = j+1; }); });
+    // Passe de compaction : tente de supprimer les panneaux peu remplis
+    best = compactResult(best, kerf);
+    // (compactResult renumérote déjà les panneaux)
 
     // Calcul du comparatif par stock pour l'affichage dans l'UI
     best.stockComparison = activeStocks.map(s => {
