@@ -40,39 +40,47 @@ except ImportError:
 # ─── Palette ACI → informations groupe ───────────────────────────────────────
 # Clé = numéro de couleur ACI DXF
 ACI_COLOR_MAP = {
-    30:  {"name": "Panneaux Orange (N1)",   "color": "#fd9a51", "stock_w": 3650, "niveau": "N1"},
-    25:  {"name": "Panneaux Marron (RDC)",  "color": "#8B5E3C", "stock_w": 2550, "niveau": "RDC"},
-    1:   {"name": "Panneaux Rouge",         "color": "#e63946", "stock_w": 3650, "niveau": ""},
-    2:   {"name": "Panneaux Jaune",         "color": "#f4d03f", "stock_w": 3650, "niveau": ""},
-    3:   {"name": "Panneaux Vert",          "color": "#2ecc71", "stock_w": 3650, "niveau": ""},
-    4:   {"name": "Panneaux Cyan",          "color": "#1abc9c", "stock_w": 3650, "niveau": ""},
-    5:   {"name": "Panneaux Bleu",          "color": "#3498db", "stock_w": 3650, "niveau": ""},
-    6:   {"name": "Panneaux Magenta",       "color": "#9b59b6", "stock_w": 3650, "niveau": ""},
-    7:   {"name": "Panneaux Blanc/Noir",    "color": "#aaaaaa", "stock_w": 3650, "niveau": ""},
-    114: {"name": "Panneaux Blanc/Noir",    "color": "#aaaaaa", "stock_w": 3650, "niveau": ""},
+    30:  {"name": "Panneaux Orange",    "color": "#fd9a51"},
+    25:  {"name": "Panneaux Marron",    "color": "#8B5E3C"},
+    1:   {"name": "Panneaux Rouge",     "color": "#e63946"},
+    2:   {"name": "Panneaux Jaune",     "color": "#f4d03f"},
+    3:   {"name": "Panneaux Vert",      "color": "#2ecc71"},
+    4:   {"name": "Panneaux Cyan",      "color": "#1abc9c"},
+    5:   {"name": "Panneaux Bleu",      "color": "#3498db"},
+    6:   {"name": "Panneaux Magenta",   "color": "#9b59b6"},
+    7:   {"name": "Panneaux Blanc/Noir","color": "#aaaaaa"},
+    114: {"name": "Panneaux Blanc/Noir","color": "#aaaaaa"},
 }
 
 def round_mm(v):
     """Arrondit à l'entier millimètre le plus proche."""
     return int(round(float(v)))
 
-def normalize_rect(w, h):
-    """Retourne (w, h) avec w ≥ h (grande dimension en premier)."""
-    w, h = round_mm(w), round_mm(h)
-    return (w, h) if w >= h else (h, w)
-
-def classify_subtype(w, h, stock_w):
+def classify_subtype_by_position(panel, all_panels_facade):
     """
-    Classifie un panneau en sous-type selon ses dimensions.
-    - Bandeau Haut : h ≈ 1064 mm  (valeur typique, ajustable)
-    - Plein        : w ≈ stock_w  (largeur du stock, ex. 3650 ou 2550)
-    - Pièce spéciale : tout le reste
+    Classifie un panneau en sous-type selon sa position dans la façade.
+    - Bandeau Toiture : dernier panneau en haut, rien au-dessus, h < 1600mm
+    - Pièce spéciale  : tout le reste (classé ensuite par dimensions)
     """
-    if abs(h - 1064) <= 8:
-        return "Bandeau Haut"
-    if abs(w - stock_w) <= 15:
+    ph = round_mm(panel["ymax"] - panel["ymin"])
+    if ph >= 1600:
         return "Plein"
-    return "Pièce spéciale"
+    # Vérifier s'il y a un panneau au-dessus (dans un rayon de 20mm horizontalement)
+    panel_top = panel["ymax"]
+    has_above = False
+    for other in all_panels_facade:
+        if other is panel:
+            continue
+        # Le panneau "other" est au-dessus si son ymin est proche du ymax de panel
+        if other["ymin"] > panel_top + 20:
+            # Vérifier le chevauchement horizontal
+            overlap_x = min(panel["xmax"], other["xmax"]) - max(panel["xmin"], other["xmin"])
+            if overlap_x > 5:
+                has_above = True
+                break
+    if not has_above and ph < 1600:
+        return "Bandeau Toiture"
+    return "Plein"
 
 def _dwg_to_dxf_libredwg(dwg_path):
     """Conversion DWG→DXF via dwg2dxf (LibreDWG) si disponible."""
@@ -138,40 +146,25 @@ def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600):
     (Oméga et Zed) par façade.
 
     Logique :
-    - OMÉGA = jonction entre 2 panneaux adjacents (joint 8mm)
-      - Panneaux plein : oméga séparé par étage (RDC/N1 ne fusionnent pas)
-      - Pièces fenêtre : oméga fusionné à travers le joint inter-étage
-      - Bandeau : oméga aux jonctions régulières sous le bandeau
+    - OMÉGA = jonction entre 2 panneaux adjacents (gap ≤ 20mm)
+      - Toujours continu (traverse les joints inter-étages)
+      - Rectangle 80mm de large
     - ZED = bord libre (ouverture) + entraxe support
       - Pas de ZED aux bords de façade (gauche/droite)
-      - Entraxe régulier : 600mm, bandeau : 400mm
+      - Entraxe régulier : 600mm, bandeau toiture : 800mm
       - Bord libre : aux ouvertures (fenêtres, portes)
+      - Rectangle 40mm de large
 
     Retourne un dict {facade_name: {"omega_mm", "zed_mm", "omega_ml", "zed_ml",
                                      "omega_details": {h: qty}, "zed_details": {h: qty}}}
     """
     JOINT = 8
     MAX_GAP = 20
-    BANDEAU_H = 1064
-    BANDEAU_TOL = 15
+    BANDEAU_TOITURE_MAX_H = 1600
     ENTRAXE_BANDEAU = 800
 
     def nearest_facade(xcenter):
         return min(facade_labels, key=lambda lbl: abs(lbl[0] - xcenter))[1]
-
-    # Detect full tier heights from color 25 (RDC) and color 30 (N1)
-    from collections import Counter as _Counter
-    rdc_heights = _Counter()
-    n1_heights = _Counter()
-    for r in rects_spatial:
-        h = round(r["ymax"] - r["ymin"])
-        if h > 2000:
-            if r.get("color") == 25:
-                rdc_heights[h] += 1
-            if r.get("color") == 30:
-                n1_heights[h] += 1
-    rdc_height = rdc_heights.most_common(1)[0][0] if rdc_heights else 2550
-    n1_height = n1_heights.most_common(1)[0][0] if n1_heights else 3650
 
     def build_columns(panels):
         columns = defaultdict(list)
@@ -238,12 +231,25 @@ def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600):
     for fname in sorted(by_facade.keys()):
         all_panels = by_facade[fname]
 
-        # Separate bandeau from regular (use facade height, not min dimension)
+        # Separate bandeau toiture from regular (by position: top, nothing above, h < 1600mm)
         regular_panels = []
         bandeau_panels = []
         for p in all_panels:
-            facade_h = round(p["ymax"] - p["ymin"])
-            if abs(facade_h - BANDEAU_H) <= BANDEAU_TOL:
+            ph = round(p["ymax"] - p["ymin"])
+            if ph >= BANDEAU_TOITURE_MAX_H:
+                regular_panels.append(p)
+                continue
+            # Check if anything is above this panel
+            has_above = False
+            for other in all_panels:
+                if other is p:
+                    continue
+                if other["ymin"] > p["ymax"] + 20:
+                    overlap_x = min(p["xmax"], other["xmax"]) - max(p["xmin"], other["xmin"])
+                    if overlap_x > 5:
+                        has_above = True
+                        break
+            if not has_above:
                 bandeau_panels.append(p)
             else:
                 regular_panels.append(p)
@@ -293,18 +299,14 @@ def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600):
                     add_zed(round(p["ymax"] - p["ymin"]))
                 continue
 
-            # Omega: per-panel overlaps with tier splitting
+            # Omega: per-panel overlaps, always continuous (merge across floor joints)
             overlaps = []
             for pl in col_sorted:
                 for pr in next_sorted:
                     ov_start = max(pl["ymin"], pr["ymin"])
                     ov_end = min(pl["ymax"], pr["ymax"])
                     if ov_end - ov_start > 1:
-                        lh = round(pl["ymax"] - pl["ymin"])
-                        rh = round(pr["ymax"] - pr["ymin"])
-                        is_full = (abs(lh - rdc_height) <= 15 or abs(lh - n1_height) <= 15) and \
-                                  (abs(rh - rdc_height) <= 15 or abs(rh - n1_height) <= 15)
-                        overlaps.append((ov_start, ov_end, is_full))
+                        overlaps.append((ov_start, ov_end))
 
             overlaps.sort()
             if overlaps:
@@ -312,15 +314,11 @@ def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600):
                 for ov in overlaps[1:]:
                     prev = merged[-1]
                     gap = ov[0] - prev[1]
-                    if gap <= JOINT + 2:
-                        if prev[2] and ov[2]:
-                            merged.append(list(ov))  # Split at tier boundary
-                        else:
-                            prev[1] = max(prev[1], ov[1])  # Merge window pieces
-                            prev[2] = prev[2] and ov[2]
+                    if gap <= MAX_GAP:
+                        prev[1] = max(prev[1], ov[1])  # Always merge
                     else:
                         merged.append(list(ov))
-                for start, end, _ in merged:
+                for start, end in merged:
                     add_omega(round(end - start))
 
             # Gap ZED (free edges at window junctions)
@@ -384,8 +382,8 @@ def parse_dxf_file(filepath):
 
     facade_labels.sort(key=lambda t: t[0])
 
-    if not facade_labels:
-        facade_labels = [(0.0, "Façade")]
+    # Si pas de texte, on numérotera les façades après extraction des rectangles
+    auto_number_facades = len(facade_labels) == 0
 
     # 2. Construit un dict layer → couleur ACI pour résoudre BYLAYER
     layer_colors = {}
@@ -424,7 +422,8 @@ def parse_dxf_file(filepath):
             if (abs(ex["xmin"] - xmin) < TOL and abs(ex["xmax"] - xmax) < TOL and
                     abs(ex["ymin"] - ymin) < TOL and abs(ex["ymax"] - ymax) < TOL):
                 return  # doublon
-        w, h = normalize_rect(raw_w, raw_h)
+        w = round_mm(raw_w)  # L = horizontal
+        h = round_mm(raw_h)  # H = vertical
         xcenter = (xmin + xmax) / 2.0
         rects.append({"xcenter": xcenter, "w": w, "h": h, "color": color_aci})
         rects_spatial.append({"xmin": xmin, "xmax": xmax, "ymin": ymin, "ymax": ymax, "color": color_aci})
@@ -543,48 +542,66 @@ def parse_dxf_file(filepath):
         rects[:] = [r for i, r in enumerate(rects) if i not in englobed]
         rects_spatial[:] = [r for i, r in enumerate(rects_spatial) if i not in englobed]
 
-    # 3. Assigne chaque rectangle à la façade la plus proche (par X)
+    # 3. Auto-numérotation des façades si pas de texte dans le DXF
+    if auto_number_facades:
+        # Détecte les groupes de panneaux séparés par de grands gaps en X
+        if rects_spatial:
+            xs = sorted(set(round(r["xmin"]) for r in rects_spatial))
+            # Trouve les gaps > 500mm entre groupes
+            gap_threshold = 500
+            groups_x = [[xs[0]]]
+            for k in range(1, len(xs)):
+                if xs[k] - xs[k - 1] > gap_threshold:
+                    groups_x.append([xs[k]])
+                else:
+                    groups_x[-1].append(xs[k])
+            facade_labels = []
+            for idx, gx in enumerate(groups_x, 1):
+                center = (min(gx) + max(gx)) / 2
+                facade_labels.append((center, f"Façade {idx}"))
+        else:
+            facade_labels = [(0.0, "Façade 1")]
+
     def nearest_facade(xcenter):
         return min(facade_labels, key=lambda lbl: abs(lbl[0] - xcenter))[1]
 
-    # 4. Regroupe par (couleur ACI, façade) → compteur (w, h)
-    data = defaultdict(lambda: defaultdict(Counter))
-    for r in rects:
-        facade = nearest_facade(r["xcenter"])
-        data[r["color"]][facade][(r["w"], r["h"])] += 1
+    # 4. Classifie les panneaux par façade pour déterminer les sous-types par position
+    panels_by_facade = defaultdict(list)
+    for i, r in enumerate(rects_spatial):
+        fname = nearest_facade((r["xmin"] + r["xmax"]) / 2)
+        panels_by_facade[fname].append(r)
 
-    # 5. Construit la structure JSON de l'appli
+    # 5. Regroupe par (couleur ACI, façade) → compteur (w, h) avec sous-type positionnel
+    data = defaultdict(lambda: defaultdict(lambda: defaultdict(Counter)))
+    for i, r in enumerate(rects):
+        facade = nearest_facade(r["xcenter"])
+        spatial = rects_spatial[i]
+        subtype = classify_subtype_by_position(spatial, panels_by_facade[facade])
+        data[r["color"]][facade][subtype][(r["w"], r["h"])] += 1
+
+    # 6. Construit la structure JSON de l'appli
     groups = []
     gid = 1
     for color_aci in sorted(data.keys()):
         info = ACI_COLOR_MAP.get(color_aci, {
             "name": f"Panneaux (ACI {color_aci})",
             "color": "#888888",
-            "stock_w": 3650,
-            "niveau": "",
         })
-        stock_w = info["stock_w"]
 
         subsections = []
         ssid = 1
         for facade_name in sorted(data[color_aci].keys()):
-            dim_counter = data[color_aci][facade_name]
-
-            # Regroupe par sous-type
-            subtype_pieces = defaultdict(list)
-            for (w, h), qty in sorted(dim_counter.items(), key=lambda x: x[0][0] * x[0][1], reverse=True):
-                st = classify_subtype(w, h, stock_w)
-                subtype_pieces[st].append({"w": w, "h": h, "qty": qty})
-
             panel_subtypes = []
             stid = 1
-            for st_name in ["Bandeau Haut", "Plein", "Pièce spéciale"]:
-                pieces_list = subtype_pieces.get(st_name, [])
-                if not pieces_list:
+            for st_name in ["Bandeau Toiture", "Plein", "Pièce spéciale"]:
+                dim_counter = data[color_aci][facade_name].get(st_name, {})
+                if not dim_counter:
                     continue
                 pieces = [
-                    {"id": pid, "w": p["w"], "h": p["h"], "qty": p["qty"]}
-                    for pid, p in enumerate(pieces_list, 1)
+                    {"id": pid, "w": w, "h": h, "qty": qty}
+                    for pid, ((w, h), qty) in enumerate(
+                        sorted(dim_counter.items(), key=lambda x: x[0][0] * x[0][1], reverse=True), 1
+                    )
                 ]
                 panel_subtypes.append({
                     "id": stid,
