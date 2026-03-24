@@ -1316,10 +1316,24 @@ function placePiece(panel, piece, rectIdx, rotated, kerf, splitFn) {
   panel.freeRects.splice(rectIdx, 1, ...splitFn(r, usedW, usedH));
 }
 
+// Choisit le stock qui minimise le gaspillage estimé pour les pièces restantes.
+// ceil(surface_restante / surface_stock) × surface_stock
+// → préfère un petit stock si peu de pièces restent, un grand si beaucoup.
+function pickBestStockForRemaining(fits, remaining) {
+  const totalArea = remaining.reduce((s, p) => s + p.w * p.h, 0);
+  let bestStock = fits[fits.length - 1], bestEst = Infinity;
+  for (const s of fits) {
+    const est = Math.ceil(totalArea / (s.w * s.h)) * s.w * s.h;
+    if (est < bestEst) { bestEst = est; bestStock = s; }
+  }
+  return bestStock;
+}
+
 function packAttempt(activeStocks, expanded, kerf, sortFn, hFn, sFn, stockPref) {
   const sorted = [...expanded].sort(sortFn);
   const panels = [], unplaced = [];
-  for (const piece of sorted) {
+  for (let pi = 0; pi < sorted.length; pi++) {
+    const piece = sorted[pi];
     const pw = piece.w+kerf, ph = piece.h+kerf;
     let placed = false;
     for (const panel of panels) {
@@ -1331,8 +1345,9 @@ function packAttempt(activeStocks, expanded, kerf, sortFn, hFn, sFn, stockPref) 
       if (!fits.length) { unplaced.push(piece); continue; }
       let stock;
       if (stockPref === 'largest') stock = fits[fits.length-1];
+      else if (stockPref === 'dynamic') stock = pickBestStockForRemaining(fits, sorted.slice(pi));
       else if (typeof stockPref === 'number') stock = fits[Math.min(stockPref, fits.length-1)];
-      else stock = fits[0];
+      else stock = fits[0]; // 'smallest' et défaut
       const panel = { stock: {...stock, label: `${stock.w}\u00d7${stock.h}`}, idx: panels.length+1, placements: [], freeRects: [{x:0,y:0,w:stock.w,h:stock.h}] };
       panels.push(panel);
       const { idx, rotated } = hFn(panel.freeRects, pw, ph, kerf);
@@ -1355,7 +1370,7 @@ function optimizePack(activeStocks, expanded, kerf) {
   let best = null, bestScore = Infinity;
 
   function tryWithStocks(stocks) {
-    const prefs = ['smallest','largest'];
+    const prefs = ['smallest','largest','dynamic'];
     for (let i = 0; i < Math.min(stocks.length, 4); i++) prefs.push(i);
     for (const sort of SORT_STRATEGIES)
       for (const h of HEURISTICS)
