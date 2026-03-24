@@ -1347,13 +1347,14 @@ function optimizePack(activeStocks, expanded, kerf) {
           }
   }
 
-  // Try with all stocks combined
-  tryWithStocks(activeStocks);
-  // Also try each stock alone — ensures adding a stock never degrades results
-  if (activeStocks.length > 1) {
-    for (const stock of activeStocks) {
-      tryWithStocks([stock]);
+  // Try ALL non-empty subsets of stocks (2^N - 1 combos, max ~31 for 5 stocks)
+  const n = activeStocks.length;
+  for (let mask = 1; mask < (1 << n); mask++) {
+    const subset = [];
+    for (let b = 0; b < n; b++) {
+      if (mask & (1 << b)) subset.push(activeStocks[b]);
     }
+    tryWithStocks(subset);
   }
 
   if (best) {
