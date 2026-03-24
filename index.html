@@ -1379,6 +1379,23 @@ function optimizePack(activeStocks, expanded, kerf) {
 
   if (best) {
     best.panels.forEach((p,i) => { p.idx = i+1; p.placements.forEach((pl,j) => { pl.pieceNum = j+1; }); });
+    // Diagnostic: log which stocks were chosen and why
+    const stockUsage = {};
+    best.panels.forEach(p => { stockUsage[p.stock.label] = (stockUsage[p.stock.label]||0)+1; });
+    const totalStock = best.panels.reduce((s,p)=>s+p.stock.w*p.stock.h,0);
+    const totalUsed = best.panels.reduce((s,p)=>s+p.placements.reduce((ss,pl)=>ss+pl.w*pl.h,0),0);
+    const wasteP = totalStock>0 ? ((1-totalUsed/totalStock)*100).toFixed(1) : '0.0';
+    console.log('[Calpinage] Optimisation: score='+bestScore.toFixed(0)+', gaspillage='+wasteP+'%, stocks utilisés:', stockUsage, '| unplacés='+best.unplaced.length);
+    // Also log each single-stock score for comparison
+    activeStocks.forEach(s => {
+      const label = s.w+'×'+s.h;
+      const r = packAttempt([s], expanded, kerf, SORT_STRATEGIES[0], HEURISTICS[0], SPLITS[0], 'largest');
+      const sc = scoreResult(r);
+      const ts = r.panels.reduce((x,p)=>x+p.stock.w*p.stock.h,0);
+      const tu = r.panels.reduce((x,p)=>x+p.placements.reduce((ss,pl)=>ss+pl.w*pl.h,0),0);
+      const wp = ts>0?((1-tu/ts)*100).toFixed(1):'?';
+      console.log('[Calpinage]   '+label+': score='+sc.toFixed(0)+', gaspillage='+wp+'%, '+r.panels.length+' panneaux, unplacés='+r.unplaced.length);
+    });
   }
   return best;
 }
