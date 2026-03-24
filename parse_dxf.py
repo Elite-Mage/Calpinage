@@ -429,6 +429,8 @@ def parse_dxf_file(filepath):
         rects.append({"xcenter": xcenter, "w": w, "h": h, "color": color_aci})
         rects_spatial.append({"xmin": xmin, "xmax": xmax, "ymin": ymin, "ymax": ymax, "color": color_aci})
 
+    all_lines = []  # Collect LINEs from modelspace AND blocks
+
     def process_entity(e, offset_x=0.0, offset_y=0.0, parent_color=None, parent_layer=None):
         """Traite une entité DXF (supporte offset pour les INSERT/blocks)."""
         def _resolve(e):
@@ -459,6 +461,14 @@ def parse_dxf_file(filepath):
                     add_rect(min(xs), max(xs), min(ys), max(ys), _resolve(e))
             except Exception:
                 pass
+        elif e.dxftype() == "LINE":
+            color_aci = _resolve(e)
+            layer = e.dxf.get("layer", "0")
+            x1 = float(e.dxf.start.x) + offset_x
+            y1 = float(e.dxf.start.y) + offset_y
+            x2 = float(e.dxf.end.x) + offset_x
+            y2 = float(e.dxf.end.y) + offset_y
+            all_lines.append((x1, y1, x2, y2, color_aci, layer))
         elif e.dxftype() == "INSERT":
             try:
                 block_name = e.dxf.name
@@ -479,14 +489,10 @@ def parse_dxf_file(filepath):
 
     # 2b. Assembler les LINE isolées en rectangles (4 lignes → 1 rectangle)
     lines_by_key = defaultdict(list)
-    for e in msp:
-        if e.dxftype() == "LINE":
-            color_aci = resolve_color(e)
-            layer = e.dxf.get("layer", "0")
-            key = f"{color_aci}|{layer}"
-            x1, y1 = float(e.dxf.start.x), float(e.dxf.start.y)
-            x2, y2 = float(e.dxf.end.x), float(e.dxf.end.y)
-            lines_by_key[key].append((x1, y1, x2, y2, color_aci, layer))
+    for line in all_lines:
+        x1, y1, x2, y2, color_aci, layer = line
+        key = f"{color_aci}|{layer}"
+        lines_by_key[key].append((x1, y1, x2, y2, color_aci, layer))
 
     for key, segs in lines_by_key.items():
         h_segs = [(s[0], s[1], s[2], s[3]) for s in segs if abs(s[1] - s[3]) < 1]

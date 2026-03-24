@@ -1333,16 +1333,29 @@ function scoreResult(r) {
 
 function optimizePack(activeStocks, expanded, kerf) {
   let best = null, bestScore = Infinity;
-  const prefs = ['smallest','largest'];
-  for (let i = 0; i < Math.min(activeStocks.length, 4); i++) prefs.push(i);
-  for (const sort of SORT_STRATEGIES)
-    for (const h of HEURISTICS)
-      for (const s of SPLITS)
-        for (const pref of prefs) {
-          const r = packAttempt(activeStocks, expanded, kerf, sort, h, s, pref);
-          const sc = scoreResult(r);
-          if (sc < bestScore) { bestScore = sc; best = r; }
-        }
+
+  function tryWithStocks(stocks) {
+    const prefs = ['smallest','largest'];
+    for (let i = 0; i < Math.min(stocks.length, 4); i++) prefs.push(i);
+    for (const sort of SORT_STRATEGIES)
+      for (const h of HEURISTICS)
+        for (const s of SPLITS)
+          for (const pref of prefs) {
+            const r = packAttempt(stocks, expanded, kerf, sort, h, s, pref);
+            const sc = scoreResult(r);
+            if (sc < bestScore) { bestScore = sc; best = r; }
+          }
+  }
+
+  // Try with all stocks combined
+  tryWithStocks(activeStocks);
+  // Also try each stock alone — ensures adding a stock never degrades results
+  if (activeStocks.length > 1) {
+    for (const stock of activeStocks) {
+      tryWithStocks([stock]);
+    }
+  }
+
   if (best) {
     best.panels.forEach((p,i) => { p.idx = i+1; p.placements.forEach((pl,j) => { pl.pieceNum = j+1; }); });
   }
