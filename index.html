@@ -964,7 +964,7 @@ function renderActiveGroup() {
   // Pieces of active subtype
   let piecesHtml = '';
   if (activeSt) {
-    piecesHtml = activeSt.pieces.map((p) => {
+    piecesHtml = [...activeSt.pieces].sort((a, b) => b.w * b.h - a.w * a.h).map((p) => {
       return `<div class="piece-item" style="border-left: 3px solid ${subColor};">
         <span class="piece-dot" style="background:${subColor};"></span>
         <span class="piece-dim mono">${p.w} &times; ${p.h} mm</span>
@@ -2746,12 +2746,8 @@ function parseDxfClientSide(text, fileName) {
   return {
     version: '6.0',
     chantier: { nom: baseName, date: new Date().toISOString().slice(0, 10) },
-    stockPanels: [
-      { id: 1, w: 3650, h: 1860, active: true },
-      { id: 2, w: 2550, h: 1860, active: true },
-      { id: 3, w: 4270, h: 2130, active: true },
-    ],
-    nextStockId: 4,
+    stockPanels: [],
+    nextStockId: 1,
     groups,
     nextGroupId: gid,
     activeGroupId: 1,
