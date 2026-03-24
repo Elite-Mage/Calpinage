@@ -779,6 +779,7 @@ let groups = [
     coloris: '',
     epaisseur: 18,
     prixM2: '',
+    motif: false,
     subsections: [
       {
         id: 1,
@@ -799,6 +800,7 @@ let groups = [
     coloris: '',
     epaisseur: 18,
     prixM2: '',
+    motif: false,
     subsections: [
       {
         id: 1,
@@ -1010,6 +1012,14 @@ function renderActiveGroup() {
         <div style="font-size:10px;color:var(--text4);letter-spacing:1px;margin-bottom:6px;">COULEUR DU TYPE</div>
         <div class="color-picker-row">${colorSwatches}</div>
       </div>
+      <!-- Motif directionnel -->
+      <div style="margin-bottom:14px;display:flex;align-items:center;gap:10px;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;">
+          <input type="checkbox" ${g.motif ? 'checked' : ''} onchange="updateGroupSupplier(${g.id},'motif',this.checked)" style="width:16px;height:16px;cursor:pointer;accent-color:${g.color};">
+          <span style="font-size:12px;font-weight:600;color:var(--text2);">Motif directionnel</span>
+        </label>
+        <span style="font-size:11px;color:var(--text4);">${g.motif ? 'Les panneaux ne seront jamais pivotés' : 'Couleur unie — pas de contrainte de sens'}</span>
+      </div>
       <!-- Supplier fields -->
       <div style="font-size:10px;color:var(--text4);letter-spacing:1px;margin-bottom:6px;">INFOS FOURNISSEUR</div>
       <div class="supplier-grid">
@@ -1083,6 +1093,7 @@ function addGroup() {
     color: availColor,
     reference: '',
     coloris: '',
+    motif: false,
     epaisseur: 18,
     prixM2: '',
     subsections: [{
