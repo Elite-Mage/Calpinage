@@ -757,13 +757,8 @@ const GROUP_COLORS = [
 // ============================================================
 // DATA
 // ============================================================
-let stockPanels = [
-  { id: 1, w: 3650, h: 1800, active: true },
-  { id: 2, w: 2550, h: 1800, active: true },
-  { id: 3, w: 4250, h: 1600, active: true },
-  { id: 4, w: 3650, h: 1600, active: true },
-];
-let nextStockId = 5;
+let stockPanels = [];
+let nextStockId = 1;
 
 let chantier = { nom: '', date: new Date().toISOString().slice(0,10) };
 
@@ -1328,7 +1323,10 @@ function packAttempt(activeStocks, expanded, kerf, sortFn, hFn, sFn, stockPref) 
 
 function scoreResult(r) {
   if (!r) return Infinity;
-  return r.panels.reduce((s,p) => s+p.stock.w*p.stock.h, 0) + r.panels.length*1000 + r.unplaced.length*1e9;
+  const totalStock = r.panels.reduce((s,p) => s+p.stock.w*p.stock.h, 0);
+  const totalUsed = r.panels.reduce((s,p) => s+p.placements.reduce((ss,pl)=>ss+pl.w*pl.h,0), 0);
+  const waste = totalStock > 0 ? (totalStock - totalUsed) / totalStock : 0;
+  return r.unplaced.length*1e9 + waste*1e6 + r.panels.length;
 }
 
 function optimizePack(activeStocks, expanded, kerf) {
@@ -1347,13 +1345,14 @@ function optimizePack(activeStocks, expanded, kerf) {
           }
   }
 
-  // Try with all stocks combined
-  tryWithStocks(activeStocks);
-  // Also try each stock alone — ensures adding a stock never degrades results
-  if (activeStocks.length > 1) {
-    for (const stock of activeStocks) {
-      tryWithStocks([stock]);
+  // Try ALL non-empty subsets of stocks (2^N - 1 combos, max ~31 for 5 stocks)
+  const n = activeStocks.length;
+  for (let mask = 1; mask < (1 << n); mask++) {
+    const subset = [];
+    for (let b = 0; b < n; b++) {
+      if (mask & (1 << b)) subset.push(activeStocks[b]);
     }
+    tryWithStocks(subset);
   }
 
   if (best) {
@@ -2526,7 +2525,7 @@ function parseDxfClientSide(text, fileName) {
         panelSubtypes.push({
           id: stid,
           name: stName,
-          pieces: pieces.map((p, idx) => ({ id: idx + 1, w: p.w, h: p.h, qty: p.qty })),
+          pieces: pieces.sort((a, b) => b.w * b.h - a.w * a.h).map((p, idx) => ({ id: idx + 1, w: p.w, h: p.h, qty: p.qty })),
           nextPieceId: pieces.length + 1,
         });
         stid++;
