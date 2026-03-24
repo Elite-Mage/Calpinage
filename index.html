@@ -910,8 +910,8 @@ function migrateGroups() {
       for (const st of sub.panelSubtypes) {
         st.pieces.sort((a, b) => b.w * b.h - a.w * a.h);
       }
-      // Sort subtypes: Bandeau Haut first, then Plein, then Pièce spéciale
-      const stOrder = { 'Bandeau Haut': 0, 'Plein': 1, 'Pièce spéciale': 2 };
+      // Sort subtypes: Bandeau Toiture first, then Plein, then Pièce spéciale
+      const stOrder = { 'Bandeau Toiture': 0, 'Plein': 1, 'Pièce spéciale': 2 };
       sub.panelSubtypes.sort((a, b) => (stOrder[a.name] ?? 99) - (stOrder[b.name] ?? 99));
     }
   }
@@ -2110,16 +2110,16 @@ async function importProjectHome(input) {
 // ── Parser DXF côté client (fonctionne sur GitHub Pages sans serveur) ──
 
 const ACI_COLOR_MAP_JS = {
-  30: { name: 'Panneaux Orange (N1)',  color: '#fd9a51', stock_w: 3650, niveau: 'N1' },
-  25: { name: 'Panneaux Marron (RDC)', color: '#8B5E3C', stock_w: 2550, niveau: 'RDC' },
-  1:  { name: 'Panneaux Rouge',        color: '#e63946', stock_w: 3650, niveau: '' },
-  2:  { name: 'Panneaux Jaune',        color: '#f4d03f', stock_w: 3650, niveau: '' },
-  3:  { name: 'Panneaux Vert',         color: '#2ecc71', stock_w: 3650, niveau: '' },
-  4:  { name: 'Panneaux Cyan',         color: '#1abc9c', stock_w: 3650, niveau: '' },
-  5:  { name: 'Panneaux Bleu',         color: '#3498db', stock_w: 3650, niveau: '' },
-  6:  { name: 'Panneaux Magenta',      color: '#9b59b6', stock_w: 3650, niveau: '' },
-  7:  { name: 'Panneaux Blanc/Noir',   color: '#aaaaaa', stock_w: 3650, niveau: '' },
-  114: { name: 'Panneaux Blanc/Noir',   color: '#aaaaaa', stock_w: 3650, niveau: '' },
+  30: { name: 'Panneaux Orange',    color: '#fd9a51' },
+  25: { name: 'Panneaux Marron',    color: '#8B5E3C' },
+  1:  { name: 'Panneaux Rouge',     color: '#e63946' },
+  2:  { name: 'Panneaux Jaune',     color: '#f4d03f' },
+  3:  { name: 'Panneaux Vert',      color: '#2ecc71' },
+  4:  { name: 'Panneaux Cyan',      color: '#1abc9c' },
+  5:  { name: 'Panneaux Bleu',      color: '#3498db' },
+  6:  { name: 'Panneaux Magenta',   color: '#9b59b6' },
+  7:  { name: 'Panneaux Blanc/Noir',color: '#aaaaaa' },
+  114: { name: 'Panneaux Blanc/Noir',color: '#aaaaaa' },
 };
 
 function parseDxfClientSide(text, fileName) {
@@ -2356,7 +2356,8 @@ function parseDxfClientSide(text, fileName) {
     .map(e => [e.props.x, e.props.text.trim()])
     .sort((a, b) => a[0] - b[0]);
 
-  if (facadeLabels.length === 0) facadeLabels.push([0, 'Façade']);
+  // Auto-numérotation si pas de texte dans le DXF
+  const autoNumberFacades = facadeLabels.length === 0;
 
   function nearestFacade(xcenter) {
     let best = facadeLabels[0];
@@ -2426,8 +2427,8 @@ function parseDxfClientSide(text, fileName) {
   function addRect(xmin, xmax, ymin, ymax, colorAci, layerName) {
     const rawW = xmax - xmin, rawH = ymax - ymin;
     if (rawW < 10 || rawH < 10) return;
-    const w = Math.round(Math.max(rawW, rawH));
-    const h = Math.round(Math.min(rawW, rawH));
+    const w = Math.round(rawW);  // L = horizontal
+    const h = Math.round(rawH);  // H = vertical
     const xcenter = (xmin + xmax) / 2;
     let color = colorAci;
     if (!color || color === 256) {
@@ -2509,60 +2510,94 @@ function parseDxfClientSide(text, fileName) {
   console.log('[DXF Parser] Couleurs calques:', JSON.stringify(layerColors));
   console.log('[DXF Parser] Rectangles par couleur:', rects.reduce((acc, r) => { acc[r.color] = (acc[r.color] || 0) + 1; return acc; }, {}));
 
-  // Classify subtype
-  function classifySubtype(w, h, stockW) {
-    if (Math.abs(h - 1064) <= 8) return 'Bandeau Haut';
-    if (Math.abs(w - stockW) <= 15) return 'Plein';
-    return 'Pièce spéciale';
+  // Auto-number facades if no text labels found
+  if (autoNumberFacades && rectsSpatial.length > 0) {
+    const xs = [...new Set(rectsSpatial.map(r => Math.round(r.xmin)))].sort((a, b) => a - b);
+    const GAP_THRESHOLD = 500;
+    const groupsX = [[xs[0]]];
+    for (let k = 1; k < xs.length; k++) {
+      if (xs[k] - xs[k - 1] > GAP_THRESHOLD) groupsX.push([xs[k]]);
+      else groupsX[groupsX.length - 1].push(xs[k]);
+    }
+    for (let idx = 0; idx < groupsX.length; idx++) {
+      const gx = groupsX[idx];
+      const center = (Math.min(...gx) + Math.max(...gx)) / 2;
+      facadeLabels.push([center, `Façade ${idx + 1}`]);
+    }
+  }
+  if (facadeLabels.length === 0) facadeLabels.push([0, 'Façade 1']);
+
+  // Classify subtype by position (Bandeau Toiture = top panel, nothing above, h < 1600mm)
+  function classifySubtypeByPosition(panel, allPanelsFacade) {
+    const BANDEAU_MAX_H = 1600;
+    const ph = Math.round(panel.ymax - panel.ymin);
+    if (ph >= BANDEAU_MAX_H) return 'Plein';
+    let hasAbove = false;
+    for (const other of allPanelsFacade) {
+      if (other === panel) continue;
+      if (other.ymin > panel.ymax + 20) {
+        const overlapX = Math.min(panel.xmax, other.xmax) - Math.max(panel.xmin, other.xmin);
+        if (overlapX > 5) { hasAbove = true; break; }
+      }
+    }
+    if (!hasAbove) return 'Bandeau Toiture';
+    return 'Plein';
   }
 
-  // Group by (color, facade) -> counter
+  // Group panels by facade for position-based classification
+  const panelsByFacade = {};
+  for (const r of rectsSpatial) {
+    const fn = nearestFacade((r.xmin + r.xmax) / 2);
+    if (!panelsByFacade[fn]) panelsByFacade[fn] = [];
+    panelsByFacade[fn].push(r);
+  }
+
+  // Group by (color, facade, subtype) -> counter
   const dataMap = {};
-  for (const r of rects) {
+  for (let ri = 0; ri < rects.length; ri++) {
+    const r = rects[ri];
+    const spatial = rectsSpatial[ri];
     const facade = nearestFacade(r.xcenter);
-    const key = `${r.color}|${facade}`;
-    if (!dataMap[key]) dataMap[key] = { color: r.color, facade, dims: {} };
+    const subtype = classifySubtypeByPosition(spatial, panelsByFacade[facade] || []);
+    const key = `${r.color}|${facade}|${subtype}`;
+    if (!dataMap[key]) dataMap[key] = { color: r.color, facade, subtype, dims: {} };
     const dk = `${r.w}x${r.h}`;
     dataMap[key].dims[dk] = (dataMap[key].dims[dk] || 0) + 1;
   }
 
-  // Build groups
-  const colorGroups = {};
+  // Build groups: color → facade → subtype
+  const colorFacadeSubtype = {};
   for (const entry of Object.values(dataMap)) {
-    if (!colorGroups[entry.color]) colorGroups[entry.color] = {};
-    colorGroups[entry.color][entry.facade] = entry.dims;
+    if (!colorFacadeSubtype[entry.color]) colorFacadeSubtype[entry.color] = {};
+    if (!colorFacadeSubtype[entry.color][entry.facade]) colorFacadeSubtype[entry.color][entry.facade] = {};
+    colorFacadeSubtype[entry.color][entry.facade][entry.subtype] = entry.dims;
   }
 
   const groups = [];
   let gid = 1;
-  for (const colorAci of Object.keys(colorGroups).map(Number).sort((a, b) => a - b)) {
+  for (const colorAci of Object.keys(colorFacadeSubtype).map(Number).sort((a, b) => a - b)) {
     const info = ACI_COLOR_MAP_JS[colorAci] || {
-      name: `Panneaux (ACI ${colorAci})`, color: '#888888', stock_w: 3650, niveau: ''
+      name: `Panneaux (ACI ${colorAci})`, color: '#888888'
     };
-    const stockW = info.stock_w;
     const subsections = [];
     let ssid = 1;
-    for (const facadeName of Object.keys(colorGroups[colorAci]).sort()) {
-      const dims = colorGroups[colorAci][facadeName];
-      const subtypePieces = {};
-      for (const [dk, qty] of Object.entries(dims)) {
-        const [w, h] = dk.split('x').map(Number);
-        const st = classifySubtype(w, h, stockW);
-        if (!subtypePieces[st]) subtypePieces[st] = [];
-        subtypePieces[st].push({ w, h, qty });
-      }
+    for (const facadeName of Object.keys(colorFacadeSubtype[colorAci]).sort()) {
+      const subtypeData = colorFacadeSubtype[colorAci][facadeName];
       const panelSubtypes = [];
       let stid = 1;
-      for (const stName of ['Bandeau Haut', 'Plein', 'Pièce spéciale']) {
-        const pieces = subtypePieces[stName];
-        if (!pieces || !pieces.length) continue;
-        panelSubtypes.push({
-          id: stid,
-          name: stName,
-          pieces: pieces.sort((a, b) => b.w * b.h - a.w * a.h).map((p, idx) => ({ id: idx + 1, w: p.w, h: p.h, qty: p.qty })),
-          nextPieceId: pieces.length + 1,
-        });
-        stid++;
+      for (const stName of ['Bandeau Toiture', 'Plein', 'Pièce spéciale']) {
+        const dims = subtypeData[stName];
+        if (!dims) continue;
+        const pieces = Object.entries(dims)
+          .map(([dk, qty]) => { const [w, h] = dk.split('x').map(Number); return { w, h, qty }; })
+          .sort((a, b) => b.w * b.h - a.w * a.h)
+          .map((p, idx) => ({ id: idx + 1, w: p.w, h: p.h, qty: p.qty }));
+        if (pieces.length) {
+          panelSubtypes.push({
+            id: stid, name: stName, pieces, nextPieceId: pieces.length + 1,
+          });
+          stid++;
+        }
       }
       if (panelSubtypes.length) {
         subsections.push({
@@ -2588,7 +2623,7 @@ function parseDxfClientSide(text, fileName) {
     const ENTRAXE_BANDEAU = 800;
     const JOINT = 8;
     const MAX_GAP = 20;
-    const BANDEAU_H = 1064, BANDEAU_TOL = 15;
+    const BANDEAU_TOITURE_MAX_H = 1600;
 
     const byFacade = {};
     for (const r of rSpatial) {
@@ -2596,21 +2631,6 @@ function parseDxfClientSide(text, fileName) {
       if (!byFacade[fn]) byFacade[fn] = [];
       byFacade[fn].push(r);
     }
-
-    // Detect full tier heights from color 25 (RDC) and color 30 (N1)
-    const rdcHeights = {}, n1Heights = {};
-    for (const r of rSpatial) {
-      const h = Math.round(r.ymax - r.ymin);
-      if (h > 2000) {
-        if (r.color === 25) rdcHeights[h] = (rdcHeights[h] || 0) + 1;
-        if (r.color === 30) n1Heights[h] = (n1Heights[h] || 0) + 1;
-      }
-    }
-    let RDC_HEIGHT = 2550, N1_HEIGHT = 3650;
-    const rdcEntries = Object.entries(rdcHeights).sort((a, b) => b[1] - a[1]);
-    const n1Entries = Object.entries(n1Heights).sort((a, b) => b[1] - a[1]);
-    if (rdcEntries.length > 0) RDC_HEIGHT = parseInt(rdcEntries[0][0]);
-    if (n1Entries.length > 0) N1_HEIGHT = parseInt(n1Entries[0][0]);
 
     function buildColumns(panels) {
       const columns = {};
@@ -2662,11 +2682,20 @@ function parseDxfClientSide(text, fileName) {
     const result = {};
     for (const fname of Object.keys(byFacade).sort()) {
       const allPanels = byFacade[fname];
-      // Separate bandeau from regular (use facade height, not min dimension)
+      // Separate bandeau toiture from regular (by position: top, nothing above, h < 1600mm)
       const regularPanels = [], bandeauPanels = [];
       for (const p of allPanels) {
-        const facadeH = Math.round(p.ymax - p.ymin);
-        if (Math.abs(facadeH - BANDEAU_H) <= BANDEAU_TOL) bandeauPanels.push(p);
+        const ph = Math.round(p.ymax - p.ymin);
+        if (ph >= BANDEAU_TOITURE_MAX_H) { regularPanels.push(p); continue; }
+        let hasAbove = false;
+        for (const other of allPanels) {
+          if (other === p) continue;
+          if (other.ymin > p.ymax + 20) {
+            const overlapX = Math.min(p.xmax, other.xmax) - Math.max(p.xmin, other.xmin);
+            if (overlapX > 5) { hasAbove = true; break; }
+          }
+        }
+        if (!hasAbove) bandeauPanels.push(p);
         else regularPanels.push(p);
       }
 
@@ -2701,37 +2730,27 @@ function parseDxfClientSide(text, fileName) {
           continue;
         }
 
-        // Adjacent - compute omega (overlaps with tier splitting)
+        // Adjacent - compute omega (always continuous, merge across floor joints)
         const overlaps = [];
         for (const pl of col) {
           for (const pr of nextCol) {
             const ovStart = Math.max(pl.ymin, pr.ymin);
             const ovEnd = Math.min(pl.ymax, pr.ymax);
             if (ovEnd - ovStart > 1) {
-              const lh = Math.round(pl.ymax - pl.ymin);
-              const rh = Math.round(pr.ymax - pr.ymin);
-              const isFullTier = (Math.abs(lh - RDC_HEIGHT) <= 15 || Math.abs(lh - N1_HEIGHT) <= 15) &&
-                                 (Math.abs(rh - RDC_HEIGHT) <= 15 || Math.abs(rh - N1_HEIGHT) <= 15);
-              overlaps.push({ start: ovStart, end: ovEnd, isFullTier });
+              overlaps.push({ start: ovStart, end: ovEnd });
             }
           }
         }
         overlaps.sort((a, b) => a.start - b.start);
 
         if (overlaps.length > 0) {
-          // Merge overlaps: merge within JOINT+2mm, but split at tier boundary for full-tier panels
           const merged = [{ ...overlaps[0] }];
           for (let oi = 1; oi < overlaps.length; oi++) {
             const ov = overlaps[oi];
             const prev = merged[merged.length - 1];
             const gap = ov.start - prev.end;
-            if (gap <= JOINT + 2) {
-              if (prev.isFullTier && ov.isFullTier) {
-                merged.push({ ...ov }); // Split at tier boundary
-              } else {
-                prev.end = Math.max(prev.end, ov.end); // Merge (window pieces across tiers)
-                prev.isFullTier = prev.isFullTier && ov.isFullTier;
-              }
+            if (gap <= MAX_GAP) {
+              prev.end = Math.max(prev.end, ov.end); // Always merge
             } else {
               merged.push({ ...ov });
             }
@@ -3130,15 +3149,13 @@ function calcOssature() {
   }
 
   // ── Orientation des dimensions ──
-  // DXF : w = max(rawW, rawH), h = min(rawW, rawH)
-  // Plein (3650×867) : p.w=3650 (hauteur montant), p.h=867 (largeur panneau)
-  // Bandeau (4268×1064) : p.w=4268 (largeur), p.h=1064 (hauteur montant)
+  // w = horizontal (largeur), h = vertical (hauteur)
   function getOssH(p, stName) {
     if (hOss > 0 && !isBandeauSubtype(stName)) return hOss;
-    return isBandeauSubtype(stName) ? p.h : p.w;
+    return p.h;  // hauteur = vertical
   }
   function getOssW(p, stName) {
-    return isBandeauSubtype(stName) ? p.w : p.h;
+    return p.w;  // largeur = horizontal
   }
 
   // ── Step 1: Spatial analysis (omega at junctions, zed at free edges) ──
@@ -3146,16 +3163,15 @@ function calcOssature() {
   //   - OMÉGA = jonction entre 2 panneaux adjacents (joint 8mm)
   //   - ZED = bord libre (ouverture) + entraxe support
   //   - Pas de ZED/OMÉGA aux bords de façade (gauche/droite)
-  //   - Bandeau haut : omegas aux jonctions sous le bandeau, entraxe 400mm
-  //   - Panneaux plein : omegas séparés par étage (RDC/N1)
-  //   - Pièces fenêtre : omegas fusionnés à travers le joint inter-étage
+  //   - Bandeau toiture : omegas aux jonctions, entraxe 800mm
+  //   - Omégas toujours continus (traversent les joints inter-étages)
   const spatialOss = {}; // facadeName → { omegaCuts: [], zedEdgeCuts: [] }
 
   if (projectRectsSpatial && projectRectsSpatial.length > 0) {
     const JOINT = 8, MAX_GAP = 20;
-    const BANDEAU_H = 1064, BANDEAU_TOL = 15;
+    const BANDEAU_TOITURE_MAX_H = 1600;
 
-    const fLabels = projectFacadeLabels && projectFacadeLabels.length ? projectFacadeLabels : [[0, 'Façade']];
+    const fLabels = projectFacadeLabels && projectFacadeLabels.length ? projectFacadeLabels : [[0, 'Façade 1']];
     function nearestFacade(xcenter) {
       let best = fLabels[0];
       for (const lbl of fLabels) {
@@ -3163,21 +3179,6 @@ function calcOssature() {
       }
       return best[1];
     }
-
-    // Detect full tier heights
-    const rdcH = {}, n1H = {};
-    for (const r of projectRectsSpatial) {
-      const h = Math.round(r.ymax - r.ymin);
-      if (h > 2000) {
-        if (r.color === 25) rdcH[h] = (rdcH[h] || 0) + 1;
-        if (r.color === 30) n1H[h] = (n1H[h] || 0) + 1;
-      }
-    }
-    let RDC_HEIGHT = 2550, N1_HEIGHT = 3650;
-    const rdcE = Object.entries(rdcH).sort((a, b) => b[1] - a[1]);
-    const n1E = Object.entries(n1H).sort((a, b) => b[1] - a[1]);
-    if (rdcE.length > 0) RDC_HEIGHT = parseInt(rdcE[0][0]);
-    if (n1E.length > 0) N1_HEIGHT = parseInt(n1E[0][0]);
 
     function buildColumns(panels) {
       const columns = {};
@@ -3236,8 +3237,17 @@ function calcOssature() {
     for (const [fname, allPanels] of Object.entries(byFacade)) {
       const regularPanels = [], bandeauPanels = [];
       for (const p of allPanels) {
-        const facadeH = Math.round(p.ymax - p.ymin);
-        if (Math.abs(facadeH - BANDEAU_H) <= BANDEAU_TOL) bandeauPanels.push(p);
+        const ph = Math.round(p.ymax - p.ymin);
+        if (ph >= BANDEAU_TOITURE_MAX_H) { regularPanels.push(p); continue; }
+        let hasAbove = false;
+        for (const other of allPanels) {
+          if (other === p) continue;
+          if (other.ymin > p.ymax + 20) {
+            const overlapX = Math.min(p.xmax, other.xmax) - Math.max(p.xmin, other.xmin);
+            if (overlapX > 5) { hasAbove = true; break; }
+          }
+        }
+        if (!hasAbove) bandeauPanels.push(p);
         else regularPanels.push(p);
       }
 
@@ -3260,18 +3270,14 @@ function calcOssature() {
           continue;
         }
 
-        // Omega: compute per-panel overlaps with tier splitting
+        // Omega: always continuous (merge across floor joints)
         const overlaps = [];
         for (const pl of col) {
           for (const pr of nextCol) {
             const ovStart = Math.max(pl.ymin, pr.ymin);
             const ovEnd = Math.min(pl.ymax, pr.ymax);
             if (ovEnd - ovStart > 1) {
-              const lh = Math.round(pl.ymax - pl.ymin);
-              const rh = Math.round(pr.ymax - pr.ymin);
-              const isFullTier = (Math.abs(lh - RDC_HEIGHT) <= 15 || Math.abs(lh - N1_HEIGHT) <= 15) &&
-                                 (Math.abs(rh - RDC_HEIGHT) <= 15 || Math.abs(rh - N1_HEIGHT) <= 15);
-              overlaps.push({ start: ovStart, end: ovEnd, isFullTier });
+              overlaps.push({ start: ovStart, end: ovEnd });
             }
           }
         }
@@ -3283,13 +3289,8 @@ function calcOssature() {
             const ov = overlaps[oi];
             const prev = merged[merged.length - 1];
             const gap = ov.start - prev.end;
-            if (gap <= JOINT + 2) {
-              if (prev.isFullTier && ov.isFullTier) {
-                merged.push({ ...ov }); // Split at tier boundary
-              } else {
-                prev.end = Math.max(prev.end, ov.end); // Merge window pieces
-                prev.isFullTier = prev.isFullTier && ov.isFullTier;
-              }
+            if (gap <= MAX_GAP) {
+              prev.end = Math.max(prev.end, ov.end); // Always merge
             } else {
               merged.push({ ...ov });
             }
@@ -4268,25 +4269,10 @@ function exportDxfOssature() {
   const ENTRAXE_REGULAR = ossatureConfig.entaxeMax || 600;
   const ENTRAXE_BANDEAU = ossatureConfig.entaxeBandeau || 800;
   const JOINT = 8, MAX_GAP = 20;
-  const BANDEAU_H = 1064, BANDEAU_TOL = 15;
+  const BANDEAU_TOITURE_MAX_H = 1600;
 
   const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
   const facadeNames = Object.keys(byFacade).sort();
-
-  // Detect tier heights
-  const rdcH = {}, n1H = {};
-  for (const r of projectRectsSpatial) {
-    const h = Math.round(r.ymax - r.ymin);
-    if (h > 2000) {
-      if (r.color === 25) rdcH[h] = (rdcH[h] || 0) + 1;
-      if (r.color === 30) n1H[h] = (n1H[h] || 0) + 1;
-    }
-  }
-  let RDC_HEIGHT = 2550, N1_HEIGHT = 3650;
-  const rdcE = Object.entries(rdcH).sort((a, b) => b[1] - a[1]);
-  const n1E = Object.entries(n1H).sort((a, b) => b[1] - a[1]);
-  if (rdcE.length > 0) RDC_HEIGHT = parseInt(rdcE[0][0]);
-  if (n1E.length > 0) N1_HEIGHT = parseInt(n1E[0][0]);
 
   function buildColumns(panels) {
     const columns = {};
@@ -4351,8 +4337,17 @@ function exportDxfOssature() {
     const allPanels = byFacade[fname];
     const regularPanels = [], bandeauPanels = [];
     for (const p of allPanels) {
-      const facadeH = Math.round(p.ymax - p.ymin);
-      if (Math.abs(facadeH - BANDEAU_H) <= BANDEAU_TOL) bandeauPanels.push(p);
+      const ph = Math.round(p.ymax - p.ymin);
+      if (ph >= BANDEAU_TOITURE_MAX_H) { regularPanels.push(p); continue; }
+      let hasAbove = false;
+      for (const other of allPanels) {
+        if (other === p) continue;
+        if (other.ymin > p.ymax + 20) {
+          const overlapX = Math.min(p.xmax, other.xmax) - Math.max(p.xmin, other.xmin);
+          if (overlapX > 5) { hasAbove = true; break; }
+        }
+      }
+      if (!hasAbove) bandeauPanels.push(p);
       else regularPanels.push(p);
     }
 
@@ -4381,14 +4376,16 @@ function exportDxfOssature() {
     for (let ci = 0; ci < sortedCols.length; ci++) {
       const col = sortedCols[ci].sort((a, b) => a.ymin - b.ymin);
 
-      // Entraxe ZED
+      // Entraxe ZED (rectangle 40mm wide)
+      const ZED_W = 40;
       for (const p of col) {
         const pw = Math.round(p.xmax - p.xmin);
         const nz = Math.max(0, Math.ceil(pw / ENTRAXE_REGULAR) - 1);
         if (nz > 0) {
           const step = pw / (nz + 1);
           for (let z = 1; z <= nz; z++) {
-            dxf.addLine(p.xmin + z * step, p.ymin, p.xmin + z * step, p.ymax, 'ZED_ENTRAXE', 2);
+            const cx = p.xmin + z * step;
+            dxf.addRect(cx - ZED_W/2, p.ymin, cx + ZED_W/2, p.ymax, 'ZED_ENTRAXE', 2);
           }
         }
       }
@@ -4400,12 +4397,13 @@ function exportDxfOssature() {
       const xGap = rightXmin - leftXmax;
 
       if (xGap > MAX_GAP) {
-        for (const p of col) dxf.addLine(p.xmax, p.ymin, p.xmax, p.ymax, 'ZED_BORD', 6);
-        for (const p of nextCol) dxf.addLine(p.xmin, p.ymin, p.xmin, p.ymax, 'ZED_BORD', 6);
+        for (const p of col) dxf.addRect(p.xmax - ZED_W/2, p.ymin, p.xmax + ZED_W/2, p.ymax, 'ZED_BORD', 6);
+        for (const p of nextCol) dxf.addRect(p.xmin - ZED_W/2, p.ymin, p.xmin + ZED_W/2, p.ymax, 'ZED_BORD', 6);
         continue;
       }
 
-      // OMEGA at junction
+      // OMEGA at junction (rectangle 80mm wide, always continuous)
+      const OMEGA_W = 80;
       const junctionX = (leftXmax + rightXmin) / 2;
       const overlaps = [];
       for (const pl of col) {
@@ -4413,11 +4411,7 @@ function exportDxfOssature() {
           const ovStart = Math.max(pl.ymin, pr.ymin);
           const ovEnd = Math.min(pl.ymax, pr.ymax);
           if (ovEnd - ovStart > 1) {
-            const lh = Math.round(pl.ymax - pl.ymin);
-            const rh = Math.round(pr.ymax - pr.ymin);
-            const isFullTier = (Math.abs(lh - RDC_HEIGHT) <= 15 || Math.abs(lh - N1_HEIGHT) <= 15) &&
-                               (Math.abs(rh - RDC_HEIGHT) <= 15 || Math.abs(rh - N1_HEIGHT) <= 15);
-            overlaps.push({ start: ovStart, end: ovEnd, isFullTier });
+            overlaps.push({ start: ovStart, end: ovEnd });
           }
         }
       }
@@ -4429,39 +4423,45 @@ function exportDxfOssature() {
           const ov = overlaps[oi];
           const prev = merged[merged.length - 1];
           const gap = ov.start - prev.end;
-          if (gap <= JOINT + 2) {
-            if (prev.isFullTier && ov.isFullTier) merged.push({ ...ov });
-            else { prev.end = Math.max(prev.end, ov.end); prev.isFullTier = prev.isFullTier && ov.isFullTier; }
-          } else merged.push({ ...ov });
+          if (gap <= MAX_GAP) {
+            prev.end = Math.max(prev.end, ov.end); // Always merge
+          } else {
+            merged.push({ ...ov });
+          }
         }
-        for (const m of merged) dxf.addLine(junctionX, m.start, junctionX, m.end, 'OMEGA', 4);
+        for (const m of merged) dxf.addRect(junctionX - OMEGA_W/2, m.start, junctionX + OMEGA_W/2, m.end, 'OMEGA', 4);
       }
 
-      // Gap ZED
+      // Gap ZED (rectangle 40mm wide)
       const leftIntervals = col.map(p => [p.ymin, p.ymax]);
       const rightIntervals = nextCol.map(p => [p.ymin, p.ymax]);
       const { leftGaps, rightGaps } = getGaps(leftIntervals, rightIntervals);
-      for (const [gs, ge] of rightGaps) { if (Math.round(ge - gs) >= 100) dxf.addLine(junctionX, gs, junctionX, ge, 'ZED_BORD', 6); }
-      for (const [gs, ge] of leftGaps) { if (Math.round(ge - gs) >= 100) dxf.addLine(junctionX, gs, junctionX, ge, 'ZED_BORD', 6); }
+      for (const [gs, ge] of rightGaps) { if (Math.round(ge - gs) >= 100) dxf.addRect(junctionX - ZED_W/2, gs, junctionX + ZED_W/2, ge, 'ZED_BORD', 6); }
+      for (const [gs, ge] of leftGaps) { if (Math.round(ge - gs) >= 100) dxf.addRect(junctionX - ZED_W/2, gs, junctionX + ZED_W/2, ge, 'ZED_BORD', 6); }
     }
 
-    // ── Bandeau ──
+    // ── Bandeau toiture ──
     const banSorted = [...bandeauPanels].sort((a, b) => a.xmin - b.xmin);
+    const ZED_W_BAN = 40;
     for (const bp of bandeauPanels) {
       const bw = Math.round(bp.xmax - bp.xmin);
       const nz = Math.max(0, Math.ceil(bw / ENTRAXE_BANDEAU) - 1);
       if (nz > 0) {
         const step = bw / (nz + 1);
-        for (let z = 1; z <= nz; z++) dxf.addLine(bp.xmin + z * step, bp.ymin, bp.xmin + z * step, bp.ymax, 'ZED_BANDEAU', 2);
+        for (let z = 1; z <= nz; z++) {
+          const cx = bp.xmin + z * step;
+          dxf.addRect(cx - ZED_W_BAN/2, bp.ymin, cx + ZED_W_BAN/2, bp.ymax, 'ZED_BANDEAU', 2);
+        }
       }
     }
     for (let bi = 0; bi < banSorted.length - 1; bi++) {
       const gap = banSorted[bi + 1].xmin - banSorted[bi].xmax;
       if (gap <= MAX_GAP) {
+        const OMEGA_W_BAN = 80;
         const jx = (banSorted[bi].xmax + banSorted[bi + 1].xmin) / 2;
         const jymin = Math.max(banSorted[bi].ymin, banSorted[bi + 1].ymin);
         const jymax = Math.min(banSorted[bi].ymax, banSorted[bi + 1].ymax);
-        dxf.addLine(jx, jymin, jx, jymax, 'OMEGA_BANDEAU', 4);
+        dxf.addRect(jx - OMEGA_W_BAN/2, jymin, jx + OMEGA_W_BAN/2, jymax, 'OMEGA_BANDEAU', 4);
       }
     }
   }
