@@ -903,6 +903,17 @@ function migrateGroups() {
     for (let i = 0; i < g.subsections.length; i++) {
       g.subsections[i] = migrateSubsection(g.subsections[i]);
     }
+    // Sort facades alphabetically within each group
+    g.subsections.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    // Sort pieces by surface descending within each subtype
+    for (const sub of g.subsections) {
+      for (const st of sub.panelSubtypes) {
+        st.pieces.sort((a, b) => b.w * b.h - a.w * a.h);
+      }
+      // Sort subtypes: Bandeau Haut first, then Plein, then Pièce spéciale
+      const stOrder = { 'Bandeau Haut': 0, 'Plein': 1, 'Pièce spéciale': 2 };
+      sub.panelSubtypes.sort((a, b) => (stOrder[a.name] ?? 99) - (stOrder[b.name] ?? 99));
+    }
   }
 }
 
