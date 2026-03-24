@@ -1367,35 +1367,59 @@ function optimizePack(activeStocks, expanded, kerf) {
           }
   }
 
-  // Try ALL non-empty subsets of stocks (2^N - 1 combos, max ~31 for 5 stocks)
   const n = activeStocks.length;
-  for (let mask = 1; mask < (1 << n); mask++) {
+
+  // Étape 1 : tester chaque stock seul en priorité (garantit le meilleur résultat mono-stock)
+  for (const s of activeStocks) tryWithStocks([s]);
+
+  // Étape 2 : tester tous les sous-ensembles multi-stocks
+  // Utilise Math.pow pour éviter le débordement 32-bit de l'opérateur <<
+  const totalSubsets = Math.pow(2, n);
+  const maxSubsets = Math.min(totalSubsets, 32768); // cap à 2^15 pour éviter le gel du navigateur
+  for (let mask = 1; mask < maxSubsets; mask++) {
+    if ((mask & (mask - 1)) === 0) continue; // sous-ensemble mono-stock déjà fait à l'étape 1
     const subset = [];
-    for (let b = 0; b < n; b++) {
+    for (let b = 0; b < Math.min(n, 15); b++) {
       if (mask & (1 << b)) subset.push(activeStocks[b]);
     }
-    tryWithStocks(subset);
+    if (subset.length > 1) tryWithStocks(subset);
+  }
+
+  // Étape 3 : si n > 15 stocks, tester aussi toutes les paires et l'ensemble complet
+  if (n > 15) {
+    for (let i = 0; i < n; i++)
+      for (let j = i+1; j < n; j++)
+        tryWithStocks([activeStocks[i], activeStocks[j]]);
+    tryWithStocks(activeStocks);
   }
 
   if (best) {
     best.panels.forEach((p,i) => { p.idx = i+1; p.placements.forEach((pl,j) => { pl.pieceNum = j+1; }); });
-    // Diagnostic: log which stocks were chosen and why
-    const stockUsage = {};
-    best.panels.forEach(p => { stockUsage[p.stock.label] = (stockUsage[p.stock.label]||0)+1; });
-    const totalStock = best.panels.reduce((s,p)=>s+p.stock.w*p.stock.h,0);
-    const totalUsed = best.panels.reduce((s,p)=>s+p.placements.reduce((ss,pl)=>ss+pl.w*pl.h,0),0);
-    const wasteP = totalStock>0 ? ((1-totalUsed/totalStock)*100).toFixed(1) : '0.0';
-    console.log('[Calpinage] Optimisation: score='+bestScore.toFixed(0)+', gaspillage='+wasteP+'%, stocks utilisés:', stockUsage, '| unplacés='+best.unplaced.length);
-    // Also log each single-stock score for comparison
-    activeStocks.forEach(s => {
-      const label = s.w+'×'+s.h;
-      const r = packAttempt([s], expanded, kerf, SORT_STRATEGIES[0], HEURISTICS[0], SPLITS[0], 'largest');
-      const sc = scoreResult(r);
-      const ts = r.panels.reduce((x,p)=>x+p.stock.w*p.stock.h,0);
-      const tu = r.panels.reduce((x,p)=>x+p.placements.reduce((ss,pl)=>ss+pl.w*pl.h,0),0);
-      const wp = ts>0?((1-tu/ts)*100).toFixed(1):'?';
-      console.log('[Calpinage]   '+label+': score='+sc.toFixed(0)+', gaspillage='+wp+'%, '+r.panels.length+' panneaux, unplacés='+r.unplaced.length);
+
+    // Calcul du comparatif par stock pour l'affichage dans l'UI
+    best.stockComparison = activeStocks.map(s => {
+      let bestR = null, bestSc = Infinity;
+      for (const sort of SORT_STRATEGIES)
+        for (const h of HEURISTICS)
+          for (const sp of SPLITS) {
+            const r = packAttempt([s], expanded, kerf, sort, h, sp, 'largest');
+            const sc = scoreResult(r);
+            if (sc < bestSc) { bestSc = sc; bestR = r; }
+          }
+      const ts = bestR.panels.reduce((x,p)=>x+p.stock.w*p.stock.h, 0);
+      const tu = bestR.panels.reduce((x,p)=>x+p.placements.reduce((ss,pl)=>ss+pl.w*pl.h, 0), 0);
+      return {
+        label: s.w+'×'+s.h,
+        panels: bestR.panels.length,
+        unplaced: bestR.unplaced.length,
+        waste: ts > 0 ? ((1 - tu/ts)*100).toFixed(1) : '?',
+        isBest: false,
+      };
     });
+    // Marquer le meilleur
+    const chosen = {};
+    best.panels.forEach(p => { chosen[p.stock.label] = true; });
+    best.stockComparison.forEach(c => { c.isBest = !!chosen[c.label]; });
   }
   return best;
 }
@@ -1423,7 +1447,7 @@ function optimize() {
     // colorMap by pieceTypeIdx -> subsection color
     const colorMap = {};
     allPieces.forEach((p, i) => { colorMap[i] = subsectionColorMap[p.subsectionId]; });
-    allResults[g.id] = { ...result, allPieces, subsectionColorMap, colorMap };
+    allResults[g.id] = { ...result, allPieces, subsectionColorMap, colorMap, stockComparison: result?.stockComparison || [] };
   }
 
   if (!hasAny) { alert('Ajoute des pieces dans au moins un type !'); return; }
@@ -1476,6 +1500,24 @@ function renderAllResults() {
       <span style="font-size:11px;color:var(--text4);margin-left:4px;">${g.subsections.length} facade${g.subsections.length>1?'s':''}</span>
       <span class="info">${result.panels.length} panneau${result.panels.length>1?'x':''} &mdash; chute ${groupWaste}%</span>
     </div>`;
+
+    // Comparatif par stock
+    if (result.stockComparison && result.stockComparison.length > 1) {
+      html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px 0;padding:8px 12px;background:var(--bg2);border-radius:6px;border:1px solid var(--border);">
+        <span style="font-size:10px;color:var(--text4);letter-spacing:1px;width:100%;margin-bottom:4px;">COMPARATIF PAR FORMAT FOURNISSEUR</span>`;
+      for (const c of result.stockComparison) {
+        const wasteNum = parseFloat(c.waste);
+        const col = c.unplaced > 0 ? 'var(--red)' : wasteNum < 20 ? 'var(--green)' : wasteNum < 35 ? 'var(--yellow)' : 'var(--text2)';
+        const border = c.isBest ? `2px solid ${g.color}` : '1px solid var(--border)';
+        const bg = c.isBest ? `${g.color}22` : 'var(--bg3)';
+        html += `<div style="display:flex;flex-direction:column;align-items:center;padding:6px 10px;border-radius:5px;background:${bg};border:${border};min-width:90px;">
+          <span style="font-size:11px;font-weight:700;font-family:monospace;color:var(--text1);">${c.label}</span>
+          <span style="font-size:13px;font-weight:700;color:${col};margin-top:2px;">${c.unplaced > 0 ? '⚠ '+c.unplaced+' non placé'+(c.unplaced>1?'s':'') : c.waste+'% chute'}</span>
+          <span style="font-size:10px;color:var(--text4);">${c.panels} panneau${c.panels>1?'x':''}${c.isBest?' ✓':''}</span>
+        </div>`;
+      }
+      html += `</div>`;
+    }
 
     for (const panel of result.panels) {
       html += renderPanelCard(panel, result.colorMap, g, result.subsectionColorMap);
