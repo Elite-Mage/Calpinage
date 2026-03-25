@@ -1312,16 +1312,34 @@ const SORT_STRATEGIES = [
   (a,b) => Math.max(b.w,b.h) - Math.max(a.w,a.h),
 ];
 const HEURISTICS = [heuristicBestAreaFit, heuristicBestShortSideFit, heuristicBottomLeft];
-const SPLITS = [splitMaxRectShort, splitMaxRectLong];
+const SPLITS = [null]; // MaxRect gère le découpage en interne
 
-function placePiece(panel, piece, rectIdx, rotated, kerf, splitFn) {
+function placePiece(panel, piece, rectIdx, rotated, kerf, _splitFn) {
   const r = panel.freeRects[rectIdx];
   const fw = rotated ? piece.h : piece.w, fh = rotated ? piece.w : piece.h;
   panel.placements.push({ ...piece, w: fw, h: fh, x: r.x, y: r.y, pieceNum: panel.placements.length+1, rotated });
-  const usedW = fw + (fw < r.w ? kerf : 0);
-  const usedH = fh + (fh < r.h ? kerf : 0);
-  panel.freeRects.splice(rectIdx, 1, ...splitFn(r, usedW, usedH));
+  // Dimensions occupées (kerf seulement si la pièce ne touche pas le bord du rect)
+  const px = r.x, py = r.y;
+  const pw = fw + (fw < r.w ? kerf : 0);
+  const ph = fh + (fh < r.h ? kerf : 0);
+  // MaxRect complet : pour chaque rect libre, le découper autour de la pièce posée
+  const next = [];
+  for (const fr of panel.freeRects) {
+    // Pas de chevauchement → conserver tel quel
+    if (fr.x + fr.w <= px || px + pw <= fr.x || fr.y + fr.h <= py || py + ph <= fr.y) {
+      next.push(fr); continue;
+    }
+    // Chevauchement → générer jusqu'à 4 sous-rectangles
+    if (px > fr.x)           next.push({ x: fr.x,    y: fr.y, w: px - fr.x,                h: fr.h });
+    if (px + pw < fr.x+fr.w) next.push({ x: px + pw, y: fr.y, w: fr.x + fr.w - px - pw,   h: fr.h });
+    if (py > fr.y)           next.push({ x: fr.x, y: fr.y,    w: fr.w, h: py - fr.y });
+    if (py + ph < fr.y+fr.h) next.push({ x: fr.x, y: py + ph, w: fr.w, h: fr.y + fr.h - py - ph });
+  }
+  // Supprimer les rectangles dominés (A ⊆ B → supprimer A)
+  panel.freeRects = next.filter((a, i) => !next.some((b, j) => i !== j &&
+    b.x <= a.x && b.y <= a.y && b.x + b.w >= a.x + a.w && b.y + b.h >= a.y + a.h));
 }
+
 
 // Choisit le stock qui minimise le gaspillage RÉEL pour les pièces restantes.
 // Effectue un packing d'essai sur un panneau de chaque stock et mesure la surface emballée.
