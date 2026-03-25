@@ -1539,116 +1539,6 @@ function postOptimize(result, activeStocks, kerf, allowRotate) {
   return { ...result, panels };
 }
 
-// Passe de migration partielle : pour chaque panneau, déplace autant de pièces que possible
-// vers d'autres panneaux, puis vérifie si ce qui reste tient dans un stock plus petit.
-// Complète compactResult (tout-ou-rien) en gérant les cas partiels.
-function migrateAndShrink(result, activeStocks, kerf, allowRotate) {
-  const allStocks = [];
-  for (const s of activeStocks) {
-    allStocks.push({w: s.w, h: s.h});
-    if (s.w !== s.h) allStocks.push({w: s.h, h: s.w});
-  }
-  allStocks.sort((a, b) => a.w * a.h - b.w * b.h);
-
-  function origPieces(panel) {
-    return panel.placements.map(p => {
-      const ow = p.rotated ? p.h : p.w, oh = p.rotated ? p.w : p.h;
-      return { ...p, w: ow, h: oh, rotated: false };
-    });
-  }
-
-  function tryFit(pieces, stock) {
-    for (const sortFn of SORT_STRATEGIES) {
-      for (const hFn of HEURISTICS) {
-        const trial = { freeRects: [{x:0,y:0,w:stock.w,h:stock.h}], placements: [] };
-        let ok = true;
-        for (const piece of [...pieces].sort(sortFn)) {
-          const pw = piece.w + kerf, ph = piece.h + kerf;
-          const { idx, rotated } = hFn(trial.freeRects, pw, ph, kerf, allowRotate);
-          if (idx !== -1) placePiece(trial, piece, idx, rotated, kerf, null);
-          else { ok = false; break; }
-        }
-        if (ok) return trial;
-      }
-    }
-    return null;
-  }
-
-  let panels = result.panels.map(p => ({
-    ...p,
-    freeRects: (p.freeRects || [{x:0,y:0,w:p.stock.w,h:p.stock.h}]).map(r => ({...r}))
-  }));
-
-  let globalChanged = true;
-  while (globalChanged) {
-    globalChanged = false;
-    // Traiter d'abord les panneaux les moins remplis
-    panels.sort((a, b) => {
-      const uA = a.placements.reduce((s,p)=>s+p.w*p.h,0) / (a.stock.w*a.stock.h);
-      const uB = b.placements.reduce((s,p)=>s+p.w*p.h,0) / (b.stock.w*b.stock.h);
-      return uA - uB;
-    });
-
-    for (let i = 0; i < panels.length && !globalChanged; i++) {
-      const srcPanel = panels[i];
-      const srcPieces = origPieces(srcPanel);
-      const curStockArea = srcPanel.stock.w * srcPanel.stock.h;
-
-      // Cloner les autres panneaux
-      const othersCopy = panels
-        .filter((_,j) => j !== i)
-        .map(p => ({...p, freeRects: p.freeRects.map(r=>({...r})), placements: [...p.placements]}));
-
-      // Tenter de migrer les pièces (les plus grandes en premier)
-      const remainingPieces = [];
-      let movedCount = 0;
-      for (const piece of [...srcPieces].sort((a,b) => b.w*b.h - a.w*a.h)) {
-        const pw = piece.w + kerf, ph = piece.h + kerf;
-        let placed = false;
-        for (const op of othersCopy) {
-          const { idx, rotated } = heuristicBestAreaFit(op.freeRects, pw, ph, kerf, allowRotate);
-          if (idx !== -1) {
-            placePiece(op, piece, idx, rotated, kerf, splitMaxRectShort);
-            placed = true;
-            movedCount++;
-            break;
-          }
-        }
-        if (!placed) remainingPieces.push(piece);
-      }
-
-      if (movedCount === 0) continue;
-
-      // Cas 1 : toutes les pièces ont été déplacées → supprimer ce panneau
-      if (remainingPieces.length === 0) {
-        panels = othersCopy;
-        globalChanged = true;
-        break;
-      }
-
-      // Cas 2 : migration partielle → essayer de mettre ce qui reste dans un stock plus petit
-      for (const s of allStocks) {
-        if (s.w * s.h >= curStockArea) continue;
-        const trial = tryFit(remainingPieces, s);
-        if (trial) {
-          const newSrcPanel = {
-            ...srcPanel,
-            stock: {...s, label: `${s.w}\u00d7${s.h}`},
-            placements: trial.placements,
-            freeRects: trial.freeRects
-          };
-          panels = [...othersCopy, newSrcPanel];
-          globalChanged = true;
-          break;
-        }
-      }
-    }
-  }
-
-  panels.forEach((p, i) => { p.idx = i+1; p.placements.forEach((pl, j) => { pl.pieceNum = j+1; }); });
-  return { ...result, panels };
-}
-
 function optimizePack(activeStocks, expanded, kerf, allowRotate) {
   let best = null, bestScore = Infinity;
 
@@ -1697,9 +1587,6 @@ function optimizePack(activeStocks, expanded, kerf, allowRotate) {
 
     // Post-optimisation : réduire les stocks + fusionner les panneaux
     best = postOptimize(best, activeStocks, kerf, allowRotate);
-
-    // Migration partielle : déplacer des pièces entre panneaux pour réduire les stocks
-    best = migrateAndShrink(best, activeStocks, kerf, allowRotate);
 
     // Calcul du comparatif par stock pour l'affichage dans l'UI
     best.stockComparison = activeStocks.map(s => {
@@ -3142,16 +3029,8 @@ function parseDxfClientSide(text, fileName) {
           }
           for (const m of merged) addOmega(Math.round(m.end - m.start));
         }
-        // N'inclure dans leftI/rightI que les panneaux ayant un overlap vertical réel à cette jonction
-        // pour éviter les faux ZED_BORD causés par des panneaux d'un autre étage au même jx.
-        const plSet = new Set(), prSet = new Set();
-        for (const pl of left) for (const pr of right)
-          if (Math.min(pl.ymax, pr.ymax) - Math.max(pl.ymin, pr.ymin) > 1) {
-            plSet.add(`${Math.round(pl.ymin)}_${Math.round(pl.ymax)}`);
-            prSet.add(`${Math.round(pr.ymin)}_${Math.round(pr.ymax)}`);
-          }
-        const leftI = [...plSet].map(s => s.split('_').map(Number));
-        const rightI = [...prSet].map(s => s.split('_').map(Number));
+        const leftI = [...new Set(left.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
+        const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
         const { leftGaps, rightGaps } = getGaps(leftI, rightI);
         for (const [gs, ge] of rightGaps) { const h = Math.round(ge - gs); if (h >= 100) addZed(h); }
         for (const [gs, ge] of leftGaps) { const h = Math.round(ge - gs); if (h >= 100) addZed(h); }
@@ -3621,14 +3500,8 @@ function calcOssature() {
           }
           for (const m of merged) cuts.omegaCuts.push({ len: Math.round(m.end - m.start), ref: 'jonction', structural: true });
         }
-        const plSet2 = new Set(), prSet2 = new Set();
-        for (const pl of left) for (const pr of right)
-          if (Math.min(pl.ymax, pr.ymax) - Math.max(pl.ymin, pr.ymin) > 1) {
-            plSet2.add(`${Math.round(pl.ymin)}_${Math.round(pl.ymax)}`);
-            prSet2.add(`${Math.round(pr.ymin)}_${Math.round(pr.ymax)}`);
-          }
-        const leftI = [...plSet2].map(s => s.split('_').map(Number));
-        const rightI = [...prSet2].map(s => s.split('_').map(Number));
+        const leftI = [...new Set(left.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
+        const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
         const { leftGaps, rightGaps } = getGaps(leftI, rightI);
         for (const [gs, ge] of rightGaps) { const h = Math.round(ge - gs); if (h >= 100) cuts.zedEdgeCuts.push({ len: h, ref: 'bord ouverture' }); }
         for (const [gs, ge] of leftGaps) { const h = Math.round(ge - gs); if (h >= 100) cuts.zedEdgeCuts.push({ len: h, ref: 'bord ouverture' }); }
@@ -4743,15 +4616,8 @@ function exportDxfOssature() {
       }
 
       // Gap ZED at junction (bord ouverture)
-      // Seuls les panneaux ayant un overlap vertical réel sont inclus pour éviter les faux ZED_BORD.
-      const plSetD = new Set(), prSetD = new Set();
-      for (const pl of left) for (const pr of right)
-        if (Math.min(pl.ymax, pr.ymax) - Math.max(pl.ymin, pr.ymin) > 1) {
-          plSetD.add(`${Math.round(pl.ymin)}_${Math.round(pl.ymax)}`);
-          prSetD.add(`${Math.round(pr.ymin)}_${Math.round(pr.ymax)}`);
-        }
-      const leftI = [...plSetD].map(s => s.split('_').map(Number));
-      const rightI = [...prSetD].map(s => s.split('_').map(Number));
+      const leftI = [...new Set(left.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
+      const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
       const { leftGaps, rightGaps } = getGaps(leftI, rightI);
       for (const [gs, ge] of rightGaps) { if (Math.round(ge - gs) >= 100) dxf.addRect(jx - ZED_W/2, gs, jx + ZED_W/2, ge, 'ZED_BORD', 6); }
       for (const [gs, ge] of leftGaps) { if (Math.round(ge - gs) >= 100) dxf.addRect(jx - ZED_W/2, gs, jx + ZED_W/2, ge, 'ZED_BORD', 6); }
