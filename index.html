@@ -1442,6 +1442,103 @@ function scoreResult(r) {
   return r.unplaced.length*1e9 + waste*1e6 + r.panels.length;
 }
 
+// ── Post-optimisation : réduction de stock + fusion de panneaux ──
+function postOptimize(result, activeStocks, kerf, allowRotate) {
+  // Construire toutes les variantes de stock (naturel + pivoté)
+  const allStocks = [];
+  for (const s of activeStocks) {
+    allStocks.push({w: s.w, h: s.h});
+    if (s.w !== s.h) allStocks.push({w: s.h, h: s.w});
+  }
+  allStocks.sort((a, b) => a.w * a.h - b.w * b.h);
+
+  // Récupère les dimensions originales d'une pièce (avant rotation)
+  function origPieces(panel) {
+    return panel.placements.map(p => {
+      const ow = p.rotated ? p.h : p.w, oh = p.rotated ? p.w : p.h;
+      return { ...p, w: ow, h: oh, rotated: false };
+    });
+  }
+
+  // Tente de placer toutes les pièces dans un stock donné (essaie tous les tris × heuristiques)
+  function tryFit(pieces, stock) {
+    for (const sortFn of SORT_STRATEGIES) {
+      const sorted = [...pieces].sort(sortFn);
+      for (const hFn of HEURISTICS) {
+        const trial = { freeRects: [{x:0,y:0,w:stock.w,h:stock.h}], placements: [] };
+        let ok = true;
+        for (const piece of sorted) {
+          const pw = piece.w + kerf, ph = piece.h + kerf;
+          const { idx, rotated } = hFn(trial.freeRects, pw, ph, kerf, allowRotate);
+          if (idx !== -1) placePiece(trial, piece, idx, rotated, kerf, null);
+          else { ok = false; break; }
+        }
+        if (ok) return trial;
+      }
+    }
+    return null;
+  }
+
+  let panels = result.panels.map(p => ({...p}));
+
+  // Phase 1 : réduire chaque panneau au plus petit stock possible
+  for (let i = 0; i < panels.length; i++) {
+    const pieces = origPieces(panels[i]);
+    const curArea = panels[i].stock.w * panels[i].stock.h;
+    for (const s of allStocks) {
+      if (s.w * s.h >= curArea) continue;
+      const trial = tryFit(pieces, s);
+      if (trial) {
+        panels[i] = { ...panels[i], stock: {...s, label: `${s.w}\u00d7${s.h}`}, placements: trial.placements, freeRects: trial.freeRects };
+        break;
+      }
+    }
+  }
+
+  // Phase 2 : fusionner des panneaux dans un stock plus grand (si aire totale diminue)
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let bi = panels.length - 1; bi >= 0 && !changed; bi--) {
+      for (let ai = 0; ai < panels.length && !changed; ai++) {
+        if (ai === bi) continue;
+        const pA = origPieces(panels[ai]);
+        const pB = origPieces(panels[bi]);
+        const combined = [...pA, ...pB];
+        const oldArea = panels[ai].stock.w * panels[ai].stock.h + panels[bi].stock.w * panels[bi].stock.h;
+        // Essayer chaque stock (du plus petit au plus grand)
+        for (const s of allStocks) {
+          if (s.w * s.h >= oldArea) continue; // pas rentable
+          const trial = tryFit(combined, s);
+          if (trial) {
+            panels[ai] = { ...panels[ai], stock: {...s, label: `${s.w}\u00d7${s.h}`}, placements: trial.placements, freeRects: trial.freeRects };
+            panels.splice(bi, 1);
+            changed = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Phase 3 : re-réduire après les fusions
+  for (let i = 0; i < panels.length; i++) {
+    const pieces = origPieces(panels[i]);
+    const curArea = panels[i].stock.w * panels[i].stock.h;
+    for (const s of allStocks) {
+      if (s.w * s.h >= curArea) continue;
+      const trial = tryFit(pieces, s);
+      if (trial) {
+        panels[i] = { ...panels[i], stock: {...s, label: `${s.w}\u00d7${s.h}`}, placements: trial.placements, freeRects: trial.freeRects };
+        break;
+      }
+    }
+  }
+
+  panels.forEach((p, i) => { p.idx = i+1; p.placements.forEach((pl, j) => { pl.pieceNum = j+1; }); });
+  return { ...result, panels };
+}
+
 function optimizePack(activeStocks, expanded, kerf, allowRotate) {
   let best = null, bestScore = Infinity;
 
@@ -1487,7 +1584,9 @@ function optimizePack(activeStocks, expanded, kerf, allowRotate) {
   if (best) {
     // Passe de compaction : tente de supprimer les panneaux peu remplis
     best = compactResult(best, kerf, allowRotate);
-    // (compactResult renumérote déjà les panneaux)
+
+    // Post-optimisation : réduire les stocks + fusionner les panneaux
+    best = postOptimize(best, activeStocks, kerf, allowRotate);
 
     // Calcul du comparatif par stock pour l'affichage dans l'UI
     best.stockComparison = activeStocks.map(s => {
