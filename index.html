@@ -4697,16 +4697,22 @@ function exportDxfOssature() {
       }
     }
 
-    // OMEGA : union de tous les panneaux à la jonction (toujours continu)
+    // OMEGA aux jonctions — joint ≤20mm = Omega là où left et right se chevauchent
     for (const jx of Object.keys(junctions).map(Number).sort((a, b) => a - b)) {
       const { left, right } = junctions[jx];
-      const allRanges = [...new Set([...left, ...right].map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))
-      ].map(s => s.split('_').map(Number)).map(([s, e]) => ({ start: s, end: e }));
-      allRanges.sort((a, b) => a.start - b.start);
-      if (allRanges.length > 0) {
-        const merged = [{ ...allRanges[0] }];
-        for (let oi = 1; oi < allRanges.length; oi++) {
-          const ov = allRanges[oi], prev = merged[merged.length - 1];
+      const overlaps = [];
+      for (const pl of left) {
+        for (const pr of right) {
+          const ovStart = Math.max(pl.ymin, pr.ymin);
+          const ovEnd = Math.min(pl.ymax, pr.ymax);
+          if (ovEnd - ovStart > 1) overlaps.push({ start: ovStart, end: ovEnd });
+        }
+      }
+      overlaps.sort((a, b) => a.start - b.start);
+      if (overlaps.length > 0) {
+        const merged = [{ ...overlaps[0] }];
+        for (let oi = 1; oi < overlaps.length; oi++) {
+          const ov = overlaps[oi], prev = merged[merged.length - 1];
           if (ov.start <= prev.end + MAX_GAP) prev.end = Math.max(prev.end, ov.end);
           else merged.push({ ...ov });
         }
