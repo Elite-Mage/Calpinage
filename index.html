@@ -3008,22 +3008,8 @@ function parseDxfClientSide(text, fileName) {
         }
       }
 
-      // Fusionner les junctions proches (≤5mm) : des panneaux légèrement désalignés
-      // peuvent créer deux jx distincts pour la même colonne, causant de faux ZED_BORD.
-      const JUNC_TOL = 5;
-      const mergedJunctions1 = {};
       for (const jx of Object.keys(junctions).map(Number).sort((a, b) => a - b)) {
-        const nearby = Object.keys(mergedJunctions1).map(Number).find(mjx => Math.abs(jx - mjx) <= JUNC_TOL);
-        if (nearby !== undefined) {
-          mergedJunctions1[nearby].left.push(...junctions[jx].left);
-          mergedJunctions1[nearby].right.push(...junctions[jx].right);
-        } else {
-          mergedJunctions1[jx] = { left: [...junctions[jx].left], right: [...junctions[jx].right] };
-        }
-      }
-
-      for (const jx of Object.keys(mergedJunctions1).map(Number).sort((a, b) => a - b)) {
-        const { left, right } = mergedJunctions1[jx];
+        const { left, right } = junctions[jx];
         const overlaps = [];
         for (const pl of left) {
           for (const pr of right) {
@@ -3493,19 +3479,8 @@ function calcOssature() {
         }
       }
 
-      const mergedJunctions2 = {};
       for (const jx of Object.keys(junctions).map(Number).sort((a, b) => a - b)) {
-        const nearby = Object.keys(mergedJunctions2).map(Number).find(mjx => Math.abs(jx - mjx) <= 5);
-        if (nearby !== undefined) {
-          mergedJunctions2[nearby].left.push(...junctions[jx].left);
-          mergedJunctions2[nearby].right.push(...junctions[jx].right);
-        } else {
-          mergedJunctions2[jx] = { left: [...junctions[jx].left], right: [...junctions[jx].right] };
-        }
-      }
-
-      for (const jx of Object.keys(mergedJunctions2).map(Number).sort((a, b) => a - b)) {
-        const { left, right } = mergedJunctions2[jx];
+        const { left, right } = junctions[jx];
         const overlaps = [];
         for (const pl of left) {
           for (const pr of right) {
@@ -4615,21 +4590,9 @@ function exportDxfOssature() {
       }
     }
 
-    // Fusionner les junctions proches (≤5mm)
-    const mergedJunctions3 = {};
-    for (const jx of Object.keys(junctions).map(Number).sort((a, b) => a - b)) {
-      const nearby = Object.keys(mergedJunctions3).map(Number).find(mjx => Math.abs(jx - mjx) <= 5);
-      if (nearby !== undefined) {
-        mergedJunctions3[nearby].left.push(...junctions[jx].left);
-        mergedJunctions3[nearby].right.push(...junctions[jx].right);
-      } else {
-        mergedJunctions3[jx] = { left: [...junctions[jx].left], right: [...junctions[jx].right] };
-      }
-    }
-
     // OMEGA at junctions + gap ZED
-    for (const jx of Object.keys(mergedJunctions3).map(Number).sort((a, b) => a - b)) {
-      const { left, right } = mergedJunctions3[jx];
+    for (const jx of Object.keys(junctions).map(Number).sort((a, b) => a - b)) {
+      const { left, right } = junctions[jx];
 
       // Omega: merge Y-overlaps across floor joints
       const overlaps = [];
