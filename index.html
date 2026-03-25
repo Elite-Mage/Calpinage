@@ -3142,8 +3142,16 @@ function parseDxfClientSide(text, fileName) {
           }
           for (const m of merged) addOmega(Math.round(m.end - m.start));
         }
-        const leftI = [...new Set(left.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
-        const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
+        // N'inclure dans leftI/rightI que les panneaux ayant un overlap vertical réel à cette jonction
+        // pour éviter les faux ZED_BORD causés par des panneaux d'un autre étage au même jx.
+        const plSet = new Set(), prSet = new Set();
+        for (const pl of left) for (const pr of right)
+          if (Math.min(pl.ymax, pr.ymax) - Math.max(pl.ymin, pr.ymin) > 1) {
+            plSet.add(`${Math.round(pl.ymin)}_${Math.round(pl.ymax)}`);
+            prSet.add(`${Math.round(pr.ymin)}_${Math.round(pr.ymax)}`);
+          }
+        const leftI = [...plSet].map(s => s.split('_').map(Number));
+        const rightI = [...prSet].map(s => s.split('_').map(Number));
         const { leftGaps, rightGaps } = getGaps(leftI, rightI);
         for (const [gs, ge] of rightGaps) { const h = Math.round(ge - gs); if (h >= 100) addZed(h); }
         for (const [gs, ge] of leftGaps) { const h = Math.round(ge - gs); if (h >= 100) addZed(h); }
@@ -3613,8 +3621,14 @@ function calcOssature() {
           }
           for (const m of merged) cuts.omegaCuts.push({ len: Math.round(m.end - m.start), ref: 'jonction', structural: true });
         }
-        const leftI = [...new Set(left.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
-        const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
+        const plSet2 = new Set(), prSet2 = new Set();
+        for (const pl of left) for (const pr of right)
+          if (Math.min(pl.ymax, pr.ymax) - Math.max(pl.ymin, pr.ymin) > 1) {
+            plSet2.add(`${Math.round(pl.ymin)}_${Math.round(pl.ymax)}`);
+            prSet2.add(`${Math.round(pr.ymin)}_${Math.round(pr.ymax)}`);
+          }
+        const leftI = [...plSet2].map(s => s.split('_').map(Number));
+        const rightI = [...prSet2].map(s => s.split('_').map(Number));
         const { leftGaps, rightGaps } = getGaps(leftI, rightI);
         for (const [gs, ge] of rightGaps) { const h = Math.round(ge - gs); if (h >= 100) cuts.zedEdgeCuts.push({ len: h, ref: 'bord ouverture' }); }
         for (const [gs, ge] of leftGaps) { const h = Math.round(ge - gs); if (h >= 100) cuts.zedEdgeCuts.push({ len: h, ref: 'bord ouverture' }); }
@@ -4729,8 +4743,15 @@ function exportDxfOssature() {
       }
 
       // Gap ZED at junction (bord ouverture)
-      const leftI = [...new Set(left.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
-      const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
+      // Seuls les panneaux ayant un overlap vertical réel sont inclus pour éviter les faux ZED_BORD.
+      const plSetD = new Set(), prSetD = new Set();
+      for (const pl of left) for (const pr of right)
+        if (Math.min(pl.ymax, pr.ymax) - Math.max(pl.ymin, pr.ymin) > 1) {
+          plSetD.add(`${Math.round(pl.ymin)}_${Math.round(pl.ymax)}`);
+          prSetD.add(`${Math.round(pr.ymin)}_${Math.round(pr.ymax)}`);
+        }
+      const leftI = [...plSetD].map(s => s.split('_').map(Number));
+      const rightI = [...prSetD].map(s => s.split('_').map(Number));
       const { leftGaps, rightGaps } = getGaps(leftI, rightI);
       for (const [gs, ge] of rightGaps) { if (Math.round(ge - gs) >= 100) dxf.addRect(jx - ZED_W/2, gs, jx + ZED_W/2, ge, 'ZED_BORD', 6); }
       for (const [gs, ge] of leftGaps) { if (Math.round(ge - gs) >= 100) dxf.addRect(jx - ZED_W/2, gs, jx + ZED_W/2, ge, 'ZED_BORD', 6); }
