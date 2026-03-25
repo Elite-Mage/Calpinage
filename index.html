@@ -541,12 +541,6 @@
         <input type="number" id="kerfInput" value="3" min="0" max="15" step="0.5">
         <span style="font-size:13px;color:var(--text3);">mm par coupe</span>
       </div>
-      <div class="kerf-row" style="margin-top:8px;">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-          <input type="checkbox" id="allowRotation" style="accent-color:var(--accent);width:15px;height:15px;cursor:pointer;">
-          <span style="font-size:13px;color:var(--text3);">Autoriser rotation pièces ↻</span>
-        </label>
-      </div>
     </div>
 
     <!-- GROUP TABS -->
@@ -1245,24 +1239,11 @@ function expandPieces(pcs) {
 
 function allFittingStocks(activeStocks, pw, ph, kerf) {
   const fits = [], w = pw - kerf, h = ph - kerf;
-  const rot = getAllowRotation() && pw !== ph;
-  const seen = new Set();
-  function addStock(s, swapped) {
-    const key = s.id + (swapped ? 'r' : '');
-    if (seen.has(key)) return;
-    seen.add(key);
-    fits.push(swapped ? { ...s, w: s.h, h: s.w } : s);
-  }
   for (const s of activeStocks) {
-    // Stock naturel, pièce non tournée
-    if ((s.w >= pw || s.w >= w) && (s.h >= ph || s.h >= h)) addStock(s, false);
-    // Stock pivoté, pièce non tournée
-    if ((s.h >= pw || s.h >= w) && (s.w >= ph || s.w >= h)) addStock(s, true);
-    if (rot) {
-      // Stock naturel, pièce tournée (ph×pw dans s.w×s.h)
-      if ((s.w >= ph || s.w >= h) && (s.h >= pw || s.h >= w)) addStock(s, false);
-      // Stock pivoté, pièce tournée (=stock naturel + pièce non tournée, déjà couvert)
-    }
+    // Stock en orientation naturelle
+    if ((s.w >= pw || s.w >= w) && (s.h >= ph || s.h >= h)) fits.push(s);
+    // Stock pivoté (le panneau fournisseur peut être posé dans les deux sens)
+    else if ((s.h >= pw || s.h >= w) && (s.w >= ph || s.w >= h)) fits.push({ ...s, w: s.h, h: s.w });
   }
   return fits.sort((a, b) => a.w * a.h - b.w * b.h);
 }
@@ -1290,35 +1271,28 @@ function fitsInRect(rw, rh, pw, ph, kerf) {
   const w = pw - kerf, h = ph - kerf;
   return (rw >= pw || rw >= w) && (rh >= ph || rh >= h);
 }
-function getAllowRotation() { const el = document.getElementById('allowRotation'); return el ? el.checked : false; }
 function heuristicBestAreaFit(freeRects, pw, ph, kerf) {
   let bestIdx = -1, bestW = Infinity, bestR = false;
-  const rot = getAllowRotation() && pw !== ph;
   const w = pw-kerf, h = ph-kerf;
   for (let i = 0; i < freeRects.length; i++) {
     const r = freeRects[i];
     if (fitsInRect(r.w, r.h, pw, ph, kerf)) { const a = r.w*r.h - w*h; if (a < bestW) { bestW=a; bestIdx=i; bestR=false; } }
-    if (rot && fitsInRect(r.w, r.h, ph, pw, kerf)) { const a = r.w*r.h - w*h; if (a < bestW) { bestW=a; bestIdx=i; bestR=true; } }
   }
   return { idx: bestIdx, rotated: bestR };
 }
 function heuristicBestShortSideFit(freeRects, pw, ph, kerf) {
   let bestIdx = -1, bestS = Infinity, bestR = false;
-  const rot = getAllowRotation() && pw !== ph;
   for (let i = 0; i < freeRects.length; i++) {
     const r = freeRects[i];
     if (fitsInRect(r.w, r.h, pw, ph, kerf)) { const s = Math.min(r.w-pw, r.h-ph); if (s < bestS) { bestS=s; bestIdx=i; bestR=false; } }
-    if (rot && fitsInRect(r.w, r.h, ph, pw, kerf)) { const s = Math.min(r.w-ph, r.h-pw); if (s < bestS) { bestS=s; bestIdx=i; bestR=true; } }
   }
   return { idx: bestIdx, rotated: bestR };
 }
 function heuristicBottomLeft(freeRects, pw, ph, kerf) {
   let bestIdx = -1, bestY = Infinity, bestX = Infinity, bestR = false;
-  const rot = getAllowRotation() && pw !== ph;
   for (let i = 0; i < freeRects.length; i++) {
     const r = freeRects[i];
     if (fitsInRect(r.w, r.h, pw, ph, kerf)) { if (r.y < bestY || (r.y===bestY && r.x < bestX)) { bestY=r.y; bestX=r.x; bestIdx=i; bestR=false; } }
-    if (rot && fitsInRect(r.w, r.h, ph, pw, kerf)) { if (r.y < bestY || (r.y===bestY && r.x < bestX)) { bestY=r.y; bestX=r.x; bestIdx=i; bestR=true; } }
   }
   return { idx: bestIdx, rotated: bestR };
 }
