@@ -4542,8 +4542,40 @@ function clusterBounds(cluster) {
   return { xmin, xmax, ymin, ymax };
 }
 
-// Primary cluster = largest by area
-function primaryCluster(clusters) {
+// Find the original label position for a facade name from facadeLabels
+function facadeLabelPos(fname, facadeLabels) {
+  if (!facadeLabels || !facadeLabels.length) return null;
+  for (const lbl of facadeLabels) {
+    if (lbl[1] === fname) {
+      if (Array.isArray(lbl[0])) return { x: lbl[0][0], y: lbl[0][1] };
+      return { x: lbl[0], y: undefined };
+    }
+  }
+  return null;
+}
+
+// Find the cluster closest to a reference point (original label position)
+function closestClusterToLabel(clusters, refX, refY) {
+  if (clusters.length === 1) return clusters[0];
+  let best = clusters[0], bestDist = Infinity;
+  for (const cl of clusters) {
+    const b = clusterBounds(cl);
+    const cx = (b.xmin + b.xmax) / 2;
+    const cy = (b.ymin + b.ymax) / 2;
+    const d = (cx - refX) ** 2 + (refY !== undefined ? (cy - refY) ** 2 : 0);
+    if (d < bestDist) { bestDist = d; best = cl; }
+  }
+  return best;
+}
+
+// Select the best cluster for title placement:
+// use original label position if available, otherwise largest by area
+function titleCluster(panels, fname, facadeLabels) {
+  const clusters = clusterPanelsByX(panels);
+  if (clusters.length <= 1) return clusters[0];
+  const labelPos = facadeLabelPos(fname, facadeLabels);
+  if (labelPos) return closestClusterToLabel(clusters, labelPos.x, labelPos.y);
+  // Fallback: largest by area
   return clusters.reduce((best, cl) => {
     const b = clusterBounds(cl), pb = clusterBounds(best);
     return (b.xmax - b.xmin) * (b.ymax - b.ymin) > (pb.xmax - pb.xmin) * (pb.ymax - pb.ymin) ? cl : best;
@@ -4582,9 +4614,9 @@ function exportDxfPanneaux() {
   for (const fname of facadeNames) {
     const panels = byFacade[fname];
 
-    // Facade bounding box (for title placement only)
-    const primCl = primaryCluster(clusterPanelsByX(panels));
-    const primB = clusterBounds(primCl);
+    // Find the cluster closest to the original facade label for title placement
+    const tCl = titleCluster(panels, fname, projectFacadeLabels);
+    const primB = clusterBounds(tCl);
     const facH = primB.ymax - primB.ymin;
 
     // Title centered above the primary cluster of this facade
@@ -4700,8 +4732,9 @@ function exportDxfOssature() {
     }
 
     // Title above the primary cluster of this facade
-    const ossPrimCl = primaryCluster(clusterPanelsByX(allPanels));
-    const ossPrimB = clusterBounds(ossPrimCl);
+    // Find the cluster closest to the original facade label for title placement
+    const ossTCl = titleCluster(allPanels, fname, projectFacadeLabels);
+    const ossPrimB = clusterBounds(ossTCl);
     const facH = ossPrimB.ymax - ossPrimB.ymin;
     const titleH = Math.max(200, facH * 0.05);
     dxf.addText((ossPrimB.xmin + ossPrimB.xmax) / 2, ossPrimB.ymax + OSS_TITLE_MARGIN + titleH * 0.5, titleH, fname + ' - Ossature', 'TITRE', 7, 1);
