@@ -4550,17 +4550,6 @@ function primaryCluster(clusters) {
   }, clusters[0]);
 }
 
-// Title Y = max fymax of all clusters (any facade) overlapping in Y with the given cluster + margin
-function titleYAboveRow(refBounds, allClusterBounds, titleMargin, titleH) {
-  let maxFymax = refBounds.ymax;
-  for (const cb of allClusterBounds) {
-    if (cb.ymin < refBounds.ymax + 200 && cb.ymax > refBounds.ymin - 200) {
-      maxFymax = Math.max(maxFymax, cb.ymax);
-    }
-  }
-  return maxFymax + titleMargin + titleH * 0.5;
-}
-
 function exportDxfPanneaux() {
   if (!projectRectsSpatial || !projectRectsSpatial.length) {
     alert('Aucune donnee spatiale disponible. Importez un DXF d\'abord.');
@@ -4577,35 +4566,30 @@ function exportDxfPanneaux() {
   const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
   const facadeNames = Object.keys(byFacade).sort();
 
-  // Build cluster list for all facades (used for row-level title Y calculation)
-  const allClusterBoundsList = [];
-  const facadeClusters = {};
+  // One single outer contour around ALL panels
+  let gxmin = Infinity, gxmax = -Infinity, gymin = Infinity, gymax = -Infinity;
   for (const fname of facadeNames) {
-    const cls = clusterPanelsByX(byFacade[fname]);
-    facadeClusters[fname] = cls;
-    for (const cl of cls) allClusterBoundsList.push(clusterBounds(cl));
+    for (const p of byFacade[fname]) {
+      gxmin = Math.min(gxmin, p.xmin); gxmax = Math.max(gxmax, p.xmax);
+      gymin = Math.min(gymin, p.ymin); gymax = Math.max(gymax, p.ymax);
+    }
   }
+  const outerMargin = 200;
+  dxf.addRect(gxmin - outerMargin, gymin - outerMargin, gxmax + outerMargin, gymax + outerMargin, 'CONTOUR', 8);
 
-  const TITLE_MARGIN = 400;
+  const TITLE_MARGIN = 300;
 
   for (const fname of facadeNames) {
     const panels = byFacade[fname];
-    const clusters = facadeClusters[fname];
-    const primCl = primaryCluster(clusters);
+
+    // Facade bounding box (for title placement only)
+    const primCl = primaryCluster(clusterPanelsByX(panels));
     const primB = clusterBounds(primCl);
     const facH = primB.ymax - primB.ymin;
-    const margin = 100;
 
-    // One contour rectangle per cluster (no overlap between facades)
-    for (const cl of clusters) {
-      const b = clusterBounds(cl);
-      dxf.addRect(b.xmin - margin, b.ymin - margin, b.xmax + margin, b.ymax + margin, 'CONTOUR', 8);
-    }
-
-    // Title centered above primary cluster, elevated above all facades in the same row
+    // Title centered above the primary cluster of this facade
     const titleH = Math.max(200, facH * 0.05);
-    const titleY = titleYAboveRow(primB, allClusterBoundsList, TITLE_MARGIN, titleH);
-    dxf.addText((primB.xmin + primB.xmax) / 2, titleY, titleH, fname, 'TITRE', 7, 1);
+    dxf.addText((primB.xmin + primB.xmax) / 2, primB.ymax + TITLE_MARGIN + titleH * 0.5, titleH, fname, 'TITRE', 7, 1);
 
     // Sort panels: left to right, bottom to top
     const sorted = [...panels].sort((a, b) => {
@@ -4651,16 +4635,16 @@ function exportDxfOssature() {
   const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
   const facadeNames = Object.keys(byFacade).sort();
 
-  // Build clusters for all facades (for contour + title placement)
-  const ossFacadeClusters = {};
-  const ossAllClusterBounds = [];
+  // One single outer contour around ALL panels
+  let ossGxmin = Infinity, ossGxmax = -Infinity, ossGymin = Infinity, ossGymax = -Infinity;
   for (const fn of facadeNames) {
-    const cls = clusterPanelsByX(byFacade[fn]);
-    ossFacadeClusters[fn] = cls;
-    for (const cl of cls) ossAllClusterBounds.push(clusterBounds(cl));
+    for (const p of byFacade[fn]) {
+      ossGxmin = Math.min(ossGxmin, p.xmin); ossGxmax = Math.max(ossGxmax, p.xmax);
+      ossGymin = Math.min(ossGymin, p.ymin); ossGymax = Math.max(ossGymax, p.ymax);
+    }
   }
 
-  const OSS_TITLE_MARGIN = 400;
+  const OSS_TITLE_MARGIN = 300;
 
   function getGaps(leftIntervals, rightIntervals) {
     const events = [];
@@ -4692,6 +4676,9 @@ function exportDxfOssature() {
   dxf.addLayer('TITRE', 7);
   dxf.addLayer('TEXTE', 7);
 
+  // Single outer contour around all panels
+  const ossOuterMargin = 200;
+  dxf.addRect(ossGxmin - ossOuterMargin, ossGymin - ossOuterMargin, ossGxmax + ossOuterMargin, ossGymax + ossOuterMargin, 'CONTOUR', 8);
 
   for (const fname of facadeNames) {
     const allPanels = byFacade[fname];
@@ -4712,21 +4699,12 @@ function exportDxfOssature() {
       if (!hasAbove) bandeauSet.add(p);
     }
 
-    const ossClusters = ossFacadeClusters[fname];
-    const ossPrimCl = primaryCluster(ossClusters);
+    // Title above the primary cluster of this facade
+    const ossPrimCl = primaryCluster(clusterPanelsByX(allPanels));
     const ossPrimB = clusterBounds(ossPrimCl);
     const facH = ossPrimB.ymax - ossPrimB.ymin;
-    const margin = 100;
-
-    // One contour per cluster
-    for (const cl of ossClusters) {
-      const b = clusterBounds(cl);
-      dxf.addRect(b.xmin - margin, b.ymin - margin, b.xmax + margin, b.ymax + margin, 'CONTOUR', 8);
-    }
-
     const titleH = Math.max(200, facH * 0.05);
-    const titleY = titleYAboveRow(ossPrimB, ossAllClusterBounds, OSS_TITLE_MARGIN, titleH);
-    dxf.addText((ossPrimB.xmin + ossPrimB.xmax) / 2, titleY, titleH, fname + ' - Ossature', 'TITRE', 7, 1);
+    dxf.addText((ossPrimB.xmin + ossPrimB.xmax) / 2, ossPrimB.ymax + OSS_TITLE_MARGIN + titleH * 0.5, titleH, fname + ' - Ossature', 'TITRE', 7, 1);
 
     // Panel outlines in light gray
     for (const p of allPanels) {
