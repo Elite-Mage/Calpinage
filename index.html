@@ -4530,22 +4530,25 @@ function exportDxfPanneaux() {
   const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
   const facadeNames = Object.keys(byFacade).sort();
 
-  let dxfOY = 0; // empilage vertical des façades
   for (const fname of facadeNames) {
     const panels = byFacade[fname];
     let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
     for (const p of panels) {
-      fxmin = Math.min(fxmin, p.xmin); fxmax = Math.max(fxmax, p.xmax);
-      fymin = Math.min(fymin, p.ymin); fymax = Math.max(fymax, p.ymax);
+      fxmin = Math.min(fxmin, p.xmin);
+      fxmax = Math.max(fxmax, p.xmax);
+      fymin = Math.min(fymin, p.ymin);
+      fymax = Math.max(fymax, p.ymax);
     }
-    const facW = fxmax - fxmin, facH = fymax - fymin;
-    const tx = -fxmin, ty = -fymin + dxfOY;
+    const facW = fxmax - fxmin;
+    const facH = fymax - fymin;
 
+    // Facade outline at original coordinates
     const margin = 100;
-    dxf.addRect(-margin, dxfOY - margin, facW + margin, dxfOY + facH + margin, 'CONTOUR', 8);
+    dxf.addRect(fxmin - margin, fymin - margin, fxmax + margin, fymax + margin, 'CONTOUR', 8);
 
+    // Title above facade
     const titleH = Math.max(150, facH * 0.04);
-    dxf.addText(facW / 2, dxfOY + facH + margin + titleH * 0.5, titleH, fname, 'TITRE', 7, 1);
+    dxf.addText((fxmin + fxmax) / 2, fymax + margin + titleH * 0.5, titleH, fname, 'TITRE', 7, 1);
 
     // Sort panels: left to right, bottom to top
     const sorted = [...panels].sort((a, b) => {
@@ -4561,17 +4564,17 @@ function exportDxfPanneaux() {
       const pw = Math.round(p.xmax - p.xmin);
       const ph = Math.round(p.ymax - p.ymin);
 
-      dxf.addRect(p.xmin + tx, p.ymin + ty, p.xmax + tx, p.ymax + ty, 'PANNEAUX', aciColor);
+      // Panel rectangle at original coordinates
+      dxf.addRect(p.xmin, p.ymin, p.xmax, p.ymax, 'PANNEAUX', aciColor);
 
-      const cx = (p.xmin + p.xmax) / 2 + tx;
-      const cy = (p.ymin + p.ymax) / 2 + ty;
+      // Text labels at panel center
+      const cx = (p.xmin + p.xmax) / 2;
+      const cy = (p.ymin + p.ymax) / 2;
       const textH = Math.max(50, Math.min(120, Math.min(pw, ph) * 0.12));
 
       dxf.addText(cx, cy + textH * 0.8, textH, 'P' + (i + 1), 'TEXTE', aciColor, 1);
       dxf.addText(cx, cy - textH * 0.6, textH * 0.7, pw + 'x' + ph, 'COTES', 8, 1);
     }
-
-    dxfOY += facH + 2 * margin + titleH + 500;
   }
 
   const nom = chantier.nom || 'calpinage';
@@ -4623,7 +4626,7 @@ function exportDxfOssature() {
   dxf.addLayer('TITRE', 7);
   dxf.addLayer('TEXTE', 7);
 
-  let ossOY = 0;
+
   for (const fname of facadeNames) {
     const allPanels = byFacade[fname];
 
@@ -4645,26 +4648,29 @@ function exportDxfOssature() {
 
     let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
     for (const p of allPanels) {
-      fxmin = Math.min(fxmin, p.xmin); fxmax = Math.max(fxmax, p.xmax);
-      fymin = Math.min(fymin, p.ymin); fymax = Math.max(fymax, p.ymax);
+      fxmin = Math.min(fxmin, p.xmin);
+      fxmax = Math.max(fxmax, p.xmax);
+      fymin = Math.min(fymin, p.ymin);
+      fymax = Math.max(fymax, p.ymax);
     }
     const facW = fxmax - fxmin, facH = fymax - fymin;
-    // Translation : normalise chaque façade à (0, ossOY)
-    const tx = -fxmin, ty = -fymin + ossOY;
 
     const margin = 100;
-    dxf.addRect(-margin, ossOY - margin, facW + margin, ossOY + facH + margin, 'CONTOUR', 8);
+    dxf.addRect(fxmin - margin, fymin - margin, fxmax + margin, fymax + margin, 'CONTOUR', 8);
+
     const titleH = Math.max(150, facH * 0.04);
-    dxf.addText(facW / 2, ossOY + facH + margin + titleH * 0.5, titleH, fname + ' - Ossature', 'TITRE', 7, 1);
+    dxf.addText((fxmin + fxmax) / 2, fymax + margin + titleH * 0.5, titleH, fname + ' - Ossature', 'TITRE', 7, 1);
 
     // Panel outlines in light gray
     for (const p of allPanels) {
-      dxf.addRect(p.xmin + tx, p.ymin + ty, p.xmax + tx, p.ymax + ty, 'PANNEAUX_REF', 9);
+      dxf.addRect(p.xmin, p.ymin, p.xmax, p.ymax, 'PANNEAUX_REF', 9);
     }
 
-    const ZED_W = 40, OMEGA_W = 80;
+    // ── Pairwise junction detection for omega and zed ──
+    const ZED_W = 40;
+    const OMEGA_W = 80;
 
-    // Entraxe ZED per panel
+    // Entraxe ZED per panel: 600mm regular, 800mm bandeau
     for (const p of allPanels) {
       const pw = Math.round(p.xmax - p.xmin);
       const ent = bandeauSet.has(p) ? ENTRAXE_BANDEAU : ENTRAXE_REGULAR;
@@ -4673,8 +4679,8 @@ function exportDxfOssature() {
       if (nz > 0) {
         const step = pw / (nz + 1);
         for (let z = 1; z <= nz; z++) {
-          const cx = p.xmin + z * step + tx;
-          dxf.addRect(cx - ZED_W/2, p.ymin + ty, cx + ZED_W/2, p.ymax + ty, layer, 2);
+          const cx = p.xmin + z * step;
+          dxf.addRect(cx - ZED_W/2, p.ymin, cx + ZED_W/2, p.ymax, layer, 2);
         }
       }
     }
@@ -4697,9 +4703,11 @@ function exportDxfOssature() {
       }
     }
 
-    // OMEGA aux jonctions — joint ≤20mm = Omega là où left et right se chevauchent
+    // OMEGA at junctions + gap ZED
     for (const jx of Object.keys(junctions).map(Number).sort((a, b) => a - b)) {
       const { left, right } = junctions[jx];
+
+      // Omega: merge Y-overlaps across floor joints
       const overlaps = [];
       for (const pl of left) {
         for (const pr of right) {
@@ -4712,24 +4720,29 @@ function exportDxfOssature() {
       if (overlaps.length > 0) {
         const merged = [{ ...overlaps[0] }];
         for (let oi = 1; oi < overlaps.length; oi++) {
-          const ov = overlaps[oi], prev = merged[merged.length - 1];
+          const ov = overlaps[oi];
+          const prev = merged[merged.length - 1];
           if (ov.start <= prev.end + MAX_GAP) prev.end = Math.max(prev.end, ov.end);
           else merged.push({ ...ov });
         }
-        for (const m of merged)
-          dxf.addRect(jx + tx - OMEGA_W/2, m.start + ty, jx + tx + OMEGA_W/2, m.end + ty, 'OMEGA', 4);
+        for (const m of merged) dxf.addRect(jx - OMEGA_W/2, m.start, jx + OMEGA_W/2, m.end, 'OMEGA', 4);
       }
+
+      // Gap ZED at junction (bord ouverture)
+      const leftI = [...new Set(left.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
+      const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
+      const { leftGaps, rightGaps } = getGaps(leftI, rightI);
+      for (const [gs, ge] of rightGaps) { if (Math.round(ge - gs) >= 100) dxf.addRect(jx - ZED_W/2, gs, jx + ZED_W/2, ge, 'ZED_BORD', 6); }
+      for (const [gs, ge] of leftGaps) { if (Math.round(ge - gs) >= 100) dxf.addRect(jx - ZED_W/2, gs, jx + ZED_W/2, ge, 'ZED_BORD', 6); }
     }
 
-    // ZED bord libre (panel face à une ouverture, pas bord de façade)
+    // Free-edge ZED (bord sans voisin, mais pas bord de façade)
     for (const p of allPanels) {
       if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP))
-        dxf.addRect(p.xmax + tx - ZED_W/2, p.ymin + ty, p.xmax + tx + ZED_W/2, p.ymax + ty, 'ZED_BORD', 6);
+        dxf.addRect(p.xmax - ZED_W/2, p.ymin, p.xmax + ZED_W/2, p.ymax, 'ZED_BORD', 6);
       if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP))
-        dxf.addRect(p.xmin + tx - ZED_W/2, p.ymin + ty, p.xmin + tx + ZED_W/2, p.ymax + ty, 'ZED_BORD', 6);
+        dxf.addRect(p.xmin - ZED_W/2, p.ymin, p.xmin + ZED_W/2, p.ymax, 'ZED_BORD', 6);
     }
-
-    ossOY += facH + 2 * margin + titleH + 500;
   }
 
   const nom = chantier.nom || 'calpinage';
