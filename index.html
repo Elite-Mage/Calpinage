@@ -4728,36 +4728,12 @@ function exportDxfOssature() {
       }
     }
 
-    // ZED violet : uniquement là où deux panneaux se font face avec gap > 20mm
-    const zedEdges = {};
+    // ZED bord libre : gap >20mm face à une ouverture, pas aux bords absolus de façade
     for (const p of allPanels) {
-      for (const q of allPanels) {
-        if (q === p) continue;
-        const gap = q.xmin - p.xmax;
-        if (gap > MAX_GAP) {
-          const ovStart = Math.max(p.ymin, q.ymin);
-          const ovEnd = Math.min(p.ymax, q.ymax);
-          if (ovEnd - ovStart > 1) {
-            const rk = Math.round(p.xmax);
-            if (!zedEdges[rk]) zedEdges[rk] = { x: p.xmax, segs: [] };
-            zedEdges[rk].segs.push([ovStart, ovEnd]);
-            const lk = Math.round(q.xmin);
-            if (!zedEdges[lk]) zedEdges[lk] = { x: q.xmin, segs: [] };
-            zedEdges[lk].segs.push([ovStart, ovEnd]);
-          }
-        }
-      }
-    }
-    for (const { x, segs } of Object.values(zedEdges)) {
-      segs.sort((a, b) => a[0] - b[0]);
-      const merged = [[...segs[0]]];
-      for (const [s, e] of segs.slice(1)) {
-        const prev = merged[merged.length - 1];
-        if (s <= prev[1] + 1) prev[1] = Math.max(prev[1], e);
-        else merged.push([s, e]);
-      }
-      for (const [s, e] of merged)
-        dxf.addRect(x + tx - ZED_W/2, s + ty, x + tx + ZED_W/2, e + ty, 'ZED_BORD', 6);
+      if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP))
+        dxf.addRect(p.xmax + tx - ZED_W/2, p.ymin + ty, p.xmax + tx + ZED_W/2, p.ymax + ty, 'ZED_BORD', 6);
+      if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP))
+        dxf.addRect(p.xmin + tx - ZED_W/2, p.ymin + ty, p.xmin + tx + ZED_W/2, p.ymax + ty, 'ZED_BORD', 6);
     }
 
     ossOY += facH + 2 * margin + titleH + 500;
