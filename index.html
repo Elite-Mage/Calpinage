@@ -606,8 +606,12 @@
       <div class="card-title">Configuration ossature</div>
       <div class="oss-config">
         <div>
-          <label>Entraxe max (mm)</label>
+          <label>Entraxe Zed — panneaux (mm)</label>
           <input type="number" id="ossEntaxeMax" value="600" min="100" max="1200" step="50" oninput="ossatureConfig.entaxeMax=+this.value; renderOssature(); scheduleSave();">
+        </div>
+        <div>
+          <label>Entraxe Zed — bandeau toiture (mm)</label>
+          <input type="number" id="ossEntaxeBandeau" value="800" min="100" max="1200" step="50" oninput="ossatureConfig.entaxeBandeau=+this.value; renderOssature(); scheduleSave();">
         </div>
         <div>
           <label>Trait de scie oss. (mm)</label>
@@ -818,7 +822,7 @@ let nextGroupId = 3;
 let activeGroupId = 1;
 let allResults = null;
 let activeSection = 'panneaux'; // 'panneaux' | 'ossature' | 'devis'
-let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0 };
+let ossatureConfig = { entaxeMax: 600, entaxeBandeau: 800, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0 };
 let devisConfig = { prixMO: '' };
 let fixationConfig = { prixFixation: '' };
 let projectRectsSpatial = []; // Stored spatial rectangles from DXF parsing
@@ -2307,8 +2311,9 @@ function applyProjectData(data) {
     activeGroupId = data.activeGroupId || groups[0]?.id;
   }
   if (data.ossatureConfig) {
-    ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, ...data.ossatureConfig };
+    ossatureConfig = { entaxeMax: 600, entaxeBandeau: 800, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, ...data.ossatureConfig };
     document.getElementById('ossEntaxeMax').value = ossatureConfig.entaxeMax || 600;
+    document.getElementById('ossEntaxeBandeau').value = ossatureConfig.entaxeBandeau || 800;
     document.getElementById('ossKerf').value = ossatureConfig.kerf || 0;
     document.getElementById('ossPrixOmega').value = ossatureConfig.prixOmega || '';
     document.getElementById('ossPrixZed').value = ossatureConfig.prixZed || '';
@@ -3045,8 +3050,8 @@ function parseDxfClientSide(text, fileName) {
 
   // Ossature calculation (same logic as parse_dxf.py)
   function calcOssatureFacades(rSpatial, fLabels) {
-    const ENTRAXE_REGULAR = 600;
-    const ENTRAXE_BANDEAU = 800;
+    const ENTRAXE_REGULAR = ossatureConfig.entaxeMax || 600;
+    const ENTRAXE_BANDEAU = ossatureConfig.entaxeBandeau || 800;
     const JOINT = 8;
     const MAX_GAP = 20;
     const BANDEAU_TOITURE_MAX_H = 1600;
