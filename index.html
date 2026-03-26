@@ -4789,16 +4789,34 @@ function exportDxfOssature() {
         const bxMin = sortedBottom[0].xmin;
         const bxMax = sortedBottom[sortedBottom.length - 1].xmax;
 
-        // Collecter les X des Zeds violet qui existent déjà dans l'ossature principale
-        // (jonctions partielles + bords internes d'ouvertures — PAS les bords extérieurs de façade)
-        const violetXs = new Set();
+        // ── Étape 1 : collecter et dessiner les profils existants étendus ──
 
-        // Jonctions : gap Zeds qui touchent fymin
+        // Positions X des Zeds jaunes étendus (issus de l'entraxe panels)
+        const extYellowXs = [];
+        for (const p of bottomPanels) {
+          const pw = p.xmax - p.xmin;
+          const nz = Math.max(0, Math.ceil(pw / ENTRAXE_REGULAR) - 1);
+          if (nz > 0) {
+            const step = pw / (nz + 1);
+            for (let z = 1; z <= nz; z++) {
+              const cx = p.xmin + z * step;
+              extYellowXs.push(cx);
+              dxf.addRect(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2);
+            }
+          }
+        }
+
+        // Positions X des Zeds violet intérieurs (jonctions partielles + ouvertures)
+        // PAS les bords extérieurs de façade
+        const violetXs = new Set();
         for (const jx of Object.keys(junctions).map(Number)) {
           const { left, right } = junctions[jx];
           const hasBottom = left.some(p => Math.abs(p.ymin - fymin) < 5)
                          || right.some(p => Math.abs(p.ymin - fymin) < 5);
           if (!hasBottom) continue;
+          // Étendre l'oméga de jonction
+          dxf.addRect(jx - OMEGA_W/2, extY1, jx + OMEGA_W/2, extY2, 'OMEGA', 4);
+          // Vérifier s'il y a un gap Zed touchant fymin
           const leftI  = [...new Set(left.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
           const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
           const { leftGaps, rightGaps } = getGaps(leftI, rightI);
@@ -4806,36 +4824,38 @@ function exportDxfOssature() {
             if (gs <= fymin + 5 && Math.round(ge - gs) >= 100) violetXs.add(jx);
           }
         }
-
-        // Bords libres internes (ouvertures, portes) — pas les bords extérieurs de façade
         for (const p of bottomPanels) {
           if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP))
             violetXs.add(Math.round(p.xmax));
           if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP))
             violetXs.add(Math.round(p.xmin));
         }
-
         const sortedVioletXs = [...violetXs].sort((a, b) => a - b);
-
-        // 1. Continuer les Zeds violet vers le bas (sans violet aux bords de façade)
         for (const vx of sortedVioletXs) {
           dxf.addRect(vx - ZED_W/2, extY1, vx + ZED_W/2, extY2, 'ZED_BORD', 6);
         }
 
-        // 2. Remplir toutes les sections du prolongement avec des Zeds jaune à pEnt
-        // Les sections sont délimitées par les Zeds violet + les bords de façade
+        // ── Étape 2 : combler les trous > pEnt entre profils existants ──
+        // Toutes les positions de profils dans le prolongement, par section entre violet
         const boundaries = [bxMin, ...sortedVioletXs, bxMax];
         for (let i = 0; i < boundaries.length - 1; i++) {
           const segStart = boundaries[i];
           const segEnd   = boundaries[i + 1];
-          const segW     = segEnd - segStart;
-          if (segW <= ZED_W) continue; // trop étroit
-          const nz = Math.max(0, Math.ceil(segW / pEnt) - 1);
-          if (nz > 0) {
-            const step = segW / (nz + 1);
-            for (let z = 1; z <= nz; z++) {
-              const cx = segStart + z * step;
-              dxf.addRect(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2);
+          // Profils déjà présents dans cette section (jaunes étendus)
+          const inSeg = extYellowXs.filter(x => x > segStart + ZED_W && x < segEnd - ZED_W).sort((a, b) => a - b);
+          // Tous les points de référence dans la section (bords + profils existants)
+          const pts = [segStart, ...inSeg, segEnd];
+          for (let j = 0; j < pts.length - 1; j++) {
+            const gap = pts[j + 1] - pts[j];
+            if (gap <= pEnt) continue; // déjà couvert
+            // Ajouter des Zeds jaunes pour combler
+            const nz = Math.max(0, Math.ceil(gap / pEnt) - 1);
+            if (nz > 0) {
+              const step = gap / (nz + 1);
+              for (let z = 1; z <= nz; z++) {
+                const cx = pts[j] + z * step;
+                dxf.addRect(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2);
+              }
             }
           }
         }
