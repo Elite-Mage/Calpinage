@@ -4672,9 +4672,12 @@ function exportDxfOssature() {
   dxf.addLayer('TITRE', 7);
   dxf.addLayer('TEXTE', 7);
 
-  // Single outer contour around all panels
+  const prol = (ossatureConfig.prolongementEnabled && ossatureConfig.prolongement > 0) ? ossatureConfig.prolongement : 0;
+  const pEnt = ossatureConfig.prolongEntaxe || ENTRAXE_REGULAR;
+
+  // Single outer contour around all panels (extended for prolongement)
   const ossOuterMargin = 200;
-  dxf.addRect(ossGxmin - ossOuterMargin, ossGymin - ossOuterMargin, ossGxmax + ossOuterMargin, ossGymax + ossOuterMargin, 'CONTOUR', 8);
+  dxf.addRect(ossGxmin - ossOuterMargin, ossGymin - ossOuterMargin - prol, ossGxmax + ossOuterMargin, ossGymax + ossOuterMargin, 'CONTOUR', 8);
 
   for (const fname of facadeNames) {
     const allPanels = byFacade[fname];
@@ -4688,11 +4691,11 @@ function exportDxfOssature() {
     }
     const facH = fymax - fymin;
 
-    // Title X = original label X, Title Y = above topmost panels
+    // Title X = original label X, Title Y = above topmost panels (+ prolongement room)
     const ossLblX = facadeLabelX(fname, projectFacadeLabels);
     const ossTitleX = ossLblX !== null ? ossLblX : (fxmin + fxmax) / 2;
     const titleH = Math.max(200, facH * 0.05);
-    dxf.addText(ossTitleX, fymax + OSS_TITLE_MARGIN + titleH * 0.5, titleH, fname + ' - Ossature', 'TITRE', 7, 1);
+    dxf.addText(ossTitleX, fymax + OSS_TITLE_MARGIN + prol + titleH * 0.5, titleH, fname + ' - Ossature', 'TITRE', 7, 1);
 
     // Panel outlines in light gray
     for (const p of allPanels) {
@@ -4703,15 +4706,23 @@ function exportDxfOssature() {
     const ZED_W = 40;
     const OMEGA_W = 80;
 
-    // Entraxe ZED per panel (même entraxe pour tous les panneaux)
+    // Track positions of extended profiles for prolongement gap-fill
+    const extYellowXs = [];
+    const omegaXsExt = [];
+    const violetXsSet = new Set();
+
+    // Entraxe ZED per panel — si panneau en bas et prolongement actif, on étend vers le bas
     for (const p of allPanels) {
       const pw = Math.round(p.xmax - p.xmin);
       const nz = Math.max(0, Math.ceil(pw / ENTRAXE_REGULAR) - 1);
       if (nz > 0) {
         const step = pw / (nz + 1);
+        const isBottom = prol > 0 && Math.abs(p.ymin - fymin) < 5;
+        const yStart = isBottom ? fymin - prol : p.ymin;
         for (let z = 1; z <= nz; z++) {
           const cx = p.xmin + z * step;
-          dxf.addRect(cx - ZED_W/2, p.ymin, cx + ZED_W/2, p.ymax, 'ZED_ENTRAXE', 2);
+          dxf.addRect(cx - ZED_W/2, yStart, cx + ZED_W/2, p.ymax, 'ZED_ENTRAXE', 2);
+          if (isBottom) extYellowXs.push(cx);
         }
       }
     }
@@ -4756,106 +4767,72 @@ function exportDxfOssature() {
           if (ov.start <= prev.end + MAX_GAP) prev.end = Math.max(prev.end, ov.end);
           else merged.push({ ...ov });
         }
-        for (const m of merged) dxf.addRect(jx - OMEGA_W/2, m.start, jx + OMEGA_W/2, m.end, 'OMEGA', 4);
+        for (const m of merged) {
+          // Étendre l'Oméga vers le bas si segment touche fymin et prolongement actif
+          const mStart = (prol > 0 && m.start <= fymin + 5) ? fymin - prol : m.start;
+          dxf.addRect(jx - OMEGA_W/2, mStart, jx + OMEGA_W/2, m.end, 'OMEGA', 4);
+          if (prol > 0 && m.start <= fymin + 5) omegaXsExt.push(jx);
+        }
       }
 
-      // Gap ZED at junction (bord ouverture)
+      // Gap ZED at junction (bord ouverture) — étendu vers le bas si touche fymin
       const leftI = [...new Set(left.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
       const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
       const { leftGaps, rightGaps } = getGaps(leftI, rightI);
-      for (const [gs, ge] of rightGaps) { if (Math.round(ge - gs) >= 100) dxf.addRect(jx - ZED_W/2, gs, jx + ZED_W/2, ge, 'ZED_BORD', 6); }
-      for (const [gs, ge] of leftGaps) { if (Math.round(ge - gs) >= 100) dxf.addRect(jx - ZED_W/2, gs, jx + ZED_W/2, ge, 'ZED_BORD', 6); }
+      for (const [gs, ge] of rightGaps) {
+        if (Math.round(ge - gs) >= 100) {
+          const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : gs;
+          dxf.addRect(jx - ZED_W/2, gsExt, jx + ZED_W/2, ge, 'ZED_BORD', 6);
+          if (prol > 0 && gs <= fymin + 5) violetXsSet.add(jx);
+        }
+      }
+      for (const [gs, ge] of leftGaps) {
+        if (Math.round(ge - gs) >= 100) {
+          const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : gs;
+          dxf.addRect(jx - ZED_W/2, gsExt, jx + ZED_W/2, ge, 'ZED_BORD', 6);
+          if (prol > 0 && gs <= fymin + 5) violetXsSet.add(jx);
+        }
+      }
     }
 
-    // Free-edge ZED (bord sans voisin, mais pas bord de façade)
+    // Free-edge ZED (bord sans voisin, mais pas bord de façade) — étendu vers le bas si touche fymin
     for (const p of allPanels) {
-      if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP))
-        dxf.addRect(p.xmax - ZED_W/2, p.ymin, p.xmax + ZED_W/2, p.ymax, 'ZED_BORD', 6);
-      if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP))
-        dxf.addRect(p.xmin - ZED_W/2, p.ymin, p.xmin + ZED_W/2, p.ymax, 'ZED_BORD', 6);
+      const isBottomP = prol > 0 && Math.abs(p.ymin - fymin) < 5;
+      const yStart = isBottomP ? fymin - prol : p.ymin;
+      if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP)) {
+        dxf.addRect(p.xmax - ZED_W/2, yStart, p.xmax + ZED_W/2, p.ymax, 'ZED_BORD', 6);
+        if (isBottomP) violetXsSet.add(Math.round(p.xmax));
+      }
+      if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP)) {
+        dxf.addRect(p.xmin - ZED_W/2, yStart, p.xmin + ZED_W/2, p.ymax, 'ZED_BORD', 6);
+        if (isBottomP) violetXsSet.add(Math.round(p.xmin));
+      }
     }
 
-    // ── Prolongement bas de l'ossature ──
-    if (ossatureConfig.prolongementEnabled && ossatureConfig.prolongement > 0) {
-      const prol = ossatureConfig.prolongement;
-      const pEnt = ossatureConfig.prolongEntaxe || ENTRAXE_REGULAR; // entraxe séparé pour le prolongement
-      const extY1 = fymin - prol;
-      const extY2 = fymin;
-
-      // Panneaux qui touchent le bas de la façade
+    // ── Prolongement bas — remplissage des trous uniquement ──
+    // Les profils existants ont déjà été étendus dans les boucles ci-dessus.
+    // On ajoute ici uniquement les Zeds jaunes pour combler les trous > pEnt.
+    if (prol > 0) {
       const bottomPanels = allPanels.filter(p => Math.abs(p.ymin - fymin) < 5);
       if (bottomPanels.length > 0) {
         const sortedBottom = [...bottomPanels].sort((a, b) => a.xmin - b.xmin);
         const bxMin = sortedBottom[0].xmin;
         const bxMax = sortedBottom[sortedBottom.length - 1].xmax;
-
-        // ── Étape 1 : collecter et dessiner les profils existants étendus ──
-
-        // Positions X des Zeds jaunes étendus (issus de l'entraxe panels)
-        const extYellowXs = [];
-        for (const p of bottomPanels) {
-          const pw = p.xmax - p.xmin;
-          const nz = Math.max(0, Math.ceil(pw / ENTRAXE_REGULAR) - 1);
-          if (nz > 0) {
-            const step = pw / (nz + 1);
-            for (let z = 1; z <= nz; z++) {
-              const cx = p.xmin + z * step;
-              extYellowXs.push(cx);
-              dxf.addRect(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2);
-            }
-          }
-        }
-
-        // Séparer les jonctions en bas : avec gap (→ Zed violet) vs sans gap (→ Oméga)
-        const omegaXsExt = [];
-        const violetXs = new Set();
-        for (const jx of Object.keys(junctions).map(Number)) {
-          const { left, right } = junctions[jx];
-          const hasBottom = left.some(p => Math.abs(p.ymin - fymin) < 5)
-                         || right.some(p => Math.abs(p.ymin - fymin) < 5);
-          if (!hasBottom) continue;
-          const leftI  = [...new Set(left.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
-          const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
-          const { leftGaps, rightGaps } = getGaps(leftI, rightI);
-          const hasGapAtBottom = [...leftGaps, ...rightGaps].some(([gs, ge]) => gs <= fymin + 5 && Math.round(ge - gs) >= 100);
-          if (hasGapAtBottom) {
-            // Ouverture en bas → Zed violet (pas d'oméga)
-            violetXs.add(jx);
-          } else {
-            // Jonction pleine → Oméga (pas de violet)
-            omegaXsExt.push(jx);
-            dxf.addRect(jx - OMEGA_W/2, extY1, jx + OMEGA_W/2, extY2, 'OMEGA', 4);
-          }
-        }
-        // Bords d'ouverture intérieurs (ouvertures entre panneaux non-adjacents, PAS bords façade)
-        for (const p of bottomPanels) {
-          if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP))
-            violetXs.add(Math.round(p.xmax));
-          if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP))
-            violetXs.add(Math.round(p.xmin));
-        }
-        const sortedVioletXs = [...violetXs].sort((a, b) => a - b);
-        for (const vx of sortedVioletXs) {
-          dxf.addRect(vx - ZED_W/2, extY1, vx + ZED_W/2, extY2, 'ZED_BORD', 6);
-        }
-
-        // ── Étape 2 : combler les trous > pEnt entre profils existants ──
-        // Les Omégas étendus comptent aussi comme profils existants pour éviter les doublons
+        const extY1 = fymin - prol;
+        const extY2 = fymin;
+        const sortedVioletXs = [...violetXsSet].sort((a, b) => a - b);
         const boundaries = [bxMin, ...sortedVioletXs, bxMax];
         for (let i = 0; i < boundaries.length - 1; i++) {
           const segStart = boundaries[i];
           const segEnd   = boundaries[i + 1];
-          // Profils déjà présents dans cette section : jaunes étendus + omégas étendus
           const inSeg = [
             ...extYellowXs.filter(x => x > segStart + ZED_W && x < segEnd - ZED_W),
             ...omegaXsExt.filter(x => x > segStart + ZED_W && x < segEnd - ZED_W),
           ].sort((a, b) => a - b);
-          // Tous les points de référence dans la section (bords + profils existants)
           const pts = [segStart, ...inSeg, segEnd];
           for (let j = 0; j < pts.length - 1; j++) {
             const gap = pts[j + 1] - pts[j];
-            if (gap <= pEnt) continue; // déjà couvert
-            // Ajouter des Zeds jaunes pour combler
+            if (gap <= pEnt) continue;
             const nz = Math.max(0, Math.ceil(gap / pEnt) - 1);
             if (nz > 0) {
               const step = gap / (nz + 1);
