@@ -4674,7 +4674,7 @@ function exportDxfOssature() {
   const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
   const facadeNames = Object.keys(byFacade).sort();
 
-  const OSS_TITLE_MARGIN = 300;
+  const OSS_TITLE_MARGIN = 600;
   const prol = (ossatureConfig.prolongementEnabled && ossatureConfig.prolongement > 0) ? ossatureConfig.prolongement : 0;
   const pEnt = ossatureConfig.prolongEntaxe || ENTRAXE_REGULAR;
 
