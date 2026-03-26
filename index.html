@@ -4530,15 +4530,35 @@ function exportDxfPanneaux() {
   const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
   const facadeNames = Object.keys(byFacade).sort();
 
+  // Pre-compute bounding boxes for all facades
+  const facadeBoundsPan = {};
   for (const fname of facadeNames) {
     const panels = byFacade[fname];
     let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
     for (const p of panels) {
-      fxmin = Math.min(fxmin, p.xmin);
-      fxmax = Math.max(fxmax, p.xmax);
-      fymin = Math.min(fymin, p.ymin);
-      fymax = Math.max(fymax, p.ymax);
+      fxmin = Math.min(fxmin, p.xmin); fxmax = Math.max(fxmax, p.xmax);
+      fymin = Math.min(fymin, p.ymin); fymax = Math.max(fymax, p.ymax);
     }
+    facadeBoundsPan[fname] = { fxmin, fxmax, fymin, fymax };
+  }
+
+  // For title Y: use the max fymax among all facades overlapping in Y (same row)
+  function rowTitleY_pan(fname, titleMargin, titleH) {
+    const b = facadeBoundsPan[fname];
+    let maxFymax = b.fymax;
+    for (const other of facadeNames) {
+      if (other === fname) continue;
+      const ob = facadeBoundsPan[other];
+      if (ob.fymin < b.fymax + 200 && ob.fymax > b.fymin - 200) {
+        maxFymax = Math.max(maxFymax, ob.fymax);
+      }
+    }
+    return maxFymax + titleMargin + titleH * 0.5;
+  }
+
+  for (const fname of facadeNames) {
+    const panels = byFacade[fname];
+    const { fxmin, fxmax, fymin, fymax } = facadeBoundsPan[fname];
     const facW = fxmax - fxmin;
     const facH = fymax - fymin;
 
@@ -4546,9 +4566,10 @@ function exportDxfPanneaux() {
     const margin = 100;
     dxf.addRect(fxmin - margin, fymin - margin, fxmax + margin, fymax + margin, 'CONTOUR', 8);
 
-    // Title above facade
-    const titleH = Math.max(150, facH * 0.04);
-    dxf.addText((fxmin + fxmax) / 2, fymax + margin + titleH * 0.5, titleH, fname, 'TITRE', 7, 1);
+    // Title above the row (all facades in same row share the same baseline Y)
+    const titleH = Math.max(200, facH * 0.05);
+    const titleMargin = 400;
+    dxf.addText((fxmin + fxmax) / 2, rowTitleY_pan(fname, titleMargin, titleH), titleH, fname, 'TITRE', 7, 1);
 
     // Sort panels: left to right, bottom to top
     const sorted = [...panels].sort((a, b) => {
@@ -4595,6 +4616,31 @@ function exportDxfOssature() {
 
   const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
   const facadeNames = Object.keys(byFacade).sort();
+
+  // Pre-compute bounding boxes for all facades (for title placement)
+  const facadeBoundsOss = {};
+  for (const fn of facadeNames) {
+    const panels = byFacade[fn];
+    let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
+    for (const p of panels) {
+      fxmin = Math.min(fxmin, p.xmin); fxmax = Math.max(fxmax, p.xmax);
+      fymin = Math.min(fymin, p.ymin); fymax = Math.max(fymax, p.ymax);
+    }
+    facadeBoundsOss[fn] = { fxmin, fxmax, fymin, fymax };
+  }
+
+  function rowTitleY_oss(fname, titleMargin, titleH) {
+    const b = facadeBoundsOss[fname];
+    let maxFymax = b.fymax;
+    for (const other of facadeNames) {
+      if (other === fname) continue;
+      const ob = facadeBoundsOss[other];
+      if (ob.fymin < b.fymax + 200 && ob.fymax > b.fymin - 200) {
+        maxFymax = Math.max(maxFymax, ob.fymax);
+      }
+    }
+    return maxFymax + titleMargin + titleH * 0.5;
+  }
 
   function getGaps(leftIntervals, rightIntervals) {
     const events = [];
@@ -4646,20 +4692,15 @@ function exportDxfOssature() {
       if (!hasAbove) bandeauSet.add(p);
     }
 
-    let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
-    for (const p of allPanels) {
-      fxmin = Math.min(fxmin, p.xmin);
-      fxmax = Math.max(fxmax, p.xmax);
-      fymin = Math.min(fymin, p.ymin);
-      fymax = Math.max(fymax, p.ymax);
-    }
+    const { fxmin, fxmax, fymin, fymax } = facadeBoundsOss[fname];
     const facW = fxmax - fxmin, facH = fymax - fymin;
 
     const margin = 100;
     dxf.addRect(fxmin - margin, fymin - margin, fxmax + margin, fymax + margin, 'CONTOUR', 8);
 
-    const titleH = Math.max(150, facH * 0.04);
-    dxf.addText((fxmin + fxmax) / 2, fymax + margin + titleH * 0.5, titleH, fname + ' - Ossature', 'TITRE', 7, 1);
+    const titleH = Math.max(200, facH * 0.05);
+    const titleMargin = 400;
+    dxf.addText((fxmin + fxmax) / 2, rowTitleY_oss(fname, titleMargin, titleH), titleH, fname + ' - Ossature', 'TITRE', 7, 1);
 
     // Panel outlines in light gray
     for (const p of allPanels) {
