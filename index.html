@@ -2676,6 +2676,7 @@ function parseDxfClientSide(text, fileName) {
         if (groupCode === 20) currentEntity.props.insY = parseFloat(value);
       } else if (currentType === 'TEXT' || currentType === 'MTEXT') {
         if (groupCode === 10) currentEntity.props.x = parseFloat(value);
+        if (groupCode === 20) currentEntity.props.y = parseFloat(value);
         if (groupCode === 1) currentEntity.props.text = value;
       }
     }
@@ -2727,19 +2728,26 @@ function parseDxfClientSide(text, fileName) {
   entities.length = 0;
   for (const e of expandedEntities) entities.push(e);
 
-  // Extract facade labels
+  // Extract facade labels with 2D positions [[x, y], text]
   const facadeLabels = entities
     .filter(e => (e.type === 'TEXT' || e.type === 'MTEXT') && e.props.text && e.props.x !== undefined)
-    .map(e => [e.props.x, e.props.text.trim()])
-    .sort((a, b) => a[0] - b[0]);
+    .map(e => [[e.props.x, e.props.y || 0], e.props.text.trim()])
+    .sort((a, b) => a[0][0] - b[0][0]);
 
   // Auto-numérotation si pas de texte dans le DXF
   const autoNumberFacades = facadeLabels.length === 0;
 
-  function nearestFacade(xcenter) {
+  function nearestFacade(xcenter, ycenter) {
+    if (ycenter !== undefined) {
+      return facadeLabels.reduce((best, lbl) => {
+        const d = (lbl[0][0] - xcenter)**2 + (lbl[0][1] - ycenter)**2;
+        const bd = (best[0][0] - xcenter)**2 + (best[0][1] - ycenter)**2;
+        return d < bd ? lbl : best;
+      }, facadeLabels[0])[1];
+    }
     let best = facadeLabels[0];
     for (const lbl of facadeLabels) {
-      if (Math.abs(lbl[0] - xcenter) < Math.abs(best[0] - xcenter)) best = lbl;
+      if (Math.abs(lbl[0][0] - xcenter) < Math.abs(best[0][0] - xcenter)) best = lbl;
     }
     return best[1];
   }
@@ -2927,7 +2935,7 @@ function parseDxfClientSide(text, fileName) {
       }
     }
   }
-  if (facadeLabels.length === 0) facadeLabels.push([0, 'Façade 1']);
+  if (facadeLabels.length === 0) facadeLabels.push([[0, 0], 'Façade 1']);
 
   // Get facade for a panel: direct if auto-numbered, else by proximity to TEXT labels
   function getFacade(idx, r) {
@@ -2940,7 +2948,7 @@ function parseDxfClientSide(text, fileName) {
         return d < bd ? lbl : best;
       })[1];
     }
-    return nearestFacade((r.xmin + r.xmax) / 2);
+    return nearestFacade((r.xmin + r.xmax) / 2, (r.ymin + r.ymax) / 2);
   }
 
   // Classify subtype by position:
@@ -4484,7 +4492,7 @@ function downloadDxf(content, filename) {
 
 // Group rects by facade and return sorted facade data
 function groupRectsByFacade(rectsSpatial, facadeLabels) {
-  const fLabels = facadeLabels && facadeLabels.length ? facadeLabels : [[0, 'Facade']];
+  const fLabels = facadeLabels && facadeLabels.length ? facadeLabels : [[[0, 0], 'Facade']];
   const pfm = projectPanelFacadeMap || {};
   function nearestFacade(xcenter, ycenter) {
     if (Array.isArray(fLabels[0][0])) {

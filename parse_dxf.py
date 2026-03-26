@@ -344,11 +344,12 @@ def parse_dxf_file(filepath):
             try:
                 txt = e.dxf.text if e.dxftype() == "TEXT" else e.text
                 x = e.dxf.insert[0]
-                facade_labels.append((x, txt.strip()))
+                y = e.dxf.insert[1] if len(e.dxf.insert) > 1 else 0
+                facade_labels.append(((x, y), txt.strip()))
             except Exception:
                 pass
 
-    facade_labels.sort(key=lambda t: t[0])
+    facade_labels.sort(key=lambda t: t[0][0])
 
     # Si pas de texte, on numérotera les façades après extraction des rectangles
     auto_number_facades = len(facade_labels) == 0
