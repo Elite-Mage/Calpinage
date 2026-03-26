@@ -4630,7 +4630,7 @@ function exportDxfPanneaux() {
     const lblX = facadeLabelX(fname, projectFacadeLabels);
     const titleX = lblX !== null ? lblX : (fxmin + fxmax) / 2;
     const titleH = Math.max(200, facH * 0.05);
-    dxf.addText(titleX, fymax + TITLE_MARGIN + titleH * 0.5, titleH, fname, 'TITRE', 7, 1);
+    dxf.addText(titleX, fymin - TITLE_MARGIN - titleH * 0.5, titleH, fname, 'TITRE', 7, 1);
 
     // Sort panels: left to right, bottom to top
     const sorted = [...panels].sort((a, b) => {
@@ -4744,11 +4744,11 @@ function exportDxfOssature() {
     }
     const facH = fymax - fymin;
 
-    // Title X = original label X, Title Y = above topmost panels (+ prolongement room)
+    // Title X = original label X, Title Y = sous la zone de prolongement (fymin - prol - marge)
     const ossLblX = facadeLabelX(fname, projectFacadeLabels);
     const ossTitleX = ossLblX !== null ? ossLblX : (fxmin + fxmax) / 2;
     const titleH = Math.max(200, facH * 0.05);
-    dxf.addText(ossTitleX, fymax + OSS_TITLE_MARGIN + prol + titleH * 0.5, titleH, fname + ' - Ossature', 'TITRE', 7, 1);
+    dxf.addText(ossTitleX, fymin - prol - OSS_TITLE_MARGIN - titleH * 0.5, titleH, fname + ' - Ossature', 'TITRE', 7, 1);
 
     // Panel outlines in light gray
     for (const p of allPanels) {
