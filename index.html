@@ -4544,6 +4544,36 @@ function facadeLabelX(fname, facadeLabels) {
   return null;
 }
 
+// Regroupe les façades en rangées horizontales (même plage Y) et calcule un décalage Y
+// pour chaque façade de façon à avoir extraGap mm entre les rangées.
+function computeFacadeRowOffsets(facadeNames, byFacade, extraGap) {
+  const bounds = {};
+  for (const fn of facadeNames) {
+    let fymin = Infinity, fymax = -Infinity;
+    for (const p of byFacade[fn]) { fymin = Math.min(fymin, p.ymin); fymax = Math.max(fymax, p.ymax); }
+    bounds[fn] = { fymin, fymax };
+  }
+  // Grouper par proximité Y (±500 mm)
+  const rows = [];
+  const sorted = [...facadeNames].sort((a, b) => bounds[a].fymin - bounds[b].fymin);
+  for (const fn of sorted) {
+    const { fymin, fymax } = bounds[fn];
+    const row = rows.find(r => fymin <= r.ymax + 500 && fymax >= r.ymin - 500);
+    if (row) { row.facades.push(fn); row.ymin = Math.min(row.ymin, fymin); row.ymax = Math.max(row.ymax, fymax); }
+    else rows.push({ facades: [fn], ymin: fymin, ymax: fymax });
+  }
+  rows.sort((a, b) => a.ymin - b.ymin);
+  const offsets = {};
+  let cumulative = 0;
+  for (const fn of rows[0].facades) offsets[fn] = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const extra = Math.max(0, extraGap - (rows[i].ymin - rows[i - 1].ymax));
+    cumulative += extra;
+    for (const fn of rows[i].facades) offsets[fn] = cumulative;
+  }
+  return offsets;
+}
+
 function exportDxfPanneaux() {
   if (!projectRectsSpatial || !projectRectsSpatial.length) {
     alert('Aucune donnee spatiale disponible. Importez un DXF d\'abord.');
@@ -4560,10 +4590,24 @@ function exportDxfPanneaux() {
   const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
   const facadeNames = Object.keys(byFacade).sort();
 
-  // One single outer contour around ALL panels
+  const TITLE_MARGIN = 300;
+  // Espace nécessaire entre rangées = titre + marge + buffer
+  const titleHEstPan = Math.max(200, 0.05 * Math.max(...facadeNames.map(fn => {
+    const ps = byFacade[fn]; return Math.max(...ps.map(p => p.ymax)) - Math.min(...ps.map(p => p.ymin));
+  })));
+  const yOffsets = computeFacadeRowOffsets(facadeNames, byFacade, TITLE_MARGIN + titleHEstPan + 400);
+
+  // Translated panel copies for each facade
+  const translatedByFacade = {};
+  for (const fn of facadeNames) {
+    const off = yOffsets[fn] || 0;
+    translatedByFacade[fn] = byFacade[fn].map(p => ({ ...p, ymin: p.ymin + off, ymax: p.ymax + off }));
+  }
+
+  // One single outer contour around ALL translated panels
   let gxmin = Infinity, gxmax = -Infinity, gymin = Infinity, gymax = -Infinity;
-  for (const fname of facadeNames) {
-    for (const p of byFacade[fname]) {
+  for (const fn of facadeNames) {
+    for (const p of translatedByFacade[fn]) {
       gxmin = Math.min(gxmin, p.xmin); gxmax = Math.max(gxmax, p.xmax);
       gymin = Math.min(gymin, p.ymin); gymax = Math.max(gymax, p.ymax);
     }
@@ -4571,10 +4615,8 @@ function exportDxfPanneaux() {
   const outerMargin = 200;
   dxf.addRect(gxmin - outerMargin, gymin - outerMargin, gxmax + outerMargin, gymax + outerMargin, 'CONTOUR', 8);
 
-  const TITLE_MARGIN = 300;
-
   for (const fname of facadeNames) {
-    const panels = byFacade[fname];
+    const panels = translatedByFacade[fname];
 
     // Facade bounding box
     let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
@@ -4587,7 +4629,6 @@ function exportDxfPanneaux() {
     // Title X = original label X if available, else center of facade
     const lblX = facadeLabelX(fname, projectFacadeLabels);
     const titleX = lblX !== null ? lblX : (fxmin + fxmax) / 2;
-    // Title Y = above the topmost panels of this facade
     const titleH = Math.max(200, facH * 0.05);
     dxf.addText(titleX, fymax + TITLE_MARGIN + titleH * 0.5, titleH, fname, 'TITRE', 7, 1);
 
@@ -4633,16 +4674,31 @@ function exportDxfOssature() {
   const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
   const facadeNames = Object.keys(byFacade).sort();
 
-  // One single outer contour around ALL panels
+  const OSS_TITLE_MARGIN = 300;
+  const prol = (ossatureConfig.prolongementEnabled && ossatureConfig.prolongement > 0) ? ossatureConfig.prolongement : 0;
+  const pEnt = ossatureConfig.prolongEntaxe || ENTRAXE_REGULAR;
+
+  // Espace entre rangées = titre + marge + prolongement + buffer
+  const titleHEstOss = Math.max(200, 0.05 * Math.max(...facadeNames.map(fn => {
+    const ps = byFacade[fn]; return Math.max(...ps.map(p => p.ymax)) - Math.min(...ps.map(p => p.ymin));
+  })));
+  const yOffsets = computeFacadeRowOffsets(facadeNames, byFacade, OSS_TITLE_MARGIN + titleHEstOss + prol + 400);
+
+  // Translated panel copies (coordonnées Y décalées pour l'espacement)
+  const translatedByFacade = {};
+  for (const fn of facadeNames) {
+    const off = yOffsets[fn] || 0;
+    translatedByFacade[fn] = byFacade[fn].map(p => ({ ...p, ymin: p.ymin + off, ymax: p.ymax + off }));
+  }
+
+  // One single outer contour around ALL translated panels (+ prolongement en bas)
   let ossGxmin = Infinity, ossGxmax = -Infinity, ossGymin = Infinity, ossGymax = -Infinity;
   for (const fn of facadeNames) {
-    for (const p of byFacade[fn]) {
+    for (const p of translatedByFacade[fn]) {
       ossGxmin = Math.min(ossGxmin, p.xmin); ossGxmax = Math.max(ossGxmax, p.xmax);
       ossGymin = Math.min(ossGymin, p.ymin); ossGymax = Math.max(ossGymax, p.ymax);
     }
   }
-
-  const OSS_TITLE_MARGIN = 300;
 
   function getGaps(leftIntervals, rightIntervals) {
     const events = [];
@@ -4672,15 +4728,12 @@ function exportDxfOssature() {
   dxf.addLayer('TITRE', 7);
   dxf.addLayer('TEXTE', 7);
 
-  const prol = (ossatureConfig.prolongementEnabled && ossatureConfig.prolongement > 0) ? ossatureConfig.prolongement : 0;
-  const pEnt = ossatureConfig.prolongEntaxe || ENTRAXE_REGULAR;
-
   // Single outer contour around all panels (extended for prolongement)
   const ossOuterMargin = 200;
   dxf.addRect(ossGxmin - ossOuterMargin, ossGymin - ossOuterMargin - prol, ossGxmax + ossOuterMargin, ossGymax + ossOuterMargin, 'CONTOUR', 8);
 
   for (const fname of facadeNames) {
-    const allPanels = byFacade[fname];
+    const allPanels = translatedByFacade[fname];
 
     // Classify bandeau toiture for entraxe only
     // Facade bounding box
