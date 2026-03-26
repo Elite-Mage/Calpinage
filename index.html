@@ -606,12 +606,13 @@
       <div class="card-title">Configuration ossature</div>
       <div class="oss-config">
         <div>
-          <label>Entraxe Zed — panneaux (mm)</label>
+          <label>Entraxe Zed (mm)</label>
           <input type="number" id="ossEntaxeMax" value="600" min="100" max="1200" step="50" oninput="ossatureConfig.entaxeMax=+this.value; renderOssature(); scheduleSave();">
         </div>
-        <div>
-          <label>Entraxe Zed — bandeau toiture (mm)</label>
-          <input type="number" id="ossEntaxeBandeau" value="800" min="100" max="1200" step="50" oninput="ossatureConfig.entaxeBandeau=+this.value; renderOssature(); scheduleSave();">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <label style="margin-bottom:0;">Prolongement bas (mm)</label>
+          <input type="checkbox" id="ossProlongEnabled" onchange="ossatureConfig.prolongementEnabled=this.checked; scheduleSave();" title="Activer le prolongement de l'ossature sous les panneaux">
+          <input type="number" id="ossProlongH" value="0" min="0" max="2000" step="10" placeholder="0" oninput="ossatureConfig.prolongement=+this.value; scheduleSave();" style="width:80px;">
         </div>
         <div>
           <label>Trait de scie oss. (mm)</label>
@@ -822,7 +823,7 @@ let nextGroupId = 3;
 let activeGroupId = 1;
 let allResults = null;
 let activeSection = 'panneaux'; // 'panneaux' | 'ossature' | 'devis'
-let ossatureConfig = { entaxeMax: 600, entaxeBandeau: 800, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0 };
+let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false };
 let devisConfig = { prixMO: '' };
 let fixationConfig = { prixFixation: '' };
 let projectRectsSpatial = []; // Stored spatial rectangles from DXF parsing
@@ -2311,13 +2312,14 @@ function applyProjectData(data) {
     activeGroupId = data.activeGroupId || groups[0]?.id;
   }
   if (data.ossatureConfig) {
-    ossatureConfig = { entaxeMax: 600, entaxeBandeau: 800, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, ...data.ossatureConfig };
+    ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false, ...data.ossatureConfig };
     document.getElementById('ossEntaxeMax').value = ossatureConfig.entaxeMax || 600;
-    document.getElementById('ossEntaxeBandeau').value = ossatureConfig.entaxeBandeau || 800;
     document.getElementById('ossKerf').value = ossatureConfig.kerf || 0;
     document.getElementById('ossPrixOmega').value = ossatureConfig.prixOmega || '';
     document.getElementById('ossPrixZed').value = ossatureConfig.prixZed || '';
     document.getElementById('ossHauteur').value = ossatureConfig.hauteurOssature || '';
+    document.getElementById('ossProlongEnabled').checked = !!ossatureConfig.prolongementEnabled;
+    document.getElementById('ossProlongH').value = ossatureConfig.prolongement || 0;
     renderOmegaStockList();
     renderZedStockList();
   }
@@ -3051,7 +3053,6 @@ function parseDxfClientSide(text, fileName) {
   // Ossature calculation (same logic as parse_dxf.py)
   function calcOssatureFacades(rSpatial, fLabels) {
     const ENTRAXE_REGULAR = ossatureConfig.entaxeMax || 600;
-    const ENTRAXE_BANDEAU = ossatureConfig.entaxeBandeau || 800;
     const JOINT = 8;
     const MAX_GAP = 20;
     const BANDEAU_TOITURE_MAX_H = 1600;
@@ -3111,8 +3112,7 @@ function parseDxfClientSide(text, fileName) {
       for (const p of allPanels) {
         const pw = Math.round(p.xmax - p.xmin);
         const ph = Math.round(p.ymax - p.ymin);
-        const ent = bandeauSet.has(p) ? ENTRAXE_BANDEAU : ENTRAXE_REGULAR;
-        const nz = Math.max(0, Math.ceil(pw / ent) - 1);
+        const nz = Math.max(0, Math.ceil(pw / ENTRAXE_REGULAR) - 1);
         if (nz > 0) for (let z = 0; z < nz; z++) addZed(ph);
       }
 
@@ -3660,8 +3660,7 @@ function calcOssature() {
         for (const p of st.pieces) {
           const ossH = getOssH(p, st.name);
           const ossW = getOssW(p, st.name);
-          const entraxeForType = isBandeauSubtype(st.name) ? (ossatureConfig.entaxeBandeau || 800) : entaxeMax;
-          const nbZed = Math.max(0, Math.ceil(ossW / entraxeForType) - 1);
+          const nbZed = Math.max(0, Math.ceil(ossW / entaxeMax) - 1);
 
           subData.pieces.push({
             ...p,
@@ -4624,9 +4623,7 @@ function exportDxfOssature() {
   }
 
   const ENTRAXE_REGULAR = ossatureConfig.entaxeMax || 600;
-  const ENTRAXE_BANDEAU = ossatureConfig.entaxeBandeau || 800;
   const JOINT = 8, MAX_GAP = 20;
-  const BANDEAU_TOITURE_MAX_H = 1600;
 
   const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
   const facadeNames = Object.keys(byFacade).sort();
@@ -4667,8 +4664,6 @@ function exportDxfOssature() {
   dxf.addLayer('OMEGA', 4);
   dxf.addLayer('ZED_ENTRAXE', 2);
   dxf.addLayer('ZED_BORD', 6);
-  dxf.addLayer('OMEGA_BANDEAU', 4);
-  dxf.addLayer('ZED_BANDEAU', 2);
   dxf.addLayer('TITRE', 7);
   dxf.addLayer('TEXTE', 7);
 
@@ -4680,21 +4675,6 @@ function exportDxfOssature() {
     const allPanels = byFacade[fname];
 
     // Classify bandeau toiture for entraxe only
-    const bandeauSet = new Set();
-    for (const p of allPanels) {
-      const ph = Math.round(p.ymax - p.ymin);
-      if (ph >= BANDEAU_TOITURE_MAX_H) continue;
-      let hasAbove = false;
-      for (const other of allPanels) {
-        if (other === p) continue;
-        if (other.ymin > p.ymax + 20) {
-          const overlapX = Math.min(p.xmax, other.xmax) - Math.max(p.xmin, other.xmin);
-          if (overlapX > 5) { hasAbove = true; break; }
-        }
-      }
-      if (!hasAbove) bandeauSet.add(p);
-    }
-
     // Facade bounding box
     let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
     for (const p of allPanels) {
@@ -4718,17 +4698,15 @@ function exportDxfOssature() {
     const ZED_W = 40;
     const OMEGA_W = 80;
 
-    // Entraxe ZED per panel: 600mm regular, 800mm bandeau
+    // Entraxe ZED per panel (même entraxe pour tous les panneaux)
     for (const p of allPanels) {
       const pw = Math.round(p.xmax - p.xmin);
-      const ent = bandeauSet.has(p) ? ENTRAXE_BANDEAU : ENTRAXE_REGULAR;
-      const layer = bandeauSet.has(p) ? 'ZED_BANDEAU' : 'ZED_ENTRAXE';
-      const nz = Math.max(0, Math.ceil(pw / ent) - 1);
+      const nz = Math.max(0, Math.ceil(pw / ENTRAXE_REGULAR) - 1);
       if (nz > 0) {
         const step = pw / (nz + 1);
         for (let z = 1; z <= nz; z++) {
           const cx = p.xmin + z * step;
-          dxf.addRect(cx - ZED_W/2, p.ymin, cx + ZED_W/2, p.ymax, layer, 2);
+          dxf.addRect(cx - ZED_W/2, p.ymin, cx + ZED_W/2, p.ymax, 'ZED_ENTRAXE', 2);
         }
       }
     }
@@ -4790,6 +4768,40 @@ function exportDxfOssature() {
         dxf.addRect(p.xmax - ZED_W/2, p.ymin, p.xmax + ZED_W/2, p.ymax, 'ZED_BORD', 6);
       if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP))
         dxf.addRect(p.xmin - ZED_W/2, p.ymin, p.xmin + ZED_W/2, p.ymax, 'ZED_BORD', 6);
+    }
+
+    // ── Prolongement bas de l'ossature ──
+    if (ossatureConfig.prolongementEnabled && ossatureConfig.prolongement > 0) {
+      const prol = ossatureConfig.prolongement;
+      // Regroupe les panneaux en clusters X pour prolonger chaque groupe séparément
+      const sortedByX = [...allPanels].sort((a, b) => a.xmin - b.xmin);
+      const clusters = [[sortedByX[0]]];
+      for (let i = 1; i < sortedByX.length; i++) {
+        const last = clusters[clusters.length - 1];
+        const lastXmax = Math.max(...last.map(p => p.xmax));
+        if (sortedByX[i].xmin - lastXmax > 300) clusters.push([sortedByX[i]]);
+        else last.push(sortedByX[i]);
+      }
+      for (const cl of clusters) {
+        const clXmin = Math.min(...cl.map(p => p.xmin));
+        const clXmax = Math.max(...cl.map(p => p.xmax));
+        const clYmin = Math.min(...cl.map(p => p.ymin));
+        const extYmin = clYmin - prol;
+        const extYmax = clYmin;
+        // Zeds bordure gauche et droite (violet)
+        dxf.addRect(clXmin - ZED_W/2, extYmin, clXmin + ZED_W/2, extYmax, 'ZED_BORD', 6);
+        dxf.addRect(clXmax - ZED_W/2, extYmin, clXmax + ZED_W/2, extYmax, 'ZED_BORD', 6);
+        // Zeds intermédiaires au même entraxe, sur la hauteur du prolongement uniquement
+        const clW = clXmax - clXmin;
+        const nzProl = Math.max(0, Math.ceil(clW / ENTRAXE_REGULAR) - 1);
+        if (nzProl > 0) {
+          const step = clW / (nzProl + 1);
+          for (let z = 1; z <= nzProl; z++) {
+            const cx = clXmin + z * step;
+            dxf.addRect(cx - ZED_W/2, extYmin, cx + ZED_W/2, extYmax, 'ZED_ENTRAXE', 2);
+          }
+        }
+      }
     }
   }
 
