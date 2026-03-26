@@ -615,6 +615,10 @@
           <input type="number" id="ossProlongH" value="0" min="0" max="2000" step="10" placeholder="0" oninput="ossatureConfig.prolongement=+this.value; scheduleSave();" style="width:80px;">
         </div>
         <div>
+          <label>Entraxe Zed prolongement (mm)</label>
+          <input type="number" id="ossProlongEntaxe" value="600" min="100" max="1200" step="50" oninput="ossatureConfig.prolongEntaxe=+this.value; scheduleSave();">
+        </div>
+        <div>
           <label>Trait de scie oss. (mm)</label>
           <input type="number" id="ossKerf" value="0" min="0" max="10" step="0.5" oninput="ossatureConfig.kerf=+this.value; renderOssature(); scheduleSave();">
         </div>
@@ -823,7 +827,7 @@ let nextGroupId = 3;
 let activeGroupId = 1;
 let allResults = null;
 let activeSection = 'panneaux'; // 'panneaux' | 'ossature' | 'devis'
-let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false };
+let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false, prolongEntaxe: 600 };
 let devisConfig = { prixMO: '' };
 let fixationConfig = { prixFixation: '' };
 let projectRectsSpatial = []; // Stored spatial rectangles from DXF parsing
@@ -2312,7 +2316,7 @@ function applyProjectData(data) {
     activeGroupId = data.activeGroupId || groups[0]?.id;
   }
   if (data.ossatureConfig) {
-    ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false, ...data.ossatureConfig };
+    ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false, prolongEntaxe: 600, ...data.ossatureConfig };
     document.getElementById('ossEntaxeMax').value = ossatureConfig.entaxeMax || 600;
     document.getElementById('ossKerf').value = ossatureConfig.kerf || 0;
     document.getElementById('ossPrixOmega').value = ossatureConfig.prixOmega || '';
@@ -2320,6 +2324,7 @@ function applyProjectData(data) {
     document.getElementById('ossHauteur').value = ossatureConfig.hauteurOssature || '';
     document.getElementById('ossProlongEnabled').checked = !!ossatureConfig.prolongementEnabled;
     document.getElementById('ossProlongH').value = ossatureConfig.prolongement || 0;
+    document.getElementById('ossProlongEntaxe').value = ossatureConfig.prolongEntaxe || 600;
     renderOmegaStockList();
     renderZedStockList();
   }
@@ -4773,70 +4778,64 @@ function exportDxfOssature() {
     // ── Prolongement bas de l'ossature ──
     if (ossatureConfig.prolongementEnabled && ossatureConfig.prolongement > 0) {
       const prol = ossatureConfig.prolongement;
-      const extY1 = fymin - prol; // bas du prolongement
-      const extY2 = fymin;        // haut du prolongement = bas des panneaux
+      const pEnt = ossatureConfig.prolongEntaxe || ENTRAXE_REGULAR; // entraxe séparé pour le prolongement
+      const extY1 = fymin - prol;
+      const extY2 = fymin;
 
       // Panneaux qui touchent le bas de la façade
       const bottomPanels = allPanels.filter(p => Math.abs(p.ymin - fymin) < 5);
-
       if (bottomPanels.length > 0) {
-        // 1. Étendre les Zeds d'entraxe de chaque panneau bas
-        for (const p of bottomPanels) {
-          const pw = p.xmax - p.xmin;
-          const nz = Math.max(0, Math.ceil(pw / ENTRAXE_REGULAR) - 1);
-          if (nz > 0) {
-            const step = pw / (nz + 1);
-            for (let z = 1; z <= nz; z++) {
-              const cx = p.xmin + z * step;
-              dxf.addRect(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2);
-            }
-          }
-        }
+        const sortedBottom = [...bottomPanels].sort((a, b) => a.xmin - b.xmin);
+        const bxMin = sortedBottom[0].xmin;
+        const bxMax = sortedBottom[sortedBottom.length - 1].xmax;
 
-        // 2. Étendre les Omégas aux jonctions qui touchent le bas
+        // Collecter les X des Zeds violet qui existent déjà dans l'ossature principale
+        // (jonctions partielles + bords internes d'ouvertures — PAS les bords extérieurs de façade)
+        const violetXs = new Set();
+
+        // Jonctions : gap Zeds qui touchent fymin
         for (const jx of Object.keys(junctions).map(Number)) {
           const { left, right } = junctions[jx];
           const hasBottom = left.some(p => Math.abs(p.ymin - fymin) < 5)
                          || right.some(p => Math.abs(p.ymin - fymin) < 5);
-          if (hasBottom) {
-            dxf.addRect(jx - OMEGA_W/2, extY1, jx + OMEGA_W/2, extY2, 'OMEGA', 4);
+          if (!hasBottom) continue;
+          const leftI  = [...new Set(left.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
+          const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
+          const { leftGaps, rightGaps } = getGaps(leftI, rightI);
+          for (const [gs, ge] of [...leftGaps, ...rightGaps]) {
+            if (gs <= fymin + 5 && Math.round(ge - gs) >= 100) violetXs.add(jx);
           }
         }
 
-        // 3. Bords libres + ouvertures (portes) entre panneaux bas
-        const sortedBottom = [...bottomPanels].sort((a, b) => a.xmin - b.xmin);
+        // Bords libres internes (ouvertures, portes) — pas les bords extérieurs de façade
+        for (const p of bottomPanels) {
+          if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP))
+            violetXs.add(Math.round(p.xmax));
+          if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP))
+            violetXs.add(Math.round(p.xmin));
+        }
 
-        for (let i = 0; i < sortedBottom.length; i++) {
-          const p = sortedBottom[i];
+        const sortedVioletXs = [...violetXs].sort((a, b) => a - b);
 
-          // Bord gauche libre (pas de jonction à gauche pour ce panneau)
-          const jxLeft = Object.keys(junctions).map(Number)
-            .find(jx => Math.abs(jx - p.xmin) < 5 && junctions[jx].right.includes(p));
-          if (jxLeft === undefined) {
-            dxf.addRect(p.xmin - ZED_W/2, extY1, p.xmin + ZED_W/2, extY2, 'ZED_BORD', 6);
-          }
+        // 1. Continuer les Zeds violet vers le bas (sans violet aux bords de façade)
+        for (const vx of sortedVioletXs) {
+          dxf.addRect(vx - ZED_W/2, extY1, vx + ZED_W/2, extY2, 'ZED_BORD', 6);
+        }
 
-          // Bord droit libre (pas de jonction à droite pour ce panneau)
-          const jxRight = Object.keys(junctions).map(Number)
-            .find(jx => Math.abs(jx - p.xmax) < 5 && junctions[jx].left.includes(p));
-          if (jxRight === undefined) {
-            dxf.addRect(p.xmax - ZED_W/2, extY1, p.xmax + ZED_W/2, extY2, 'ZED_BORD', 6);
-
-            // Ouverture (porte) vers le panneau suivant ?
-            if (i + 1 < sortedBottom.length) {
-              const nextP = sortedBottom[i + 1];
-              const gap = nextP.xmin - p.xmax;
-              if (gap > MAX_GAP) {
-                // Zeds d'entraxe dans l'ouverture, sur la hauteur du prolongement
-                const nzGap = Math.max(0, Math.ceil(gap / ENTRAXE_REGULAR) - 1);
-                if (nzGap > 0) {
-                  const step = gap / (nzGap + 1);
-                  for (let z = 1; z <= nzGap; z++) {
-                    const cx = p.xmax + z * step;
-                    dxf.addRect(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2);
-                  }
-                }
-              }
+        // 2. Remplir toutes les sections du prolongement avec des Zeds jaune à pEnt
+        // Les sections sont délimitées par les Zeds violet + les bords de façade
+        const boundaries = [bxMin, ...sortedVioletXs, bxMax];
+        for (let i = 0; i < boundaries.length - 1; i++) {
+          const segStart = boundaries[i];
+          const segEnd   = boundaries[i + 1];
+          const segW     = segEnd - segStart;
+          if (segW <= ZED_W) continue; // trop étroit
+          const nz = Math.max(0, Math.ceil(segW / pEnt) - 1);
+          if (nz > 0) {
+            const step = segW / (nz + 1);
+            for (let z = 1; z <= nz; z++) {
+              const cx = segStart + z * step;
+              dxf.addRect(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2);
             }
           }
         }
