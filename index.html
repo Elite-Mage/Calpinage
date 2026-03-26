@@ -4806,24 +4806,28 @@ function exportDxfOssature() {
           }
         }
 
-        // Positions X des Zeds violet intérieurs (jonctions partielles + ouvertures)
-        // PAS les bords extérieurs de façade
+        // Séparer les jonctions en bas : avec gap (→ Zed violet) vs sans gap (→ Oméga)
+        const omegaXsExt = [];
         const violetXs = new Set();
         for (const jx of Object.keys(junctions).map(Number)) {
           const { left, right } = junctions[jx];
           const hasBottom = left.some(p => Math.abs(p.ymin - fymin) < 5)
                          || right.some(p => Math.abs(p.ymin - fymin) < 5);
           if (!hasBottom) continue;
-          // Étendre l'oméga de jonction
-          dxf.addRect(jx - OMEGA_W/2, extY1, jx + OMEGA_W/2, extY2, 'OMEGA', 4);
-          // Vérifier s'il y a un gap Zed touchant fymin
           const leftI  = [...new Set(left.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
           const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
           const { leftGaps, rightGaps } = getGaps(leftI, rightI);
-          for (const [gs, ge] of [...leftGaps, ...rightGaps]) {
-            if (gs <= fymin + 5 && Math.round(ge - gs) >= 100) violetXs.add(jx);
+          const hasGapAtBottom = [...leftGaps, ...rightGaps].some(([gs, ge]) => gs <= fymin + 5 && Math.round(ge - gs) >= 100);
+          if (hasGapAtBottom) {
+            // Ouverture en bas → Zed violet (pas d'oméga)
+            violetXs.add(jx);
+          } else {
+            // Jonction pleine → Oméga (pas de violet)
+            omegaXsExt.push(jx);
+            dxf.addRect(jx - OMEGA_W/2, extY1, jx + OMEGA_W/2, extY2, 'OMEGA', 4);
           }
         }
+        // Bords d'ouverture intérieurs (ouvertures entre panneaux non-adjacents, PAS bords façade)
         for (const p of bottomPanels) {
           if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP))
             violetXs.add(Math.round(p.xmax));
@@ -4836,13 +4840,16 @@ function exportDxfOssature() {
         }
 
         // ── Étape 2 : combler les trous > pEnt entre profils existants ──
-        // Toutes les positions de profils dans le prolongement, par section entre violet
+        // Les Omégas étendus comptent aussi comme profils existants pour éviter les doublons
         const boundaries = [bxMin, ...sortedVioletXs, bxMax];
         for (let i = 0; i < boundaries.length - 1; i++) {
           const segStart = boundaries[i];
           const segEnd   = boundaries[i + 1];
-          // Profils déjà présents dans cette section (jaunes étendus)
-          const inSeg = extYellowXs.filter(x => x > segStart + ZED_W && x < segEnd - ZED_W).sort((a, b) => a - b);
+          // Profils déjà présents dans cette section : jaunes étendus + omégas étendus
+          const inSeg = [
+            ...extYellowXs.filter(x => x > segStart + ZED_W && x < segEnd - ZED_W),
+            ...omegaXsExt.filter(x => x > segStart + ZED_W && x < segEnd - ZED_W),
+          ].sort((a, b) => a - b);
           // Tous les points de référence dans la section (bords + profils existants)
           const pts = [segStart, ...inSeg, segEnd];
           for (let j = 0; j < pts.length - 1; j++) {
