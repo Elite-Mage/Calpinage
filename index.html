@@ -4012,58 +4012,51 @@ function detectPliageOpenings(panels) {
 
   const facadeXmin = Math.min(...panels.map(p => p.xmin));
   const facadeXmax = Math.max(...panels.map(p => p.xmax));
-
-  // Group panels into horizontal rows (same floor)
-  const sorted = [...panels].sort((a, b) => a.ymin - b.ymin);
-  const rows = [];
-  for (const p of sorted) {
-    const row = rows.find(r => p.ymin < r.ymax + 30 && p.ymax > r.ymin - 30);
-    if (row) {
-      row.panels.push(p);
-      row.ymin = Math.min(row.ymin, p.ymin);
-      row.ymax = Math.max(row.ymax, p.ymax);
-    } else {
-      rows.push({ panels: [p], ymin: p.ymin, ymax: p.ymax });
-    }
-  }
-  rows.sort((a, b) => a.ymin - b.ymin);
-
-  // For each row, find x-gaps interior to the facade (not at edge)
-  function getInteriorXGaps(rowPanels) {
-    const covered = rowPanels.map(p => [p.xmin, p.xmax]).sort((a, b) => a[0] - b[0]);
-    const gaps = [];
-    let cursor = facadeXmin;
-    for (const [pxmin, pxmax] of covered) {
-      if (pxmin > cursor + 50) {
-        // Check it's not a facade-edge gap (must have panels on both sides)
-        const hasLeft = covered.some(([, mx]) => mx <= pxmin + 5 && mx >= cursor - 5);
-        const hasRight = covered.some(([mn]) => mn >= pxmax - 5);
-        if (hasLeft && hasRight) gaps.push({ xmin: Math.round(cursor), xmax: Math.round(pxmin) });
-      }
-      cursor = Math.max(cursor, pxmax);
-    }
-    return gaps;
-  }
-
-  // Merge vertically adjacent gaps with same x-range into openings
-  const openings = [];
-  for (const row of rows) {
-    const rowGaps = getInteriorXGaps(row.panels);
-    for (const gap of rowGaps) {
-      // Try to merge with existing opening (same x-range, touching vertically)
-      const existing = openings.find(o =>
-        Math.abs(o.xmin - gap.xmin) < 60 && Math.abs(o.xmax - gap.xmax) < 60 &&
-        Math.abs(o.ymax - row.ymin) < 40
-      );
-      if (existing) {
-        existing.ymax = Math.round(row.ymax);
-      } else {
-        openings.push({ xmin: gap.xmin, xmax: gap.xmax, ymin: Math.round(row.ymin), ymax: Math.round(row.ymax) });
-      }
-    }
-  }
-
   const facadeWidth = Math.round(facadeXmax - facadeXmin);
+
+  // ── 1. Group panels into vertical columns (same xmin/xmax ±50mm) ──
+  const cols = [];
+  for (const p of [...panels].sort((a, b) => a.xmin - b.xmin)) {
+    const col = cols.find(c => Math.abs(c.xmin - p.xmin) < 50 && Math.abs(c.xmax - p.xmax) < 50);
+    if (col) col.panels.push(p);
+    else cols.push({ xmin: p.xmin, xmax: p.xmax, panels: [p] });
+  }
+
+  // ── 2. For each column, find Y-gaps bounded above AND below by panels ──
+  // A gap is an opening only if there is a panel below AND a panel above it in the same column.
+  const colGaps = []; // { xmin, xmax, ymin, ymax }
+  const MIN_OPENING_H = 200; // mm minimum gap height to count as opening
+
+  for (const col of cols) {
+    const sorted = [...col.panels].sort((a, b) => a.ymin - b.ymin);
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const gapYmin = sorted[i].ymax;
+      const gapYmax = sorted[i + 1].ymin;
+      const gapH = gapYmax - gapYmin;
+      if (gapH >= MIN_OPENING_H) {
+        colGaps.push({ xmin: col.xmin, xmax: col.xmax, ymin: Math.round(gapYmin), ymax: Math.round(gapYmax) });
+      }
+    }
+  }
+
+  // ── 3. Merge horizontally adjacent columns with same Y-gap into openings ──
+  colGaps.sort((a, b) => a.ymin - b.ymin || a.xmin - b.xmin);
+  const openings = [];
+  for (const gap of colGaps) {
+    const existing = openings.find(o =>
+      Math.abs(o.ymin - gap.ymin) < 40 && Math.abs(o.ymax - gap.ymax) < 40 &&
+      gap.xmin <= o.xmax + 30  // horizontally touching or adjacent (≤30mm joint)
+    );
+    if (existing) {
+      existing.xmax = Math.max(existing.xmax, gap.xmax);
+    } else {
+      openings.push({ xmin: gap.xmin, xmax: gap.xmax, ymin: gap.ymin, ymax: gap.ymax });
+    }
+  }
+
+  // Sort final openings by x position
+  openings.sort((a, b) => a.xmin - b.xmin);
+
   return {
     openings: openings.map((o, i) => ({
       id: i + 1,
