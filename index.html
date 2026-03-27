@@ -748,6 +748,11 @@
           oninput="pliageConfig.epaisseur=this.value;scheduleSave();">
       </div>
     </div>
+    <div class="card">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn-export" onclick="exportDxfPliage()">&#128209; DXF Pliage</button>
+      </div>
+    </div>
     <div class="card" style="font-size:12px;color:var(--text4);line-height:1.7;">
       <div style="font-weight:700;color:var(--text3);margin-bottom:6px;">Légende</div>
       <div><span class="oss-badge linteau">Linteau</span> dessus ouverture</div>
@@ -4076,9 +4081,15 @@ function detectPliageOpenings(panels) {
       width: Math.round(o.xmax - o.xmin),
       height: Math.round(o.ymax - o.ymin),
       isBottom: o.isBottom,
+      // Raw coordinates for DXF export
+      xmin: o.xmin, xmax: o.xmax, ymin: o.ymin, ymax: o.ymax,
     })),
     plinthWidth: facadeWidth,
     couvertineWidth: facadeWidth,
+    facadeXmin: Math.round(facadeXmin),
+    facadeXmax: Math.round(facadeXmax),
+    facadeYmin: Math.round(facadeYmin),
+    facadeYmax: Math.round(Math.max(...panels.map(p => p.ymax))),
   };
 }
 
@@ -4911,6 +4922,136 @@ function computeFacadeRowOffsets(facadeNames, byFacade, extraGap) {
     for (const fn of rows[i].facades) offsets[fn] = cumulative;
   }
   return offsets;
+}
+
+// ── EXPORT DXF PLIAGE ──
+// Couleurs ACI par type (non utilisées par les panneaux)
+const PLIAGE_ACI = { linteau: 11, tableau: 51, appuis: 171, plinthe: 42, couvertine: 131 };
+
+function exportDxfPliage() {
+  if (!projectRectsSpatial || !projectRectsSpatial.length) {
+    alert('Aucune donnée spatiale disponible. Importez un DXF d\'abord.');
+    return;
+  }
+
+  const dxf = createDxfBuilder();
+  dxf.addLayer('PANNEAUX_REF', 9);   // gris — panneaux de référence
+  dxf.addLayer('LINTEAU',       PLIAGE_ACI.linteau);
+  dxf.addLayer('TABLEAU',       PLIAGE_ACI.tableau);
+  dxf.addLayer('APPUIS',        PLIAGE_ACI.appuis);
+  dxf.addLayer('PLINTHE',       PLIAGE_ACI.plinthe);
+  dxf.addLayer('COUVERTINE',    PLIAGE_ACI.couvertine);
+  dxf.addLayer('TITRE',         7);
+  dxf.addLayer('COTES',         8);
+  dxf.addLayer('CONTOUR',       8);
+
+  const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+  const facadeNames = Object.keys(byFacade).sort();
+  const TITLE_MARGIN = 300;
+  const titleHEst = 200;
+  const yOffsets = computeFacadeRowOffsets(facadeNames, byFacade, TITLE_MARGIN + titleHEst + 400);
+
+  // Global extents
+  let gxmin = Infinity, gxmax = -Infinity, gymin = Infinity, gymax = -Infinity;
+
+  for (const fname of facadeNames) {
+    const panels = byFacade[fname];
+    const off = yOffsets[fname] || 0;
+    const shifted = panels.map(p => ({ ...p, ymin: p.ymin + off, ymax: p.ymax + off }));
+
+    // Detect openings (raw coords, then shift Y)
+    const pliageData = detectPliageOpenings(panels);
+    const facadeYmax = pliageData.facadeYmax + off;
+    const facadeYmin = pliageData.facadeYmin + off;
+    const facadeXmin = pliageData.facadeXmin;
+    const facadeXmax = pliageData.facadeXmax;
+
+    // Update global extents
+    gxmin = Math.min(gxmin, facadeXmin);
+    gxmax = Math.max(gxmax, facadeXmax);
+    gymin = Math.min(gymin, facadeYmin);
+    gymax = Math.max(gymax, facadeYmax);
+
+    // ── 1. Panneaux de référence (gris) ──
+    for (const p of shifted) {
+      dxf.addRect(p.xmin, p.ymin, p.xmax, p.ymax, 'PANNEAUX_REF', 9);
+    }
+
+    // ── 2. Titre façade ──
+    const lblX = facadeLabelX(fname, projectFacadeLabels);
+    const titleX = lblX !== null ? lblX : (facadeXmin + facadeXmax) / 2;
+    const titleH = Math.max(150, (facadeYmax - facadeYmin) * 0.04);
+    dxf.addText(titleX, facadeYmin - TITLE_MARGIN - titleH * 0.5, titleH,
+      fname + ' - Pliage', 'TITRE', 7, 1);
+
+    // Helper: draw a horizontal pliage line with dimension label
+    function hLine(layer, color, x1, x2, y, label) {
+      dxf.addLine(x1, y, x2, y, layer, color);
+      const mid = (x1 + x2) / 2;
+      const th = Math.max(50, Math.abs(x2 - x1) * 0.04);
+      dxf.addText(mid, y + th * 0.6, Math.min(th, 120), label, 'COTES', color, 1);
+    }
+    // Helper: draw a vertical pliage line with dimension label
+    function vLine(layer, color, x, y1, y2, label) {
+      dxf.addLine(x, y1, x, y2, layer, color);
+      const mid = (y1 + y2) / 2;
+      const th = Math.max(50, Math.abs(y2 - y1) * 0.04);
+      dxf.addText(x + th * 0.7, mid, Math.min(th, 120), label, 'COTES', color, 1);
+    }
+
+    // ── 3. Encadrements (ouvertures) ──
+    for (const ov of pliageData.openings) {
+      const idx = ov.id - 1;
+      const extLinteau   = getPliageExt(fname, 'linteau', idx);
+      const extTableauG  = getPliageExt(fname, 'tableauG', idx);
+      const extTableauD  = getPliageExt(fname, 'tableauD', idx);
+      const extAppuis    = getPliageExt(fname, 'appuis', idx);
+
+      const yTop    = ov.ymax + off;
+      const yBot    = ov.ymin + off;
+      const xL      = ov.xmin;
+      const xR      = ov.xmax;
+
+      // Linteau — trait horizontal en haut de l'ouverture
+      const ltX1 = xL - extLinteau, ltX2 = xR + extLinteau;
+      hLine('LINTEAU', PLIAGE_ACI.linteau, ltX1, ltX2, yTop,
+        ov.name + ' Linteau ' + (ltX2 - ltX1) + 'mm');
+
+      // Appuis — trait horizontal en bas
+      const apX1 = xL - extAppuis, apX2 = xR + extAppuis;
+      hLine('APPUIS', PLIAGE_ACI.appuis, apX1, apX2, yBot,
+        ov.name + ' Appuis ' + (apX2 - apX1) + 'mm');
+
+      // Tableau Gauche — trait vertical côté gauche
+      const tgY1 = yBot - extTableauG, tgY2 = yTop + extTableauG;
+      vLine('TABLEAU', PLIAGE_ACI.tableau, xL, tgY1, tgY2,
+        ov.name + ' Tab.G ' + (tgY2 - tgY1) + 'mm');
+
+      // Tableau Droite — trait vertical côté droit
+      const tdY1 = yBot - extTableauD, tdY2 = yTop + extTableauD;
+      vLine('TABLEAU', PLIAGE_ACI.tableau, xR, tdY1, tdY2,
+        ov.name + ' Tab.D ' + (tdY2 - tdY1) + 'mm');
+    }
+
+    // ── 4. Plinthe — trait horizontal en bas de la façade ──
+    const extPlinthe = getPliageExt(fname, 'plinthe', 0);
+    const pX1 = facadeXmin - extPlinthe, pX2 = facadeXmax + extPlinthe;
+    hLine('PLINTHE', PLIAGE_ACI.plinthe, pX1, pX2, facadeYmin,
+      'Plinthe ' + (pX2 - pX1) + 'mm');
+
+    // ── 5. Couvertine — trait horizontal en haut de la façade ──
+    const extCouvertine = getPliageExt(fname, 'couvertine', 0);
+    const cX1 = facadeXmin - extCouvertine, cX2 = facadeXmax + extCouvertine;
+    hLine('COUVERTINE', PLIAGE_ACI.couvertine, cX1, cX2, facadeYmax,
+      'Couvertine ' + (cX2 - cX1) + 'mm');
+  }
+
+  // Contour global
+  const margin = 300;
+  dxf.addRect(gxmin - margin, gymin - margin, gxmax + margin, gymax + margin, 'CONTOUR', 8);
+
+  const nom = chantier.nom || 'calpinage';
+  downloadDxf(dxf.toString(), nom.replace(/[^a-zA-Z0-9]/g, '_') + '_pliage.dxf');
 }
 
 function exportDxfPanneaux() {
