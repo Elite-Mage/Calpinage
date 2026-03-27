@@ -5439,8 +5439,9 @@ function exportDxfOssature() {
       segTop = cy - halfGap;
     }
     if (segTop - yBottom > 1) segments.push({ top: segTop, bot: yBottom });
-    // Si un tronçon < MIN_CUT_LEN, ne pas découper
-    if (segments.some(s => (s.top - s.bot) < MIN_CUT_LEN)) {
+    // Si un tronçon intérieur < MIN_CUT_LEN, ne pas découper (exclure bords)
+    const interior = segments.slice(1, -1);
+    if (interior.some(s => (s.top - s.bot) < MIN_CUT_LEN)) {
       dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
       return;
     }
