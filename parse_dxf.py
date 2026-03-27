@@ -351,6 +351,7 @@ def detect_pliage_openings(panels_by_facade):
             continue
 
         facade_xmin = min(p["xmin"] for p in panels)
+        facade_ymin = min(p["ymin"] for p in panels)
         facade_xmax = max(p["xmax"] for p in panels)
         facade_width = round(facade_xmax - facade_xmin)
 
@@ -366,18 +367,37 @@ def detect_pliage_openings(panels_by_facade):
             if not found:
                 cols.append({"xmin": p["xmin"], "xmax": p["xmax"], "panels": [p]})
 
-        # 2. Pour chaque colonne, trouver les gaps Y entre panneaux consécutifs
-        col_gaps = []  # {xmin, xmax, ymin, ymax}
+        # 2. Pour chaque colonne, trouver les gaps Y
+        col_gaps = []
         for col in cols:
             sorted_col = sorted(col["panels"], key=lambda p: p["ymin"])
+
+            # A. Gaps intérieurs (bornés en haut ET en bas) → fenêtres
             for i in range(len(sorted_col) - 1):
                 gap_ymin = sorted_col[i]["ymax"]
                 gap_ymax = sorted_col[i + 1]["ymin"]
-                gap_h = gap_ymax - gap_ymin
-                if gap_h >= MIN_OPENING_H:
+                if gap_ymax - gap_ymin >= MIN_OPENING_H:
                     col_gaps.append({
                         "xmin": col["xmin"], "xmax": col["xmax"],
-                        "ymin": round(gap_ymin), "ymax": round(gap_ymax)
+                        "ymin": round(gap_ymin), "ymax": round(gap_ymax),
+                        "is_bottom": False
+                    })
+
+            # B. Gap en bas (premier panneau au-dessus de facade_ymin) → porte RDC
+            # Filtre hauteur max 3000mm pour exclure les colonnes bandeau toiture (H~6000mm)
+            col_ymin = sorted_col[0]["ymin"]
+            bottom_gap_h = col_ymin - facade_ymin
+            if MIN_OPENING_H <= bottom_gap_h <= 3000:
+                has_neighbor_at_bottom = any(
+                    (abs(other["xmin"] - col["xmax"]) < 40 or abs(other["xmax"] - col["xmin"]) < 40)
+                    and min(p["ymin"] for p in other["panels"]) <= facade_ymin + 40
+                    for other in cols if other is not col
+                )
+                if has_neighbor_at_bottom:
+                    col_gaps.append({
+                        "xmin": col["xmin"], "xmax": col["xmax"],
+                        "ymin": round(facade_ymin), "ymax": round(col_ymin),
+                        "is_bottom": True
                     })
 
         # 3. Fusionner les colonnes adjacentes avec le même gap Y
@@ -403,6 +423,7 @@ def detect_pliage_openings(panels_by_facade):
                     "name": f"Ouverture {i + 1}",
                     "width_mm": round(o["xmax"] - o["xmin"]),
                     "height_mm": round(o["ymax"] - o["ymin"]),
+                    "is_bottom": o.get("is_bottom", False),
                 }
                 for i, o in enumerate(openings)
             ],

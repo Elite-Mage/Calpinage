@@ -4012,6 +4012,7 @@ function detectPliageOpenings(panels) {
 
   const facadeXmin = Math.min(...panels.map(p => p.xmin));
   const facadeXmax = Math.max(...panels.map(p => p.xmax));
+  const facadeYmin = Math.min(...panels.map(p => p.ymin));
   const facadeWidth = Math.round(facadeXmax - facadeXmin);
 
   // ── 1. Group panels into vertical columns (same xmin/xmax ±50mm) ──
@@ -4022,47 +4023,59 @@ function detectPliageOpenings(panels) {
     else cols.push({ xmin: p.xmin, xmax: p.xmax, panels: [p] });
   }
 
-  // ── 2. For each column, find Y-gaps bounded above AND below by panels ──
-  // A gap is an opening only if there is a panel below AND a panel above it in the same column.
-  const colGaps = []; // { xmin, xmax, ymin, ymax }
-  const MIN_OPENING_H = 200; // mm minimum gap height to count as opening
+  const MIN_OPENING_H = 200;
+  const colGaps = [];
 
   for (const col of cols) {
     const sorted = [...col.panels].sort((a, b) => a.ymin - b.ymin);
+
+    // A. Interior gaps: bounded above AND below → fenêtres
     for (let i = 0; i < sorted.length - 1; i++) {
       const gapYmin = sorted[i].ymax;
       const gapYmax = sorted[i + 1].ymin;
-      const gapH = gapYmax - gapYmin;
-      if (gapH >= MIN_OPENING_H) {
-        colGaps.push({ xmin: col.xmin, xmax: col.xmax, ymin: Math.round(gapYmin), ymax: Math.round(gapYmax) });
-      }
+      if (gapYmax - gapYmin >= MIN_OPENING_H)
+        colGaps.push({ xmin: col.xmin, xmax: col.xmax,
+          ymin: Math.round(gapYmin), ymax: Math.round(gapYmax), isBottom: false });
+    }
+
+    // B. Bottom gap: first panel starts above facadeYmin → porte RDC
+    // Filtre hauteur max 3000mm (exclut les colonnes bandeau toiture seul)
+    const colYmin = sorted[0].ymin;
+    const bottomGapH = colYmin - facadeYmin;
+    if (bottomGapH >= MIN_OPENING_H && bottomGapH <= 3000) {
+      // Confirm: at least one neighbour column reaches the facade bottom
+      const hasNeighborAtBottom = cols.some(other => {
+        if (other === col) return false;
+        const isAdjacent = Math.abs(other.xmin - col.xmax) < 40 || Math.abs(other.xmax - col.xmin) < 40;
+        return isAdjacent && Math.min(...other.panels.map(p => p.ymin)) <= facadeYmin + 40;
+      });
+      if (hasNeighborAtBottom)
+        colGaps.push({ xmin: col.xmin, xmax: col.xmax,
+          ymin: Math.round(facadeYmin), ymax: Math.round(colYmin), isBottom: true });
     }
   }
 
-  // ── 3. Merge horizontally adjacent columns with same Y-gap into openings ──
+  // ── 2. Merge adjacent columns with same Y-gap ──
   colGaps.sort((a, b) => a.ymin - b.ymin || a.xmin - b.xmin);
   const openings = [];
   for (const gap of colGaps) {
     const existing = openings.find(o =>
       Math.abs(o.ymin - gap.ymin) < 40 && Math.abs(o.ymax - gap.ymax) < 40 &&
-      gap.xmin <= o.xmax + 30  // horizontally touching or adjacent (≤30mm joint)
+      gap.xmin <= o.xmax + 30
     );
-    if (existing) {
-      existing.xmax = Math.max(existing.xmax, gap.xmax);
-    } else {
-      openings.push({ xmin: gap.xmin, xmax: gap.xmax, ymin: gap.ymin, ymax: gap.ymax });
-    }
+    if (existing) existing.xmax = Math.max(existing.xmax, gap.xmax);
+    else openings.push({ ...gap });
   }
 
-  // Sort final openings by x position
   openings.sort((a, b) => a.xmin - b.xmin);
 
   return {
     openings: openings.map((o, i) => ({
       id: i + 1,
       name: `Ouverture ${i + 1}`,
-      width: Math.round(o.xmax - o.xmin),   // linteau & appuis
-      height: Math.round(o.ymax - o.ymin),  // tableau G & D
+      width: Math.round(o.xmax - o.xmin),
+      height: Math.round(o.ymax - o.ymin),
+      isBottom: o.isBottom,
     })),
     plinthWidth: facadeWidth,
     couvertineWidth: facadeWidth,
@@ -4175,7 +4188,7 @@ function renderPliage() {
         facadeTotalAppuis += appuisTotal;
 
         html += `<div class="pliage-ouverture">
-          <div class="pliage-ouverture-title">${ov.name} <span style="font-weight:400;color:var(--text4);font-size:12px;">(${ov.width}×${ov.height} mm)</span></div>
+          <div class="pliage-ouverture-title">${ov.name}${ov.isBottom ? ' <span style="font-size:11px;background:#e0703022;color:#e07030;border-radius:4px;padding:1px 6px;font-weight:600;">Porte RDC</span>' : ''} <span style="font-weight:400;color:var(--text4);font-size:12px;">(${ov.width}×${ov.height} mm)</span></div>
           ${extRow('linteau', 'Linteau', ov.width, linteauExt, fname, 'linteau', idx)}
           ${extRow('tableau', 'Tableau G', ov.height, tableauGExt, fname, 'tableauG', idx)}
           ${extRow('tableau', 'Tableau D', ov.height, tableauDExt, fname, 'tableauD', idx)}
