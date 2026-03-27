@@ -632,6 +632,11 @@
           <input type="checkbox" id="ossProlongEnabled" onchange="ossatureConfig.prolongementEnabled=this.checked; scheduleSave();" title="Activer le prolongement de l'ossature sous les panneaux">
           <input type="number" id="ossProlongH" value="0" min="0" max="2000" step="10" placeholder="0" oninput="ossatureConfig.prolongement=+this.value; scheduleSave();" style="width:80px;">
         </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <label style="margin-bottom:0;">Prolongement haut (mm)</label>
+          <input type="checkbox" id="ossProlongHautEnabled" onchange="ossatureConfig.prolongementHautEnabled=this.checked; scheduleSave();" title="Activer le prolongement de l'ossature au-dessus des panneaux">
+          <input type="number" id="ossProlongHautH" value="0" min="0" max="2000" step="10" placeholder="0" oninput="ossatureConfig.prolongementHaut=+this.value; scheduleSave();" style="width:80px;">
+        </div>
         <div>
           <label>Entraxe Zed prolongement (mm)</label>
           <input type="number" id="ossProlongEntaxe" value="600" min="100" max="1200" step="50" oninput="ossatureConfig.prolongEntaxe=+this.value; scheduleSave();">
@@ -888,7 +893,7 @@ let nextGroupId = 3;
 let activeGroupId = 1;
 let allResults = null;
 let activeSection = 'panneaux'; // 'panneaux' | 'ossature' | 'devis'
-let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false, prolongEntaxe: 600 };
+let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false, prolongEntaxe: 600, prolongementHaut: 0, prolongementHautEnabled: false };
 let devisConfig = { prixMO: '' };
 let fixationConfig = { prixFixation: '' };
 // pliageConfig.extensions[facadeName] = { ouvertures:[{linteau,tableauG,tableauD,appuis}…], plinthe, couvertine }
@@ -2390,6 +2395,8 @@ function applyProjectData(data) {
     document.getElementById('ossProlongEnabled').checked = !!ossatureConfig.prolongementEnabled;
     document.getElementById('ossProlongH').value = ossatureConfig.prolongement || 0;
     document.getElementById('ossProlongEntaxe').value = ossatureConfig.prolongEntaxe || 600;
+    document.getElementById('ossProlongHautEnabled').checked = !!ossatureConfig.prolongementHautEnabled;
+    document.getElementById('ossProlongHautH').value = ossatureConfig.prolongementHaut || 0;
     renderOmegaStockList();
     renderZedStockList();
   }
@@ -5194,13 +5201,14 @@ function exportDxfOssature() {
 
   const OSS_TITLE_MARGIN = 600;
   const prol = (ossatureConfig.prolongementEnabled && ossatureConfig.prolongement > 0) ? ossatureConfig.prolongement : 0;
+  const prolH = (ossatureConfig.prolongementHautEnabled && ossatureConfig.prolongementHaut > 0) ? ossatureConfig.prolongementHaut : 0;
   const pEnt = ossatureConfig.prolongEntaxe || ENTRAXE_REGULAR;
 
   // Espace entre rangées = titre + marge + prolongement + buffer
   const titleHEstOss = Math.max(200, 0.05 * Math.max(...facadeNames.map(fn => {
     const ps = byFacade[fn]; return Math.max(...ps.map(p => p.ymax)) - Math.min(...ps.map(p => p.ymin));
   })));
-  const yOffsets = computeFacadeRowOffsets(facadeNames, byFacade, OSS_TITLE_MARGIN + titleHEstOss + prol + 400);
+  const yOffsets = computeFacadeRowOffsets(facadeNames, byFacade, OSS_TITLE_MARGIN + titleHEstOss + prol + prolH + 400);
 
   // Translated panel copies (coordonnées Y décalées pour l'espacement)
   const translatedByFacade = {};
@@ -5248,7 +5256,7 @@ function exportDxfOssature() {
 
   // Single outer contour around all panels (extended for prolongement)
   const ossOuterMargin = 200;
-  dxf.addRect(ossGxmin - ossOuterMargin, ossGymin - ossOuterMargin - prol, ossGxmax + ossOuterMargin, ossGymax + ossOuterMargin, 'CONTOUR', 8);
+  dxf.addRect(ossGxmin - ossOuterMargin, ossGymin - ossOuterMargin - prol, ossGxmax + ossOuterMargin, ossGymax + ossOuterMargin + prolH, 'CONTOUR', 8);
 
   for (const fname of facadeNames) {
     const allPanels = translatedByFacade[fname];
@@ -5280,20 +5288,26 @@ function exportDxfOssature() {
     // Track positions of extended profiles for prolongement gap-fill
     const extYellowXs = [];
     const omegaXsExt = [];
+    const omegaXsExtHaut = [];
     const violetXsSet = new Set();
+    const violetXsSetHaut = new Set();
 
-    // Entraxe ZED per panel — si panneau en bas et prolongement actif, on étend vers le bas
+    // Entraxe ZED per panel — si panneau en bas/haut et prolongement actif, on étend
+    const extYellowXsHaut = [];
     for (const p of allPanels) {
       const pw = Math.round(p.xmax - p.xmin);
       const nz = Math.max(0, Math.ceil(pw / ENTRAXE_REGULAR) - 1);
       if (nz > 0) {
         const step = pw / (nz + 1);
         const isBottom = prol > 0 && Math.abs(p.ymin - fymin) < 5;
+        const isTop = prolH > 0 && Math.abs(p.ymax - fymax) < 5;
         const yStart = isBottom ? fymin - prol : p.ymin;
+        const yEnd = isTop ? fymax + prolH : p.ymax;
         for (let z = 1; z <= nz; z++) {
           const cx = p.xmin + z * step;
-          dxf.addRect(cx - ZED_W/2, yStart, cx + ZED_W/2, p.ymax, 'ZED_ENTRAXE', 2);
+          dxf.addRect(cx - ZED_W/2, yStart, cx + ZED_W/2, yEnd, 'ZED_ENTRAXE', 2);
           if (isBottom) extYellowXs.push(cx);
+          if (isTop) extYellowXsHaut.push(cx);
         }
       }
     }
@@ -5339,10 +5353,12 @@ function exportDxfOssature() {
           else merged.push({ ...ov });
         }
         for (const m of merged) {
-          // Étendre l'Oméga vers le bas si segment touche fymin et prolongement actif
+          // Étendre l'Oméga vers le bas/haut si segment touche fymin/fymax et prolongement actif
           const mStart = (prol > 0 && m.start <= fymin + 5) ? fymin - prol : m.start;
-          dxf.addRect(jx - OMEGA_W/2, mStart, jx + OMEGA_W/2, m.end, 'OMEGA', 4);
+          const mEnd = (prolH > 0 && m.end >= fymax - 5) ? fymax + prolH : m.end;
+          dxf.addRect(jx - OMEGA_W/2, mStart, jx + OMEGA_W/2, mEnd, 'OMEGA', 4);
           if (prol > 0 && m.start <= fymin + 5) omegaXsExt.push(jx);
+          if (prolH > 0 && m.end >= fymax - 5) omegaXsExtHaut.push(jx);
         }
       }
 
@@ -5353,30 +5369,38 @@ function exportDxfOssature() {
       for (const [gs, ge] of rightGaps) {
         if (Math.round(ge - gs) >= 100) {
           const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : gs;
-          dxf.addRect(jx - ZED_W/2, gsExt, jx + ZED_W/2, ge, 'ZED_BORD', 6);
+          const geExt = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : ge;
+          dxf.addRect(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 6);
           if (prol > 0 && gs <= fymin + 5) violetXsSet.add(jx);
+          if (prolH > 0 && ge >= fymax - 5) violetXsSetHaut.add(jx);
         }
       }
       for (const [gs, ge] of leftGaps) {
         if (Math.round(ge - gs) >= 100) {
           const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : gs;
-          dxf.addRect(jx - ZED_W/2, gsExt, jx + ZED_W/2, ge, 'ZED_BORD', 6);
+          const geExt = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : ge;
+          dxf.addRect(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 6);
           if (prol > 0 && gs <= fymin + 5) violetXsSet.add(jx);
+          if (prolH > 0 && ge >= fymax - 5) violetXsSetHaut.add(jx);
         }
       }
     }
 
-    // Free-edge ZED (bord sans voisin, mais pas bord de façade) — étendu vers le bas si touche fymin
+    // Free-edge ZED (bord sans voisin, mais pas bord de façade) — étendu vers le bas/haut si touche fymin/fymax
     for (const p of allPanels) {
       const isBottomP = prol > 0 && Math.abs(p.ymin - fymin) < 5;
+      const isTopP = prolH > 0 && Math.abs(p.ymax - fymax) < 5;
       const yStart = isBottomP ? fymin - prol : p.ymin;
+      const yEnd = isTopP ? fymax + prolH : p.ymax;
       if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP)) {
-        dxf.addRect(p.xmax - ZED_W/2, yStart, p.xmax + ZED_W/2, p.ymax, 'ZED_BORD', 6);
+        dxf.addRect(p.xmax - ZED_W/2, yStart, p.xmax + ZED_W/2, yEnd, 'ZED_BORD', 6);
         if (isBottomP) violetXsSet.add(Math.round(p.xmax));
+        if (isTopP) violetXsSetHaut.add(Math.round(p.xmax));
       }
       if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP)) {
-        dxf.addRect(p.xmin - ZED_W/2, yStart, p.xmin + ZED_W/2, p.ymax, 'ZED_BORD', 6);
+        dxf.addRect(p.xmin - ZED_W/2, yStart, p.xmin + ZED_W/2, yEnd, 'ZED_BORD', 6);
         if (isBottomP) violetXsSet.add(Math.round(p.xmin));
+        if (isTopP) violetXsSetHaut.add(Math.round(p.xmin));
       }
     }
 
@@ -5399,6 +5423,41 @@ function exportDxfOssature() {
           const inSeg = [
             ...extYellowXs.filter(x => x > segStart + ZED_W && x < segEnd - ZED_W),
             ...omegaXsExt.filter(x => x > segStart + ZED_W && x < segEnd - ZED_W),
+          ].sort((a, b) => a - b);
+          const pts = [segStart, ...inSeg, segEnd];
+          for (let j = 0; j < pts.length - 1; j++) {
+            const gap = pts[j + 1] - pts[j];
+            if (gap <= pEnt) continue;
+            const nz = Math.max(0, Math.ceil(gap / pEnt) - 1);
+            if (nz > 0) {
+              const step = gap / (nz + 1);
+              for (let z = 1; z <= nz; z++) {
+                const cx = pts[j] + z * step;
+                dxf.addRect(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // ── Prolongement haut — remplissage des trous uniquement ──
+    if (prolH > 0) {
+      const topPanels = allPanels.filter(p => Math.abs(p.ymax - fymax) < 5);
+      if (topPanels.length > 0) {
+        const sortedTop = [...topPanels].sort((a, b) => a.xmin - b.xmin);
+        const txMin = sortedTop[0].xmin;
+        const txMax = sortedTop[sortedTop.length - 1].xmax;
+        const extY1 = fymax;
+        const extY2 = fymax + prolH;
+        const sortedVioletXsH = [...violetXsSetHaut].sort((a, b) => a - b);
+        const boundaries = [txMin, ...sortedVioletXsH, txMax];
+        for (let i = 0; i < boundaries.length - 1; i++) {
+          const segStart = boundaries[i];
+          const segEnd   = boundaries[i + 1];
+          const inSeg = [
+            ...extYellowXsHaut.filter(x => x > segStart + ZED_W && x < segEnd - ZED_W),
+            ...omegaXsExtHaut.filter(x => x > segStart + ZED_W && x < segEnd - ZED_W),
           ].sort((a, b) => a - b);
           const pts = [segStart, ...inSeg, segEnd];
           for (let j = 0; j < pts.length - 1; j++) {
