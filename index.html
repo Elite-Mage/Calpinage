@@ -4133,8 +4133,21 @@ function renderPliage() {
   }
 
   let html = '';
-  // Per-facade grand totals (across all facades)
-  let grandTotals = { linteaux: 0, tableaux: 0, appuis: 0, plinthes: 0, couvertines: 0 };
+  // Accumulateurs globaux : { longueur_mm → quantité }
+  const grandCounts = { linteaux: {}, tableaux: {}, appuis: {}, plinthes: {}, couvertines: {} };
+
+  // Formate un compteur {longueur: qty} en "2× 1584mm, 6× 984mm — total X ml"
+  function fmtDetail(counts) {
+    const entries = Object.entries(counts).map(([l, q]) => [Number(l), q])
+      .sort((a, b) => b[0] - a[0]);
+    const detail = entries.map(([l, q]) => `${q}× ${l}mm`).join(' + ');
+    const totalMm = entries.reduce((s, [l, q]) => s + l * q, 0);
+    return { detail, totalMm };
+  }
+  function addCount(map, len) { map[len] = (map[len] || 0) + 1; }
+  function mergeCount(dst, src) {
+    for (const [k, v] of Object.entries(src)) dst[k] = (dst[k] || 0) + v;
+  }
 
   for (const fname of facadeNames) {
     const panels = byFacade[fname];
@@ -4142,18 +4155,16 @@ function renderPliage() {
 
     const facadeColor = PIECE_COLORS[facadeNames.indexOf(fname) % PIECE_COLORS.length];
 
-    // Plinthe
     const plintheExt = getPliageExt(fname, 'plinthe', 0);
     const plintheTotal = plinthWidth + 2 * plintheExt;
-    grandTotals.plinthes += plintheTotal;
-
-    // Couvertine
     const couvertineExt = getPliageExt(fname, 'couvertine', 0);
     const couvertineTotal = couvertineWidth + 2 * couvertineExt;
-    grandTotals.couvertines += couvertineTotal;
 
-    // Opening totals
-    let facadeTotalLinteaux = 0, facadeTotalTableaux = 0, facadeTotalAppuis = 0;
+    addCount(grandCounts.plinthes, plintheTotal);
+    addCount(grandCounts.couvertines, couvertineTotal);
+
+    // Compteurs par façade
+    const facCounts = { linteaux: {}, tableaux: {}, appuis: {} };
 
     const extRow = (badge, label, mesure, extVal, facN, type, ovIdx) => {
       const total = mesure + 2 * extVal;
@@ -4179,65 +4190,92 @@ function renderPliage() {
         <span style="font-size:12px;color:var(--text4);">${openings.length} ouverture${openings.length !== 1 ? 's' : ''} détectée${openings.length !== 1 ? 's' : ''}</span>
       </div>`;
 
-    // ── Encadrements ──
     if (openings.length > 0) {
       html += `<div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);font-weight:700;margin-bottom:8px;">Encadrements</div>`;
       for (const ov of openings) {
         const idx = ov.id - 1;
-        const linteauExt = getPliageExt(fname, 'linteau', idx);
+        const linteauExt  = getPliageExt(fname, 'linteau',  idx);
         const tableauGExt = getPliageExt(fname, 'tableauG', idx);
         const tableauDExt = getPliageExt(fname, 'tableauD', idx);
-        const appuisExt = getPliageExt(fname, 'appuis', idx);
+        const appuisExt   = getPliageExt(fname, 'appuis',   idx);
 
-        const linteauTotal = ov.width + 2 * linteauExt;
+        const linteauTotal  = ov.width  + 2 * linteauExt;
         const tableauGTotal = ov.height + 2 * tableauGExt;
         const tableauDTotal = ov.height + 2 * tableauDExt;
-        const appuisTotal = ov.width + 2 * appuisExt;
+        const appuisTotal   = ov.width  + 2 * appuisExt;
 
-        facadeTotalLinteaux += linteauTotal;
-        facadeTotalTableaux += tableauGTotal + tableauDTotal;
-        facadeTotalAppuis += appuisTotal;
+        addCount(facCounts.linteaux, linteauTotal);
+        addCount(facCounts.tableaux, tableauGTotal);
+        addCount(facCounts.tableaux, tableauDTotal);
+        addCount(facCounts.appuis, appuisTotal);
 
         html += `<div class="pliage-ouverture">
           <div class="pliage-ouverture-title">${ov.name}${ov.isBottom ? ' <span style="font-size:11px;background:#e0703022;color:#e07030;border-radius:4px;padding:1px 6px;font-weight:600;">Porte RDC</span>' : ''} <span style="font-weight:400;color:var(--text4);font-size:12px;">(${ov.width}×${ov.height} mm)</span></div>
-          ${extRow('linteau', 'Linteau', ov.width, linteauExt, fname, 'linteau', idx)}
+          ${extRow('linteau', 'Linteau',   ov.width,  linteauExt,  fname, 'linteau',  idx)}
           ${extRow('tableau', 'Tableau G', ov.height, tableauGExt, fname, 'tableauG', idx)}
           ${extRow('tableau', 'Tableau D', ov.height, tableauDExt, fname, 'tableauD', idx)}
-          ${extRow('appuis', 'Appuis', ov.width, appuisExt, fname, 'appuis', idx)}
+          ${extRow('appuis',  'Appuis',    ov.width,  appuisExt,   fname, 'appuis',   idx)}
         </div>`;
       }
-      grandTotals.linteaux += facadeTotalLinteaux;
-      grandTotals.tableaux += facadeTotalTableaux;
-      grandTotals.appuis += facadeTotalAppuis;
+
+      mergeCount(grandCounts.linteaux, facCounts.linteaux);
+      mergeCount(grandCounts.tableaux, facCounts.tableaux);
+      mergeCount(grandCounts.appuis,   facCounts.appuis);
+
+      // Détail par façade
+      const dLt = fmtDetail(facCounts.linteaux);
+      const dTb = fmtDetail(facCounts.tableaux);
+      const dAp = fmtDetail(facCounts.appuis);
+
+      function detailRow(badge, label, d) {
+        return `<div class="pliage-totaux-row" style="align-items:baseline;gap:8px;flex-wrap:wrap;">
+          <span style="min-width:90px;"><span class="oss-badge ${badge}">${label}</span></span>
+          <span class="mono" style="color:var(--text3);font-size:12px;flex:1;">${d.detail || '—'}</span>
+          <span class="mono" style="font-weight:700;white-space:nowrap;">${d.totalMm} mm = ${(d.totalMm/1000).toFixed(3)} ml</span>
+        </div>`;
+      }
 
       html += `<div class="pliage-totaux">
         <div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);font-weight:700;margin-bottom:6px;">Totaux façade</div>
-        <div class="pliage-totaux-row"><span><span class="oss-badge linteau">Linteaux</span></span><span class="mono" style="font-weight:700;">${facadeTotalLinteaux} mm = ${(facadeTotalLinteaux/1000).toFixed(3)} ml</span></div>
-        <div class="pliage-totaux-row"><span><span class="oss-badge tableau">Tableaux</span></span><span class="mono" style="font-weight:700;">${facadeTotalTableaux} mm = ${(facadeTotalTableaux/1000).toFixed(3)} ml</span></div>
-        <div class="pliage-totaux-row"><span><span class="oss-badge appuis">Appuis</span></span><span class="mono" style="font-weight:700;">${facadeTotalAppuis} mm = ${(facadeTotalAppuis/1000).toFixed(3)} ml</span></div>
+        ${detailRow('linteau',   'Linteaux', dLt)}
+        ${detailRow('tableau',   'Tableaux', dTb)}
+        ${detailRow('appuis',    'Appuis',   dAp)}
       </div>`;
     } else {
       html += `<div style="color:var(--text4);font-size:13px;font-style:italic;margin-bottom:10px;">Aucune ouverture détectée sur cette façade.</div>`;
     }
 
-    // ── Plinthe & Couvertine ──
     html += `<div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);font-weight:700;margin:14px 0 8px;">Plinthe & Couvertine</div>`;
-    html += extRow('plinthe', 'Plinthe', plinthWidth, plintheExt, fname, 'plinthe', 0);
+    html += extRow('plinthe',    'Plinthe',    plinthWidth,     plintheExt,    fname, 'plinthe',    0);
     html += extRow('couvertine', 'Couvertine', couvertineWidth, couvertineExt, fname, 'couvertine', 0);
-
     html += `</div>`;
   }
 
-  // ── Grand totaux tous façades ──
+  // ── Grand total tous façades ──
+  const gLt = fmtDetail(grandCounts.linteaux);
+  const gTb = fmtDetail(grandCounts.tableaux);
+  const gAp = fmtDetail(grandCounts.appuis);
+  const gPl = fmtDetail(grandCounts.plinthes);
+  const gCo = fmtDetail(grandCounts.couvertines);
+
+  function grandRow(badge, label, d) {
+    return `<tr>
+      <td><span class="oss-badge ${badge}">${label}</span></td>
+      <td class="mono" style="color:var(--text3);font-size:12px;">${d.detail || '—'}</td>
+      <td class="mono">${d.totalMm} mm</td>
+      <td class="mono" style="font-weight:700;">${(d.totalMm/1000).toFixed(3)} ml</td>
+    </tr>`;
+  }
+
   html += `<div class="oss-card" style="border-color:var(--accent)44;">
     <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--accent);font-weight:700;margin-bottom:10px;">Total général — toutes façades</div>
     <table class="oss-table">
-      <tr><th>Élément</th><th>Total (mm)</th><th>Total (ml)</th></tr>
-      <tr><td><span class="oss-badge linteau">Linteaux</span></td><td class="mono">${grandTotals.linteaux} mm</td><td class="mono" style="font-weight:700;">${(grandTotals.linteaux/1000).toFixed(3)} ml</td></tr>
-      <tr><td><span class="oss-badge tableau">Tableaux</span></td><td class="mono">${grandTotals.tableaux} mm</td><td class="mono" style="font-weight:700;">${(grandTotals.tableaux/1000).toFixed(3)} ml</td></tr>
-      <tr><td><span class="oss-badge appuis">Appuis</span></td><td class="mono">${grandTotals.appuis} mm</td><td class="mono" style="font-weight:700;">${(grandTotals.appuis/1000).toFixed(3)} ml</td></tr>
-      <tr><td><span class="oss-badge plinthe">Plinthes</span></td><td class="mono">${grandTotals.plinthes} mm</td><td class="mono" style="font-weight:700;">${(grandTotals.plinthes/1000).toFixed(3)} ml</td></tr>
-      <tr><td><span class="oss-badge couvertine">Couvertines</span></td><td class="mono">${grandTotals.couvertines} mm</td><td class="mono" style="font-weight:700;">${(grandTotals.couvertines/1000).toFixed(3)} ml</td></tr>
+      <tr><th>Élément</th><th>Détail</th><th>Total (mm)</th><th>Total (ml)</th></tr>
+      ${grandRow('linteau',   'Linteaux',   gLt)}
+      ${grandRow('tableau',   'Tableaux',   gTb)}
+      ${grandRow('appuis',    'Appuis',     gAp)}
+      ${grandRow('plinthe',   'Plinthes',   gPl)}
+      ${grandRow('couvertine','Couvertines',gCo)}
     </table>
   </div>`;
 
