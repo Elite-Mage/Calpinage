@@ -5373,24 +5373,20 @@ function exportDxfOssature() {
       return;
     }
     const halfGap = fixGap / 2;
-    // Filter cuts that intersect this profile, excluding cuts at facade top/bottom edges
+    // Filter cuts that intersect this profile
     const relevantCuts = fixCuts.filter(c => {
       const cutTop = c.yCentre + halfGap;
       const cutBot = c.yCentre - halfGap;
-      // Must intersect the profile
       if (cutBot >= yTop || cutTop <= yBottom) return false;
-      // Skip if cut touches the top or bottom edge of the facade ossature
-      if (cutTop >= ossTop - 1) return false;
-      if (cutBot <= ossBottom + 1) return false;
       return true;
-    });
+    }).sort((a, b) => b.yCentre - a.yCentre); // top to bottom
+
     if (relevantCuts.length === 0) {
       dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
       return;
     }
-    // Sort cuts from top to bottom
-    relevantCuts.sort((a, b) => b.yCentre - a.yCentre);
-    // Compute segments and check all are >= MIN_CUT_LEN
+
+    // Compute segments
     const segments = [];
     let segTop = yTop;
     for (const cut of relevantCuts) {
@@ -5401,11 +5397,25 @@ function exportDxfOssature() {
       segTop = Math.min(cutBot, yTop);
     }
     if (segTop - yBottom > 1) segments.push({ top: segTop, bot: yBottom });
-    // If any segment < MIN_CUT_LEN, don't cut at all — draw full profile
+
+    // Bords de façade : fusionner les segments trop courts aux extrémités
+    // Le tronçon du haut (touchant ossTop) ne doit pas être découpé séparément
+    while (segments.length >= 2 && Math.abs(segments[0].top - ossTop) < 5 && (segments[0].top - segments[0].bot) < MIN_CUT_LEN) {
+      segments[1].top = segments[0].top;
+      segments.splice(0, 1);
+    }
+    // Le tronçon du bas (touchant ossBottom) ne doit pas être découpé séparément
+    while (segments.length >= 2 && Math.abs(segments[segments.length-1].bot - ossBottom) < 5 && (segments[segments.length-1].top - segments[segments.length-1].bot) < MIN_CUT_LEN) {
+      segments[segments.length-2].bot = segments[segments.length-1].bot;
+      segments.splice(segments.length-1, 1);
+    }
+
+    // Tronçons intérieurs : si un tronçon < MIN_CUT_LEN, ne pas découper du tout
     if (segments.some(s => (s.top - s.bot) < MIN_CUT_LEN)) {
       dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
       return;
     }
+
     // Draw segments
     for (const s of segments) {
       dxf.addRect(xmin, s.bot, xmax, s.top, layer, color);
