@@ -329,6 +329,88 @@ def calc_ossature_facades(rects_spatial, facade_labels, entraxe_max=600, panel_f
     return result
 
 
+def detect_pliage_openings(panels_by_facade):
+    """
+    Détecte les ouvertures (fenêtres / portes) et calcule les longueurs posées
+    pour linteau, tableaux, appuis, plinthe et couvertine par façade.
+
+    Retourne un dict {facade_name: {"openings": [...], "plinthe_mm": int, "couvertine_mm": int}}
+    Chaque ouverture : {"id", "name", "width_mm" (linteau/appuis), "height_mm" (tableau)}
+    """
+    result = {}
+    for fname, panels in panels_by_facade.items():
+        if not panels:
+            result[fname] = {"openings": [], "plinthe_mm": 0, "couvertine_mm": 0}
+            continue
+
+        facade_xmin = min(p["xmin"] for p in panels)
+        facade_xmax = max(p["xmax"] for p in panels)
+        facade_width = round(facade_xmax - facade_xmin)
+
+        # Group panels into horizontal rows (same floor, ±30mm tolerance)
+        sorted_panels = sorted(panels, key=lambda p: p["ymin"])
+        rows = []
+        for p in sorted_panels:
+            merged = False
+            for row in rows:
+                if p["ymin"] < row["ymax"] + 30 and p["ymax"] > row["ymin"] - 30:
+                    row["panels"].append(p)
+                    row["ymin"] = min(row["ymin"], p["ymin"])
+                    row["ymax"] = max(row["ymax"], p["ymax"])
+                    merged = True
+                    break
+            if not merged:
+                rows.append({"panels": [p], "ymin": p["ymin"], "ymax": p["ymax"]})
+        rows.sort(key=lambda r: r["ymin"])
+
+        def get_interior_gaps(row_panels):
+            """Retourne les gaps x intérieurs à la façade (pas les bords libres)."""
+            covered = sorted([[p["xmin"], p["xmax"]] for p in row_panels], key=lambda x: x[0])
+            gaps = []
+            cursor = facade_xmin
+            for pxmin, pxmax in covered:
+                if pxmin > cursor + 50:
+                    has_left = any(mx <= pxmin + 5 and mx >= cursor - 5 for _, mx in covered)
+                    has_right = any(mn >= pxmax - 5 for mn, _ in covered)
+                    if has_left and has_right:
+                        gaps.append({"xmin": round(cursor), "xmax": round(pxmin)})
+                cursor = max(cursor, pxmax)
+            return gaps
+
+        # Merge vertically adjacent gaps with same x-range into openings
+        openings = []
+        for row in rows:
+            row_gaps = get_interior_gaps(row["panels"])
+            for gap in row_gaps:
+                merged = False
+                for o in openings:
+                    if (abs(o["xmin"] - gap["xmin"]) < 60 and abs(o["xmax"] - gap["xmax"]) < 60
+                            and abs(o["ymax"] - row["ymin"]) < 40):
+                        o["ymax"] = round(row["ymax"])
+                        merged = True
+                        break
+                if not merged:
+                    openings.append({
+                        "xmin": gap["xmin"], "xmax": gap["xmax"],
+                        "ymin": round(row["ymin"]), "ymax": round(row["ymax"])
+                    })
+
+        result[fname] = {
+            "openings": [
+                {
+                    "id": i + 1,
+                    "name": f"Ouverture {i + 1}",
+                    "width_mm": round(o["xmax"] - o["xmin"]),
+                    "height_mm": round(o["ymax"] - o["ymin"]),
+                }
+                for i, o in enumerate(openings)
+            ],
+            "plinthe_mm": facade_width,
+            "couvertine_mm": facade_width,
+        }
+    return result
+
+
 def parse_dxf_file(filepath):
     """
     Lit un fichier DXF et retourne les données structurées sous forme de dict
@@ -649,6 +731,9 @@ def parse_dxf_file(filepath):
     # Calcul ossature par façade (analyse spatiale)
     ossature = calc_ossature_facades(rects_spatial, facade_labels, panel_facade_map=panel_facade_map)
 
+    # Calcul pliage (ouvertures, plinthes, couvertines)
+    pliage = detect_pliage_openings(panels_by_facade)
+
     return {
         "version": "6.0",
         "chantier": {"nom": base_name, "date": today},
@@ -658,6 +743,7 @@ def parse_dxf_file(filepath):
         "nextGroupId": gid,
         "activeGroupId": 1,
         "ossature_facades": ossature,
+        "pliage_facades": pliage,
         "rectsSpatial": rects_spatial,
         "facadeLabels": facade_labels,
         "panelFacadeMap": panel_facade_map,

@@ -355,7 +355,7 @@
     .sidebar { flex: none; width: 100%; overflow-y: visible; }
     .main { min-width: 0; overflow-y: visible; }
     .section-content.active { display: block; }
-    #sectionPanneaux, #sectionOssature, #sectionFixation, #sectionDevis { overflow: visible !important; }
+    #sectionPanneaux, #sectionOssature, #sectionFixation, #sectionPliage, #sectionDevis { overflow: visible !important; }
     .oss-config { flex-direction: column; gap: 8px; }
     .oss-config input { width: 100%; }
     .supplier-grid { grid-template-columns: 1fr; }
@@ -433,6 +433,23 @@
   .oss-badge { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 700; }
   .oss-badge.omega { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
   .oss-badge.zed { background: color-mix(in srgb, var(--yellow) 15%, transparent); color: var(--yellow); }
+  .oss-badge.linteau { background: color-mix(in srgb, #ff6b6b 15%, transparent); color: #ff6b6b; }
+  .oss-badge.tableau { background: color-mix(in srgb, #51cf66 15%, transparent); color: #51cf66; }
+  .oss-badge.appuis { background: color-mix(in srgb, #74c0fc 15%, transparent); color: #74c0fc; }
+  .oss-badge.plinthe { background: color-mix(in srgb, #ffa94d 15%, transparent); color: #ffa94d; }
+  .oss-badge.couvertine { background: color-mix(in srgb, #da77f2 15%, transparent); color: #da77f2; }
+  .pliage-ext-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0; }
+  .pliage-ext-row .pliage-label { min-width: 110px; font-size: 13px; }
+  .pliage-mesure { font-family: monospace; font-size: 13px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; width: 90px; color: var(--text); }
+  .pliage-ext-input { font-family: monospace; font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; width: 70px; color: var(--text3); text-align: center; }
+  .pliage-ext-input:focus { outline: none; border-color: var(--accent); color: var(--text); }
+  .pliage-total { font-family: monospace; font-size: 13px; font-weight: 700; color: var(--accent); min-width: 90px; }
+  .pliage-ouverture { border-left: 3px solid var(--border); padding: 10px 14px; margin-bottom: 10px; border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--bg) 60%, var(--card)); }
+  .pliage-ouverture-title { font-weight: 700; font-size: 14px; margin-bottom: 8px; color: var(--text); }
+  .pliage-totaux { background: color-mix(in srgb, var(--accent) 6%, var(--card)); border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border)); border-radius: 8px; padding: 10px 14px; margin-top: 8px; font-size: 12px; }
+  .pliage-totaux-row { display: flex; justify-content: space-between; padding: 2px 0; }
+  .pliage-config-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .pliage-config-row label { font-size: 12px; color: var(--text3); min-width: 80px; }
   .oss-config { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
   .oss-config label { font-size: 10px; color: var(--text4); letter-spacing: 1px; display: block; margin-bottom: 3px; text-transform: uppercase; }
   .oss-config input {
@@ -514,6 +531,7 @@
   <button class="section-tab active" onclick="switchSection('panneaux')">Panneaux</button>
   <button class="section-tab" onclick="switchSection('ossature')">Ossature</button>
   <button class="section-tab" onclick="switchSection('fixation')">Fixation</button>
+  <button class="section-tab" onclick="switchSection('pliage')">Pliage</button>
   <button class="section-tab" onclick="switchSection('devis')">Devis</button>
 </div>
 <div style="height:16px;"></div>
@@ -711,6 +729,44 @@
 </div>
 </div><!-- /sectionFixation -->
 
+<!-- ═══ SECTION: PLIAGE ═══ -->
+<div id="sectionPliage" class="section-content" style="flex:1;overflow:hidden;">
+<div class="layout">
+  <div class="sidebar">
+    <div class="card">
+      <div class="card-title">Configuration pliage</div>
+      <div class="pliage-config-row">
+        <label>Matériau</label>
+        <input type="text" id="pliageMaterial" placeholder="Alu, Acier…"
+          style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:13px;font-family:inherit;"
+          oninput="pliageConfig.material=this.value;scheduleSave();">
+      </div>
+      <div class="pliage-config-row">
+        <label>Épaisseur</label>
+        <input type="text" id="pliageEpaisseur" placeholder="ex: 2mm"
+          style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:13px;font-family:inherit;"
+          oninput="pliageConfig.epaisseur=this.value;scheduleSave();">
+      </div>
+    </div>
+    <div class="card" style="font-size:12px;color:var(--text4);line-height:1.7;">
+      <div style="font-weight:700;color:var(--text3);margin-bottom:6px;">Légende</div>
+      <div><span class="oss-badge linteau">Linteau</span> dessus ouverture</div>
+      <div style="margin-top:4px;"><span class="oss-badge tableau">Tableau</span> côtés ouverture</div>
+      <div style="margin-top:4px;"><span class="oss-badge appuis">Appuis</span> dessous ouverture</div>
+      <div style="margin-top:4px;"><span class="oss-badge plinthe">Plinthe</span> bas de façade</div>
+      <div style="margin-top:4px;"><span class="oss-badge couvertine">Couvertine</span> haut de façade</div>
+      <div style="margin-top:10px;color:var(--text4);font-size:11px;">Le champ <em>+mm/côté</em> ajoute la valeur sur chaque côté (total ×2).</div>
+    </div>
+  </div>
+  <div class="main" id="pliageContent">
+    <div class="card placeholder">
+      <div class="icon">&#9670;</div>
+      <div class="text">Importe un <span style="color:var(--accent);font-weight:700;">fichier DXF</span> pour détecter automatiquement les ouvertures,<br>plinthes et couvertines.</div>
+    </div>
+  </div>
+</div>
+</div><!-- /sectionPliage -->
+
 <!-- ═══ SECTION: DEVIS ═══ -->
 <div id="sectionDevis" class="section-content" style="flex:1;overflow:hidden;">
 <div class="layout">
@@ -830,6 +886,9 @@ let activeSection = 'panneaux'; // 'panneaux' | 'ossature' | 'devis'
 let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false, prolongEntaxe: 600 };
 let devisConfig = { prixMO: '' };
 let fixationConfig = { prixFixation: '' };
+// pliageConfig.extensions[facadeName] = { ouvertures:[{linteau,tableauG,tableauD,appuis}…], plinthe, couvertine }
+// each ext field = { ext: mm (added each side), mesureManuelle: null|mm }
+let pliageConfig = { material: '', epaisseur: '', extensions: {} };
 let projectRectsSpatial = []; // Stored spatial rectangles from DXF parsing
 let projectFacadeLabels = []; // Stored facade labels from DXF parsing
 let projectPanelFacadeMap = {}; // Direct panel→facade assignment from clustering
@@ -2296,6 +2355,7 @@ function getProjectData() {
     ossatureConfig,
     devisConfig,
     fixationConfig,
+    pliageConfig,
     rectsSpatial: projectRectsSpatial,
     facadeLabels: projectFacadeLabels,
   };
@@ -2335,6 +2395,11 @@ function applyProjectData(data) {
   if (data.fixationConfig) {
     fixationConfig = { ...fixationConfig, ...data.fixationConfig };
     document.getElementById('fixationPrix').value = fixationConfig.prixFixation || '';
+  }
+  if (data.pliageConfig) {
+    pliageConfig = { material: '', epaisseur: '', extensions: {}, ...data.pliageConfig };
+    document.getElementById('pliageMaterial').value = pliageConfig.material || '';
+    document.getElementById('pliageEpaisseur').value = pliageConfig.epaisseur || '';
   }
   if (data.rectsSpatial) projectRectsSpatial = data.rectsSpatial;
   if (data.facadeLabels) projectFacadeLabels = data.facadeLabels;
@@ -3401,6 +3466,7 @@ function switchSection(name) {
   if (sectionEl) sectionEl.classList.add('active');
   if (name === 'ossature') renderOssature();
   if (name === 'fixation') renderFixation();
+  if (name === 'pliage') renderPliage();
   if (name === 'devis') renderDevis();
 }
 
@@ -3932,6 +3998,235 @@ function renderOssature() {
 // ============================================================
 // FIXATION
 // ============================================================
+// ============================================================
+// PLIAGE — OPENING DETECTION & RENDER
+// ============================================================
+
+/**
+ * Detect rectangular openings (windows/doors) from a set of facade panels.
+ * Returns { openings, plinthWidth, couvertineWidth }
+ * Each opening: { id, width (linteau/appuis), height (tableau) }
+ */
+function detectPliageOpenings(panels) {
+  if (!panels || panels.length === 0) return { openings: [], plinthWidth: 0, couvertineWidth: 0 };
+
+  const facadeXmin = Math.min(...panels.map(p => p.xmin));
+  const facadeXmax = Math.max(...panels.map(p => p.xmax));
+
+  // Group panels into horizontal rows (same floor)
+  const sorted = [...panels].sort((a, b) => a.ymin - b.ymin);
+  const rows = [];
+  for (const p of sorted) {
+    const row = rows.find(r => p.ymin < r.ymax + 30 && p.ymax > r.ymin - 30);
+    if (row) {
+      row.panels.push(p);
+      row.ymin = Math.min(row.ymin, p.ymin);
+      row.ymax = Math.max(row.ymax, p.ymax);
+    } else {
+      rows.push({ panels: [p], ymin: p.ymin, ymax: p.ymax });
+    }
+  }
+  rows.sort((a, b) => a.ymin - b.ymin);
+
+  // For each row, find x-gaps interior to the facade (not at edge)
+  function getInteriorXGaps(rowPanels) {
+    const covered = rowPanels.map(p => [p.xmin, p.xmax]).sort((a, b) => a[0] - b[0]);
+    const gaps = [];
+    let cursor = facadeXmin;
+    for (const [pxmin, pxmax] of covered) {
+      if (pxmin > cursor + 50) {
+        // Check it's not a facade-edge gap (must have panels on both sides)
+        const hasLeft = covered.some(([, mx]) => mx <= pxmin + 5 && mx >= cursor - 5);
+        const hasRight = covered.some(([mn]) => mn >= pxmax - 5);
+        if (hasLeft && hasRight) gaps.push({ xmin: Math.round(cursor), xmax: Math.round(pxmin) });
+      }
+      cursor = Math.max(cursor, pxmax);
+    }
+    return gaps;
+  }
+
+  // Merge vertically adjacent gaps with same x-range into openings
+  const openings = [];
+  for (const row of rows) {
+    const rowGaps = getInteriorXGaps(row.panels);
+    for (const gap of rowGaps) {
+      // Try to merge with existing opening (same x-range, touching vertically)
+      const existing = openings.find(o =>
+        Math.abs(o.xmin - gap.xmin) < 60 && Math.abs(o.xmax - gap.xmax) < 60 &&
+        Math.abs(o.ymax - row.ymin) < 40
+      );
+      if (existing) {
+        existing.ymax = Math.round(row.ymax);
+      } else {
+        openings.push({ xmin: gap.xmin, xmax: gap.xmax, ymin: Math.round(row.ymin), ymax: Math.round(row.ymax) });
+      }
+    }
+  }
+
+  const facadeWidth = Math.round(facadeXmax - facadeXmin);
+  return {
+    openings: openings.map((o, i) => ({
+      id: i + 1,
+      name: `Ouverture ${i + 1}`,
+      width: Math.round(o.xmax - o.xmin),   // linteau & appuis
+      height: Math.round(o.ymax - o.ymin),  // tableau G & D
+    })),
+    plinthWidth: facadeWidth,
+    couvertineWidth: facadeWidth,
+  };
+}
+
+/**
+ * Get or create extension config for a facade element.
+ * Returns the ext value (mm per side, default 0).
+ */
+function getPliageExt(facadeName, type, ouvertureIdx) {
+  const fe = pliageConfig.extensions[facadeName];
+  if (!fe) return 0;
+  if (type === 'plinthe') return fe.plintheExt || 0;
+  if (type === 'couvertine') return fe.couvertineExt || 0;
+  const ov = fe.ouvertures && fe.ouvertures[ouvertureIdx];
+  if (!ov) return 0;
+  return ov[type + 'Ext'] || 0;
+}
+
+function setPliageExt(facadeName, type, ouvertureIdx, value) {
+  if (!pliageConfig.extensions[facadeName]) {
+    pliageConfig.extensions[facadeName] = { ouvertures: [], plintheExt: 0, couvertineExt: 0 };
+  }
+  const fe = pliageConfig.extensions[facadeName];
+  if (type === 'plinthe') { fe.plintheExt = value; return; }
+  if (type === 'couvertine') { fe.couvertineExt = value; return; }
+  while (fe.ouvertures.length <= ouvertureIdx) fe.ouvertures.push({});
+  fe.ouvertures[ouvertureIdx][type + 'Ext'] = value;
+}
+
+function renderPliage() {
+  const el = document.getElementById('pliageContent');
+  if (!projectRectsSpatial || !projectRectsSpatial.length) {
+    el.innerHTML = '<div class="card placeholder"><div class="icon">&#9670;</div><div class="text">Importe un <span style="color:var(--accent);font-weight:700;">fichier DXF</span> pour détecter automatiquement les ouvertures,<br>plinthes et couvertines.</div></div>';
+    return;
+  }
+
+  const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+  const facadeNames = Object.keys(byFacade).sort();
+  if (!facadeNames.length) {
+    el.innerHTML = '<div class="card placeholder"><div class="icon">&#9670;</div><div class="text">Aucune façade détectée.</div></div>';
+    return;
+  }
+
+  let html = '';
+  // Per-facade grand totals (across all facades)
+  let grandTotals = { linteaux: 0, tableaux: 0, appuis: 0, plinthes: 0, couvertines: 0 };
+
+  for (const fname of facadeNames) {
+    const panels = byFacade[fname];
+    const { openings, plinthWidth, couvertineWidth } = detectPliageOpenings(panels);
+
+    const facadeColor = PIECE_COLORS[facadeNames.indexOf(fname) % PIECE_COLORS.length];
+
+    // Plinthe
+    const plintheExt = getPliageExt(fname, 'plinthe', 0);
+    const plintheTotal = plinthWidth + 2 * plintheExt;
+    grandTotals.plinthes += plintheTotal;
+
+    // Couvertine
+    const couvertineExt = getPliageExt(fname, 'couvertine', 0);
+    const couvertineTotal = couvertineWidth + 2 * couvertineExt;
+    grandTotals.couvertines += couvertineTotal;
+
+    // Opening totals
+    let facadeTotalLinteaux = 0, facadeTotalTableaux = 0, facadeTotalAppuis = 0;
+
+    const extRow = (badge, label, mesure, extVal, facN, type, ovIdx) => {
+      const total = mesure + 2 * extVal;
+      return `<div class="pliage-ext-row">
+        <span class="oss-badge ${badge}" style="min-width:80px;text-align:center;">${label}</span>
+        <span class="pliage-label" style="color:var(--text3);font-size:12px;">mesure :</span>
+        <span class="mono" style="font-size:13px;min-width:75px;">${mesure} mm</span>
+        <span style="color:var(--text4);font-size:12px;">+ </span>
+        <input class="pliage-ext-input" type="number" min="0" step="1" value="${extVal}"
+          title="mm ajoutés de chaque côté"
+          oninput="setPliageExt(${JSON.stringify(facN)},${JSON.stringify(type)},${ovIdx},parseInt(this.value)||0);renderPliage();scheduleSave();"
+          placeholder="0">
+        <span style="color:var(--text4);font-size:11px;">mm/côté</span>
+        <span style="color:var(--text4);font-size:12px;">=</span>
+        <span class="pliage-total">${total} mm</span>
+      </div>`;
+    };
+
+    html += `<div class="oss-card" style="border-left:3px solid ${facadeColor};">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+        <span style="width:10px;height:10px;border-radius:50%;background:${facadeColor};display:inline-block;"></span>
+        <span style="font-weight:700;font-size:15px;">${fname}</span>
+        <span style="font-size:12px;color:var(--text4);">${openings.length} ouverture${openings.length !== 1 ? 's' : ''} détectée${openings.length !== 1 ? 's' : ''}</span>
+      </div>`;
+
+    // ── Encadrements ──
+    if (openings.length > 0) {
+      html += `<div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);font-weight:700;margin-bottom:8px;">Encadrements</div>`;
+      for (const ov of openings) {
+        const idx = ov.id - 1;
+        const linteauExt = getPliageExt(fname, 'linteau', idx);
+        const tableauGExt = getPliageExt(fname, 'tableauG', idx);
+        const tableauDExt = getPliageExt(fname, 'tableauD', idx);
+        const appuisExt = getPliageExt(fname, 'appuis', idx);
+
+        const linteauTotal = ov.width + 2 * linteauExt;
+        const tableauGTotal = ov.height + 2 * tableauGExt;
+        const tableauDTotal = ov.height + 2 * tableauDExt;
+        const appuisTotal = ov.width + 2 * appuisExt;
+
+        facadeTotalLinteaux += linteauTotal;
+        facadeTotalTableaux += tableauGTotal + tableauDTotal;
+        facadeTotalAppuis += appuisTotal;
+
+        html += `<div class="pliage-ouverture">
+          <div class="pliage-ouverture-title">${ov.name} <span style="font-weight:400;color:var(--text4);font-size:12px;">(${ov.width}×${ov.height} mm)</span></div>
+          ${extRow('linteau', 'Linteau', ov.width, linteauExt, fname, 'linteau', idx)}
+          ${extRow('tableau', 'Tableau G', ov.height, tableauGExt, fname, 'tableauG', idx)}
+          ${extRow('tableau', 'Tableau D', ov.height, tableauDExt, fname, 'tableauD', idx)}
+          ${extRow('appuis', 'Appuis', ov.width, appuisExt, fname, 'appuis', idx)}
+        </div>`;
+      }
+      grandTotals.linteaux += facadeTotalLinteaux;
+      grandTotals.tableaux += facadeTotalTableaux;
+      grandTotals.appuis += facadeTotalAppuis;
+
+      html += `<div class="pliage-totaux">
+        <div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);font-weight:700;margin-bottom:6px;">Totaux façade</div>
+        <div class="pliage-totaux-row"><span><span class="oss-badge linteau">Linteaux</span></span><span class="mono" style="font-weight:700;">${facadeTotalLinteaux} mm = ${(facadeTotalLinteaux/1000).toFixed(3)} ml</span></div>
+        <div class="pliage-totaux-row"><span><span class="oss-badge tableau">Tableaux</span></span><span class="mono" style="font-weight:700;">${facadeTotalTableaux} mm = ${(facadeTotalTableaux/1000).toFixed(3)} ml</span></div>
+        <div class="pliage-totaux-row"><span><span class="oss-badge appuis">Appuis</span></span><span class="mono" style="font-weight:700;">${facadeTotalAppuis} mm = ${(facadeTotalAppuis/1000).toFixed(3)} ml</span></div>
+      </div>`;
+    } else {
+      html += `<div style="color:var(--text4);font-size:13px;font-style:italic;margin-bottom:10px;">Aucune ouverture détectée sur cette façade.</div>`;
+    }
+
+    // ── Plinthe & Couvertine ──
+    html += `<div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);font-weight:700;margin:14px 0 8px;">Plinthe & Couvertine</div>`;
+    html += extRow('plinthe', 'Plinthe', plinthWidth, plintheExt, fname, 'plinthe', 0);
+    html += extRow('couvertine', 'Couvertine', couvertineWidth, couvertineExt, fname, 'couvertine', 0);
+
+    html += `</div>`;
+  }
+
+  // ── Grand totaux tous façades ──
+  html += `<div class="oss-card" style="border-color:var(--accent)44;">
+    <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--accent);font-weight:700;margin-bottom:10px;">Total général — toutes façades</div>
+    <table class="oss-table">
+      <tr><th>Élément</th><th>Total (mm)</th><th>Total (ml)</th></tr>
+      <tr><td><span class="oss-badge linteau">Linteaux</span></td><td class="mono">${grandTotals.linteaux} mm</td><td class="mono" style="font-weight:700;">${(grandTotals.linteaux/1000).toFixed(3)} ml</td></tr>
+      <tr><td><span class="oss-badge tableau">Tableaux</span></td><td class="mono">${grandTotals.tableaux} mm</td><td class="mono" style="font-weight:700;">${(grandTotals.tableaux/1000).toFixed(3)} ml</td></tr>
+      <tr><td><span class="oss-badge appuis">Appuis</span></td><td class="mono">${grandTotals.appuis} mm</td><td class="mono" style="font-weight:700;">${(grandTotals.appuis/1000).toFixed(3)} ml</td></tr>
+      <tr><td><span class="oss-badge plinthe">Plinthes</span></td><td class="mono">${grandTotals.plinthes} mm</td><td class="mono" style="font-weight:700;">${(grandTotals.plinthes/1000).toFixed(3)} ml</td></tr>
+      <tr><td><span class="oss-badge couvertine">Couvertines</span></td><td class="mono">${grandTotals.couvertines} mm</td><td class="mono" style="font-weight:700;">${(grandTotals.couvertines/1000).toFixed(3)} ml</td></tr>
+    </table>
+  </div>`;
+
+  el.innerHTML = html;
+}
+
 function calcFixation() {
   const data = calcOssature();
   const entaxeMax = ossatureConfig.entaxeMax || 600;
@@ -4222,7 +4517,45 @@ function renderDevis() {
     </table>
   </div></div>`;
 
-  // ── 4. Section Main d'œuvre ──
+  // ── 4. Section Pliage ──
+  {
+    const pliageData = (() => {
+      if (!projectRectsSpatial || !projectRectsSpatial.length) return null;
+      const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+      let totLinteaux = 0, totTableaux = 0, totAppuis = 0, totPlinthes = 0, totCouvertines = 0;
+      for (const [fname, panels] of Object.entries(byFacade)) {
+        const { openings, plinthWidth, couvertineWidth } = detectPliageOpenings(panels);
+        const plintheExt = getPliageExt(fname, 'plinthe', 0);
+        const couvertineExt = getPliageExt(fname, 'couvertine', 0);
+        totPlinthes += plinthWidth + 2 * plintheExt;
+        totCouvertines += couvertineWidth + 2 * couvertineExt;
+        for (const ov of openings) {
+          const idx = ov.id - 1;
+          totLinteaux += ov.width + 2 * getPliageExt(fname, 'linteau', idx);
+          totTableaux += (ov.height + 2 * getPliageExt(fname, 'tableauG', idx)) + (ov.height + 2 * getPliageExt(fname, 'tableauD', idx));
+          totAppuis += ov.width + 2 * getPliageExt(fname, 'appuis', idx);
+        }
+      }
+      return { totLinteaux, totTableaux, totAppuis, totPlinthes, totCouvertines,
+               totalML: (totLinteaux + totTableaux + totAppuis + totPlinthes + totCouvertines) / 1000 };
+    })();
+    if (pliageData) {
+      html += `<div class="oss-card"><div class="devis-section">
+    <div class="devis-section-title">4. Pliage</div>
+    <table class="devis-table">
+      <tr><th>Élément</th><th>Total ml</th></tr>
+      <tr><td><span class="oss-badge linteau">Linteaux</span></td><td class="mono">${(pliageData.totLinteaux/1000).toFixed(3)} ml</td></tr>
+      <tr><td><span class="oss-badge tableau">Tableaux</span></td><td class="mono">${(pliageData.totTableaux/1000).toFixed(3)} ml</td></tr>
+      <tr><td><span class="oss-badge appuis">Appuis</span></td><td class="mono">${(pliageData.totAppuis/1000).toFixed(3)} ml</td></tr>
+      <tr><td><span class="oss-badge plinthe">Plinthes</span></td><td class="mono">${(pliageData.totPlinthes/1000).toFixed(3)} ml</td></tr>
+      <tr><td><span class="oss-badge couvertine">Couvertines</span></td><td class="mono">${(pliageData.totCouvertines/1000).toFixed(3)} ml</td></tr>
+      <tr style="font-weight:700;"><td style="color:var(--text3);">Total pliage</td><td class="mono" style="color:var(--yellow);">${pliageData.totalML.toFixed(3)} ml</td></tr>
+    </table>
+  </div></div>`;
+    }
+  }
+
+  // ── 5. Section Main d'œuvre ──
   // Calculate total surface utile from pieces
   for (const g of groups) {
     for (const sub of g.subsections) {
@@ -4236,7 +4569,7 @@ function renderDevis() {
   totalMOHT = totalSurfaceUtile * prixMO;
 
   html += `<div class="oss-card"><div class="devis-section">
-    <div class="devis-section-title">4. Main d'&#339;uvre</div>
+    <div class="devis-section-title">5. Main d'&#339;uvre</div>
     <table class="devis-table">
       <tr><th>Désignation</th><th>Surface</th><th>Prix/m²</th><th>Total HT</th></tr>
       <tr>
