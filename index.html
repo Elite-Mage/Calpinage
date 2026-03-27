@@ -5413,6 +5413,8 @@ function exportDxfOssature() {
     return [...cuts].sort((a, b) => a - b);
   }
 
+  const MIN_CUT_LEN = 1500; // tronçon min pour appliquer une découpe
+
   // Helper: draw a vertical profile split at cut points
   function addSplitProfile(xmin, yBottom, xmax, yTop, layer, color, cutPositions) {
     if (!cutPositions || cutPositions.length === 0) {
@@ -5428,18 +5430,22 @@ function exportDxfOssature() {
     }
     // Sort top to bottom
     relevant.sort((a, b) => b - a);
-    // Draw segments
+    // Compute segments
+    const segments = [];
     let segTop = yTop;
     for (const cy of relevant) {
       const segBot = cy + halfGap;
-      if (segTop - segBot > 1) {
-        dxf.addRect(xmin, segBot, xmax, segTop, layer, color);
-      }
+      if (segTop - segBot > 1) segments.push({ top: segTop, bot: segBot });
       segTop = cy - halfGap;
     }
-    // Last segment
-    if (segTop - yBottom > 1) {
-      dxf.addRect(xmin, yBottom, xmax, segTop, layer, color);
+    if (segTop - yBottom > 1) segments.push({ top: segTop, bot: yBottom });
+    // Si un tronçon < MIN_CUT_LEN, ne pas découper
+    if (segments.some(s => (s.top - s.bot) < MIN_CUT_LEN)) {
+      dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
+      return;
+    }
+    for (const s of segments) {
+      dxf.addRect(xmin, s.bot, xmax, s.top, layer, color);
     }
   }
 
@@ -5495,24 +5501,49 @@ function exportDxfOssature() {
     const violetXsSet = new Set();
     const violetXsSetHaut = new Set();
 
-    // Entraxe ZED per panel — si panneau en bas/haut et prolongement actif, on étend
+    // Entraxe ZED — collect per panel then merge across joints
     const extYellowXsHaut = [];
+    const rawZeds = []; // {cx, yStart, yEnd}
     for (const p of allPanels) {
       const pw = Math.round(p.xmax - p.xmin);
       const nz = Math.max(0, Math.ceil(pw / ENTRAXE_REGULAR) - 1);
       if (nz > 0) {
         const step = pw / (nz + 1);
-        const isBottom = prol > 0 && Math.abs(p.ymin - fymin) < 5;
-        const isTop = prolH > 0 && Math.abs(p.ymax - fymax) < 5;
-        const yStart = isBottom ? fymin - prol : p.ymin;
-        const yEnd = isTop ? fymax + prolH : p.ymax;
         for (let z = 1; z <= nz; z++) {
-          const cx = p.xmin + z * step;
-          addSplitProfile(cx - ZED_W/2, yStart, cx + ZED_W/2, yEnd, 'ZED_ENTRAXE', 2, jointCuts);
-          if (isBottom) extYellowXs.push(cx);
-          if (isTop) extYellowXsHaut.push(cx);
+          rawZeds.push({ cx: p.xmin + z * step, yStart: p.ymin, yEnd: p.ymax });
         }
       }
+    }
+    // Merge zeds at same X across joints (gap ≤ MAX_GAP)
+    const usedZ = new Array(rawZeds.length).fill(false);
+    const mergedZeds = [];
+    for (let i = 0; i < rawZeds.length; i++) {
+      if (usedZ[i]) continue;
+      let { cx, yStart, yEnd } = rawZeds[i];
+      usedZ[i] = true;
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (let j = 0; j < rawZeds.length; j++) {
+          if (usedZ[j] || Math.abs(rawZeds[j].cx - cx) > 5) continue;
+          const g1 = rawZeds[j].yStart - yEnd;
+          const g2 = yStart - rawZeds[j].yEnd;
+          if ((g1 >= -5 && g1 <= MAX_GAP) || (g2 >= -5 && g2 <= MAX_GAP)) {
+            yStart = Math.min(yStart, rawZeds[j].yStart);
+            yEnd = Math.max(yEnd, rawZeds[j].yEnd);
+            usedZ[j] = true;
+            changed = true;
+          }
+        }
+      }
+      const isBottom = prol > 0 && Math.abs(yStart - fymin) < 5;
+      const isTop = prolH > 0 && Math.abs(yEnd - fymax) < 5;
+      if (isBottom) { yStart = fymin - prol; extYellowXs.push(cx); }
+      if (isTop) { yEnd = fymax + prolH; extYellowXsHaut.push(cx); }
+      mergedZeds.push({ cx, yStart, yEnd });
+    }
+    for (const { cx, yStart, yEnd } of mergedZeds) {
+      addSplitProfile(cx - ZED_W/2, yStart, cx + ZED_W/2, yEnd, 'ZED_ENTRAXE', 2, jointCuts);
     }
 
     // Pairwise junction detection
