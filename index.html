@@ -649,7 +649,20 @@
           <label>Hauteur ossature (mm)</label>
           <input type="number" id="ossHauteur" value="0" min="0" max="10000" step="10" placeholder="auto" oninput="ossatureConfig.hauteurOssature=+this.value; renderOssature(); scheduleSave();" title="Hauteur des montants verticaux (0 = auto depuis panneaux)">
         </div>
+        <div>
+          <label>Écart découpe fixation (mm)</label>
+          <input type="number" id="ossFixationGap" value="20" min="0" max="200" step="1" oninput="ossatureConfig.fixationGap=+this.value; scheduleSave();" title="Écart entre tronçons aux zones de fixation">
+        </div>
       </div>
+    </div>
+    <!-- ZONES DE FIXATION -->
+    <div class="card">
+      <div class="card-title">Zones de fixation</div>
+      <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+        <label style="margin-bottom:0;font-size:12px;">Appliquer à toutes les façades</label>
+        <input type="checkbox" id="ossFixationApplyAll" onchange="ossatureConfig.fixationApplyAll=this.checked; renderFixationZonesUI(); scheduleSave();">
+      </div>
+      <div id="fixationZonesContainer"></div>
     </div>
     <!-- OMEGA STOCK -->
     <div class="card">
@@ -893,7 +906,7 @@ let nextGroupId = 3;
 let activeGroupId = 1;
 let allResults = null;
 let activeSection = 'panneaux'; // 'panneaux' | 'ossature' | 'devis'
-let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false, prolongEntaxe: 600, prolongementHaut: 0, prolongementHautEnabled: false };
+let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false, prolongEntaxe: 600, prolongementHaut: 0, prolongementHautEnabled: false, fixationGap: 20, fixationZones: {}, fixationApplyAll: false };
 let devisConfig = { prixMO: '' };
 let fixationConfig = { prixFixation: '' };
 // pliageConfig.extensions[facadeName] = { ouvertures:[{linteau,tableauG,tableauD,appuis}…], plinthe, couvertine }
@@ -2386,7 +2399,7 @@ function applyProjectData(data) {
     activeGroupId = data.activeGroupId || groups[0]?.id;
   }
   if (data.ossatureConfig) {
-    ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false, prolongEntaxe: 600, ...data.ossatureConfig };
+    ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false, prolongEntaxe: 600, prolongementHaut: 0, prolongementHautEnabled: false, fixationGap: 20, fixationZones: {}, fixationApplyAll: false, ...data.ossatureConfig };
     document.getElementById('ossEntaxeMax').value = ossatureConfig.entaxeMax || 600;
     document.getElementById('ossKerf').value = ossatureConfig.kerf || 0;
     document.getElementById('ossPrixOmega').value = ossatureConfig.prixOmega || '';
@@ -2397,8 +2410,11 @@ function applyProjectData(data) {
     document.getElementById('ossProlongEntaxe').value = ossatureConfig.prolongEntaxe || 600;
     document.getElementById('ossProlongHautEnabled').checked = !!ossatureConfig.prolongementHautEnabled;
     document.getElementById('ossProlongHautH').value = ossatureConfig.prolongementHaut || 0;
+    document.getElementById('ossFixationGap').value = ossatureConfig.fixationGap ?? 20;
+    document.getElementById('ossFixationApplyAll').checked = !!ossatureConfig.fixationApplyAll;
     renderOmegaStockList();
     renderZedStockList();
+    renderFixationZonesUI();
   }
   if (data.devisConfig) {
     devisConfig = { ...devisConfig, ...data.devisConfig };
@@ -3476,7 +3492,7 @@ function switchSection(name) {
   document.querySelectorAll('.section-content').forEach(s => s.classList.remove('active'));
   const sectionEl = document.getElementById('section' + name.charAt(0).toUpperCase() + name.slice(1));
   if (sectionEl) sectionEl.classList.add('active');
-  if (name === 'ossature') renderOssature();
+  if (name === 'ossature') { renderOssature(); renderFixationZonesUI(); }
   if (name === 'fixation') renderFixation();
   if (name === 'pliage') renderPliage();
   if (name === 'devis') renderDevis();
@@ -3536,6 +3552,78 @@ function removeOmegaStock(i) {
 function removeZedStock(i) {
   ossatureConfig.zedStocks.splice(i, 1);
   renderZedStockList(); renderOssature(); scheduleSave();
+}
+
+// ============================================================
+// ZONES DE FIXATION — UI management
+// ============================================================
+function getFixationFacadeNames() {
+  if (!projectRectsSpatial || !projectRectsSpatial.length) return [];
+  const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+  return Object.keys(byFacade).sort();
+}
+
+function renderFixationZonesUI() {
+  const container = document.getElementById('fixationZonesContainer');
+  if (!container) return;
+  const facades = getFixationFacadeNames();
+  if (facades.length === 0) {
+    container.innerHTML = '<div style="color:var(--text3);font-size:12px;">Importez un DXF pour configurer les zones de fixation.</div>';
+    return;
+  }
+  if (!ossatureConfig.fixationZones) ossatureConfig.fixationZones = {};
+  const applyAll = ossatureConfig.fixationApplyAll;
+  const keys = applyAll ? ['__all__'] : facades;
+  let html = '';
+  for (const key of keys) {
+    const label = applyAll ? 'Toutes les façades' : key;
+    const zones = ossatureConfig.fixationZones[key] || [];
+    html += `<div style="margin-bottom:10px;border:1px solid var(--border);border-radius:6px;padding:8px;">`;
+    html += `<div style="font-weight:600;font-size:13px;margin-bottom:6px;">${label}</div>`;
+    html += `<div id="fixZones_${key}">`;
+    for (let i = 0; i < zones.length; i++) {
+      const z = zones[i];
+      html += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap;">`;
+      html += `<span style="font-size:11px;color:var(--text3);min-width:20px;">#${i+1}</span>`;
+      html += `<label style="margin:0;font-size:11px;">Décalage</label>`;
+      html += `<input type="number" value="${z.offset}" min="0" max="20000" step="10" style="width:70px;" oninput="updateFixationZone('${key}',${i},'offset',+this.value)">`;
+      html += `<label style="margin:0;font-size:11px;">Hauteur</label>`;
+      html += `<input type="number" value="${z.height}" min="10" max="5000" step="10" style="width:70px;" oninput="updateFixationZone('${key}',${i},'height',+this.value)">`;
+      html += `<button style="background:var(--danger,#e74c3c);color:#fff;border:none;border-radius:4px;padding:2px 6px;cursor:pointer;font-size:11px;" onclick="removeFixationZone('${key}',${i})">&#10005;</button>`;
+      html += `</div>`;
+    }
+    html += `</div>`;
+    html += `<button class="btn-add" style="margin-top:4px;font-size:11px;padding:2px 10px;" onclick="addFixationZone('${key}')">+ Zone</button>`;
+    html += `</div>`;
+  }
+  container.innerHTML = html;
+}
+
+function addFixationZone(key) {
+  if (!ossatureConfig.fixationZones) ossatureConfig.fixationZones = {};
+  if (!ossatureConfig.fixationZones[key]) ossatureConfig.fixationZones[key] = [];
+  ossatureConfig.fixationZones[key].push({ offset: 0, height: 300 });
+  renderFixationZonesUI(); scheduleSave();
+}
+
+function removeFixationZone(key, idx) {
+  if (!ossatureConfig.fixationZones || !ossatureConfig.fixationZones[key]) return;
+  ossatureConfig.fixationZones[key].splice(idx, 1);
+  renderFixationZonesUI(); scheduleSave();
+}
+
+function updateFixationZone(key, idx, field, value) {
+  if (!ossatureConfig.fixationZones || !ossatureConfig.fixationZones[key]) return;
+  ossatureConfig.fixationZones[key][idx][field] = value;
+  scheduleSave();
+}
+
+function getFixationZonesForFacade(facadeName) {
+  if (!ossatureConfig.fixationZones) return [];
+  if (ossatureConfig.fixationApplyAll) {
+    return ossatureConfig.fixationZones['__all__'] || [];
+  }
+  return ossatureConfig.fixationZones[facadeName] || [];
 }
 
 // ============================================================
@@ -5251,8 +5339,60 @@ function exportDxfOssature() {
   dxf.addLayer('OMEGA', 4);
   dxf.addLayer('ZED_ENTRAXE', 2);
   dxf.addLayer('ZED_BORD', 6);
+  dxf.addLayer('FIXATION', 3);
   dxf.addLayer('TITRE', 7);
   dxf.addLayer('TEXTE', 7);
+
+  const fixGap = ossatureConfig.fixationGap || 20;
+
+  // Helper: compute absolute Y positions of fixation zone centers for a facade
+  // Returns array of { yCentre, height } — yCentre is absolute Y of zone centre
+  function computeFixationCuts(facadeName, ossTop, ossBottom) {
+    const zones = getFixationZonesForFacade(facadeName);
+    if (!zones || zones.length === 0) return [];
+    const cuts = [];
+    let cursor = ossTop; // start from top of ossature
+    for (const z of zones) {
+      cursor -= (z.offset || 0); // descend by offset
+      const yCentre = cursor - z.height / 2;
+      if (yCentre - z.height / 2 < ossBottom) break; // don't go below bottom
+      cuts.push({ yCentre, height: z.height, yTop: cursor, yBottom: cursor - z.height });
+      cursor -= z.height; // move cursor to bottom of this zone
+    }
+    return cuts;
+  }
+
+  // Helper: draw a vertical profile split at fixation zones
+  // xmin, yBottom, xmax, yTop = full profile rect; fixCuts = fixation zone cuts
+  function addSplitProfile(xmin, yBottom, xmax, yTop, layer, color, fixCuts) {
+    if (!fixCuts || fixCuts.length === 0) {
+      dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
+      return;
+    }
+    // Collect cut points (Y centres) that intersect this profile's Y range
+    const halfGap = fixGap / 2;
+    const relevantCuts = fixCuts.filter(c => c.yCentre - halfGap < yTop && c.yCentre + halfGap > yBottom);
+    if (relevantCuts.length === 0) {
+      dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
+      return;
+    }
+    // Sort cuts from top to bottom
+    relevantCuts.sort((a, b) => b.yCentre - a.yCentre);
+    let segTop = yTop;
+    for (const cut of relevantCuts) {
+      const cutTop = cut.yCentre + halfGap;
+      const cutBot = cut.yCentre - halfGap;
+      const segBot = Math.max(cutTop, yBottom);
+      if (segTop - segBot > 1) {
+        dxf.addRect(xmin, segBot, xmax, segTop, layer, color);
+      }
+      segTop = Math.min(cutBot, yTop);
+    }
+    // Last segment below all cuts
+    if (segTop - yBottom > 1) {
+      dxf.addRect(xmin, yBottom, xmax, segTop, layer, color);
+    }
+  }
 
   // Single outer contour around all panels (extended for prolongement)
   const ossOuterMargin = 200;
@@ -5269,6 +5409,16 @@ function exportDxfOssature() {
       fymin = Math.min(fymin, p.ymin); fymax = Math.max(fymax, p.ymax);
     }
     const facH = fymax - fymin;
+
+    // Zones de fixation pour cette façade
+    const ossTop = fymax + prolH;
+    const ossBottom = fymin - prol;
+    const fixCuts = computeFixationCuts(fname, ossTop, ossBottom);
+
+    // Draw fixation zone rectangles
+    for (const fc of fixCuts) {
+      dxf.addRect(fxmin, fc.yBottom, fxmax, fc.yTop, 'FIXATION', 3);
+    }
 
     // Title X = original label X, Title Y = sous la zone de prolongement (fymin - prol - marge)
     const ossLblX = facadeLabelX(fname, projectFacadeLabels);
@@ -5305,7 +5455,7 @@ function exportDxfOssature() {
         const yEnd = isTop ? fymax + prolH : p.ymax;
         for (let z = 1; z <= nz; z++) {
           const cx = p.xmin + z * step;
-          dxf.addRect(cx - ZED_W/2, yStart, cx + ZED_W/2, yEnd, 'ZED_ENTRAXE', 2);
+          addSplitProfile(cx - ZED_W/2, yStart, cx + ZED_W/2, yEnd, 'ZED_ENTRAXE', 2, fixCuts);
           if (isBottom) extYellowXs.push(cx);
           if (isTop) extYellowXsHaut.push(cx);
         }
@@ -5356,7 +5506,7 @@ function exportDxfOssature() {
           // Étendre l'Oméga vers le bas/haut si segment touche fymin/fymax et prolongement actif
           const mStart = (prol > 0 && m.start <= fymin + 5) ? fymin - prol : m.start;
           const mEnd = (prolH > 0 && m.end >= fymax - 5) ? fymax + prolH : m.end;
-          dxf.addRect(jx - OMEGA_W/2, mStart, jx + OMEGA_W/2, mEnd, 'OMEGA', 4);
+          addSplitProfile(jx - OMEGA_W/2, mStart, jx + OMEGA_W/2, mEnd, 'OMEGA', 4, fixCuts);
           if (prol > 0 && m.start <= fymin + 5) omegaXsExt.push(jx);
           if (prolH > 0 && m.end >= fymax - 5) omegaXsExtHaut.push(jx);
         }
@@ -5370,7 +5520,7 @@ function exportDxfOssature() {
         if (Math.round(ge - gs) >= 100) {
           const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : gs;
           const geExt = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : ge;
-          dxf.addRect(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 6);
+          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 6, fixCuts);
           if (prol > 0 && gs <= fymin + 5) violetXsSet.add(jx);
           if (prolH > 0 && ge >= fymax - 5) violetXsSetHaut.add(jx);
         }
@@ -5379,7 +5529,7 @@ function exportDxfOssature() {
         if (Math.round(ge - gs) >= 100) {
           const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : gs;
           const geExt = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : ge;
-          dxf.addRect(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 6);
+          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 6, fixCuts);
           if (prol > 0 && gs <= fymin + 5) violetXsSet.add(jx);
           if (prolH > 0 && ge >= fymax - 5) violetXsSetHaut.add(jx);
         }
@@ -5393,12 +5543,12 @@ function exportDxfOssature() {
       const yStart = isBottomP ? fymin - prol : p.ymin;
       const yEnd = isTopP ? fymax + prolH : p.ymax;
       if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP)) {
-        dxf.addRect(p.xmax - ZED_W/2, yStart, p.xmax + ZED_W/2, yEnd, 'ZED_BORD', 6);
+        addSplitProfile(p.xmax - ZED_W/2, yStart, p.xmax + ZED_W/2, yEnd, 'ZED_BORD', 6, fixCuts);
         if (isBottomP) violetXsSet.add(Math.round(p.xmax));
         if (isTopP) violetXsSetHaut.add(Math.round(p.xmax));
       }
       if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP)) {
-        dxf.addRect(p.xmin - ZED_W/2, yStart, p.xmin + ZED_W/2, yEnd, 'ZED_BORD', 6);
+        addSplitProfile(p.xmin - ZED_W/2, yStart, p.xmin + ZED_W/2, yEnd, 'ZED_BORD', 6, fixCuts);
         if (isBottomP) violetXsSet.add(Math.round(p.xmin));
         if (isTopP) violetXsSetHaut.add(Math.round(p.xmin));
       }
@@ -5433,7 +5583,7 @@ function exportDxfOssature() {
               const step = gap / (nz + 1);
               for (let z = 1; z <= nz; z++) {
                 const cx = pts[j] + z * step;
-                dxf.addRect(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2);
+                addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2, fixCuts);
               }
             }
           }
@@ -5468,7 +5618,7 @@ function exportDxfOssature() {
               const step = gap / (nz + 1);
               for (let z = 1; z <= nz; z++) {
                 const cx = pts[j] + z * step;
-                dxf.addRect(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2);
+                addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2, fixCuts);
               }
             }
           }
