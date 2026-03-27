@@ -5384,31 +5384,44 @@ function exportDxfOssature() {
     return [...jointYs].sort((a, b) => a - b);
   }
 
-  // Helper: filter joint Y axes that fall inside a fixation zone with margin
-  function getJointCutsInFixationZones(jointYs, fixZones) {
+  // Helper: for each horizontal joint, determine the cut Y position:
+  // - If the joint is inside a fixation zone (with 50mm margin) → cut at joint axis
+  // - Else → cut at the centre (axis) of the nearest fixation zone
+  function computeCutPositions(jointYs, fixZones) {
     if (!fixZones || fixZones.length === 0 || jointYs.length === 0) return [];
-    const cuts = [];
+    const cuts = new Set();
     for (const jy of jointYs) {
+      // Check if joint is inside a zone with margin
+      let insideZone = false;
       for (const fz of fixZones) {
-        // Joint must be inside the zone with FIXATION_MARGIN from edges
         if (jy >= fz.yBottom + FIXATION_MARGIN && jy <= fz.yTop - FIXATION_MARGIN) {
-          cuts.push(jy);
+          cuts.add(jy);
+          insideZone = true;
           break;
         }
       }
+      if (!insideZone) {
+        // Cut at the centre of the nearest fixation zone
+        let nearest = null, minDist = Infinity;
+        for (const fz of fixZones) {
+          const dist = Math.abs(jy - fz.yCentre);
+          if (dist < minDist) { minDist = dist; nearest = fz; }
+        }
+        if (nearest) cuts.add(nearest.yCentre);
+      }
     }
-    return cuts;
+    return [...cuts].sort((a, b) => a - b);
   }
 
-  // Helper: draw a vertical profile split at joint cut points
-  function addSplitProfile(xmin, yBottom, xmax, yTop, layer, color, jointCuts) {
-    if (!jointCuts || jointCuts.length === 0) {
+  // Helper: draw a vertical profile split at cut points
+  function addSplitProfile(xmin, yBottom, xmax, yTop, layer, color, cutPositions) {
+    if (!cutPositions || cutPositions.length === 0) {
       dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
       return;
     }
     const halfGap = fixGap / 2;
     // Filter cuts that intersect this profile's Y range
-    const relevant = jointCuts.filter(jy => jy - halfGap > yBottom + 1 && jy + halfGap < yTop - 1);
+    const relevant = cutPositions.filter(cy => cy - halfGap > yBottom + 1 && cy + halfGap < yTop - 1);
     if (relevant.length === 0) {
       dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
       return;
@@ -5417,12 +5430,12 @@ function exportDxfOssature() {
     relevant.sort((a, b) => b - a);
     // Draw segments
     let segTop = yTop;
-    for (const jy of relevant) {
-      const segBot = jy + halfGap;
+    for (const cy of relevant) {
+      const segBot = cy + halfGap;
       if (segTop - segBot > 1) {
         dxf.addRect(xmin, segBot, xmax, segTop, layer, color);
       }
-      segTop = jy - halfGap;
+      segTop = cy - halfGap;
     }
     // Last segment
     if (segTop - yBottom > 1) {
@@ -5456,9 +5469,9 @@ function exportDxfOssature() {
       dxf.addRect(fxmin, fc.yBottom, fxmax, fc.yTop, 'FIXATION', 3);
     }
 
-    // Detect horizontal joints and filter those inside fixation zones
+    // Detect horizontal joints and compute cut positions
     const horizontalJoints = detectHorizontalJoints(allPanels);
-    const jointCuts = getJointCutsInFixationZones(horizontalJoints, fixZones);
+    const jointCuts = computeCutPositions(horizontalJoints, fixZones);
 
     // Title X = original label X, Title Y = sous la zone de prolongement (fymin - prol - marge)
     const ossLblX = facadeLabelX(fname, projectFacadeLabels);
