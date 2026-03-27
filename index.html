@@ -5362,63 +5362,71 @@ function exportDxfOssature() {
     return cuts;
   }
 
-  const MIN_CUT_LEN = 1500; // tronçon minimum pour appliquer une découpe
+  const FIXATION_MARGIN = 50; // mm min entre l'axe du joint et le bord de la zone de fixation
 
-  // Helper: draw a vertical profile split at fixation zones
-  // xmin, yBottom, xmax, yTop = full profile rect; fixCuts = fixation zone cuts
-  // ossTop/ossBottom = extremes of the facade ossature (prolongements compris)
-  function addSplitProfile(xmin, yBottom, xmax, yTop, layer, color, fixCuts, ossTop, ossBottom) {
-    if (!fixCuts || fixCuts.length === 0) {
+  // Helper: detect horizontal joint Y axes between panels of a facade
+  // Returns sorted array of Y values (axes of joints with gap ≤ 20mm)
+  function detectHorizontalJoints(panels) {
+    const jointYs = new Set();
+    for (const p of panels) {
+      for (const q of panels) {
+        if (q === p) continue;
+        // q is above p: gap between p.ymax and q.ymin
+        const gap = q.ymin - p.ymax;
+        if (gap >= 5 && gap <= MAX_GAP) {
+          // Check horizontal overlap (must share some X range)
+          if (p.xmax > q.xmin + 5 && q.xmax > p.xmin + 5) {
+            jointYs.add(Math.round((p.ymax + q.ymin) / 2));
+          }
+        }
+      }
+    }
+    return [...jointYs].sort((a, b) => a - b);
+  }
+
+  // Helper: filter joint Y axes that fall inside a fixation zone with margin
+  function getJointCutsInFixationZones(jointYs, fixZones) {
+    if (!fixZones || fixZones.length === 0 || jointYs.length === 0) return [];
+    const cuts = [];
+    for (const jy of jointYs) {
+      for (const fz of fixZones) {
+        // Joint must be inside the zone with FIXATION_MARGIN from edges
+        if (jy >= fz.yBottom + FIXATION_MARGIN && jy <= fz.yTop - FIXATION_MARGIN) {
+          cuts.push(jy);
+          break;
+        }
+      }
+    }
+    return cuts;
+  }
+
+  // Helper: draw a vertical profile split at joint cut points
+  function addSplitProfile(xmin, yBottom, xmax, yTop, layer, color, jointCuts) {
+    if (!jointCuts || jointCuts.length === 0) {
       dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
       return;
     }
     const halfGap = fixGap / 2;
-    // Filter cuts that intersect this profile
-    const relevantCuts = fixCuts.filter(c => {
-      const cutTop = c.yCentre + halfGap;
-      const cutBot = c.yCentre - halfGap;
-      if (cutBot >= yTop || cutTop <= yBottom) return false;
-      return true;
-    }).sort((a, b) => b.yCentre - a.yCentre); // top to bottom
-
-    if (relevantCuts.length === 0) {
+    // Filter cuts that intersect this profile's Y range
+    const relevant = jointCuts.filter(jy => jy - halfGap > yBottom + 1 && jy + halfGap < yTop - 1);
+    if (relevant.length === 0) {
       dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
       return;
     }
-
-    // Compute segments
-    const segments = [];
-    let segTop = yTop;
-    for (const cut of relevantCuts) {
-      const cutTop = cut.yCentre + halfGap;
-      const cutBot = cut.yCentre - halfGap;
-      const segBot = Math.max(cutTop, yBottom);
-      if (segTop - segBot > 1) segments.push({ top: segTop, bot: segBot });
-      segTop = Math.min(cutBot, yTop);
-    }
-    if (segTop - yBottom > 1) segments.push({ top: segTop, bot: yBottom });
-
-    // Bords de façade : fusionner les segments trop courts aux extrémités
-    // Le tronçon du haut (touchant ossTop) ne doit pas être découpé séparément
-    while (segments.length >= 2 && Math.abs(segments[0].top - ossTop) < 5 && (segments[0].top - segments[0].bot) < MIN_CUT_LEN) {
-      segments[1].top = segments[0].top;
-      segments.splice(0, 1);
-    }
-    // Le tronçon du bas (touchant ossBottom) ne doit pas être découpé séparément
-    while (segments.length >= 2 && Math.abs(segments[segments.length-1].bot - ossBottom) < 5 && (segments[segments.length-1].top - segments[segments.length-1].bot) < MIN_CUT_LEN) {
-      segments[segments.length-2].bot = segments[segments.length-1].bot;
-      segments.splice(segments.length-1, 1);
-    }
-
-    // Tronçons intérieurs : si un tronçon < MIN_CUT_LEN, ne pas découper du tout
-    if (segments.some(s => (s.top - s.bot) < MIN_CUT_LEN)) {
-      dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
-      return;
-    }
-
+    // Sort top to bottom
+    relevant.sort((a, b) => b - a);
     // Draw segments
-    for (const s of segments) {
-      dxf.addRect(xmin, s.bot, xmax, s.top, layer, color);
+    let segTop = yTop;
+    for (const jy of relevant) {
+      const segBot = jy + halfGap;
+      if (segTop - segBot > 1) {
+        dxf.addRect(xmin, segBot, xmax, segTop, layer, color);
+      }
+      segTop = jy - halfGap;
+    }
+    // Last segment
+    if (segTop - yBottom > 1) {
+      dxf.addRect(xmin, yBottom, xmax, segTop, layer, color);
     }
   }
 
@@ -5441,12 +5449,16 @@ function exportDxfOssature() {
     // Zones de fixation pour cette façade
     const ossTop = fymax + prolH;
     const ossBottom = fymin - prol;
-    const fixCuts = computeFixationCuts(fname, ossTop, ossBottom);
+    const fixZones = computeFixationCuts(fname, ossTop, ossBottom);
 
     // Draw fixation zone rectangles
-    for (const fc of fixCuts) {
+    for (const fc of fixZones) {
       dxf.addRect(fxmin, fc.yBottom, fxmax, fc.yTop, 'FIXATION', 3);
     }
+
+    // Detect horizontal joints and filter those inside fixation zones
+    const horizontalJoints = detectHorizontalJoints(allPanels);
+    const jointCuts = getJointCutsInFixationZones(horizontalJoints, fixZones);
 
     // Title X = original label X, Title Y = sous la zone de prolongement (fymin - prol - marge)
     const ossLblX = facadeLabelX(fname, projectFacadeLabels);
@@ -5483,7 +5495,7 @@ function exportDxfOssature() {
         const yEnd = isTop ? fymax + prolH : p.ymax;
         for (let z = 1; z <= nz; z++) {
           const cx = p.xmin + z * step;
-          addSplitProfile(cx - ZED_W/2, yStart, cx + ZED_W/2, yEnd, 'ZED_ENTRAXE', 2, fixCuts, ossTop, ossBottom);
+          addSplitProfile(cx - ZED_W/2, yStart, cx + ZED_W/2, yEnd, 'ZED_ENTRAXE', 2, jointCuts);
           if (isBottom) extYellowXs.push(cx);
           if (isTop) extYellowXsHaut.push(cx);
         }
@@ -5534,7 +5546,7 @@ function exportDxfOssature() {
           // Étendre l'Oméga vers le bas/haut si segment touche fymin/fymax et prolongement actif
           const mStart = (prol > 0 && m.start <= fymin + 5) ? fymin - prol : m.start;
           const mEnd = (prolH > 0 && m.end >= fymax - 5) ? fymax + prolH : m.end;
-          addSplitProfile(jx - OMEGA_W/2, mStart, jx + OMEGA_W/2, mEnd, 'OMEGA', 4, fixCuts, ossTop, ossBottom);
+          addSplitProfile(jx - OMEGA_W/2, mStart, jx + OMEGA_W/2, mEnd, 'OMEGA', 4, jointCuts);
           if (prol > 0 && m.start <= fymin + 5) omegaXsExt.push(jx);
           if (prolH > 0 && m.end >= fymax - 5) omegaXsExtHaut.push(jx);
         }
@@ -5548,7 +5560,7 @@ function exportDxfOssature() {
         if (Math.round(ge - gs) >= 100) {
           const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : gs;
           const geExt = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : ge;
-          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 6, fixCuts, ossTop, ossBottom);
+          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 6, jointCuts);
           if (prol > 0 && gs <= fymin + 5) violetXsSet.add(jx);
           if (prolH > 0 && ge >= fymax - 5) violetXsSetHaut.add(jx);
         }
@@ -5557,7 +5569,7 @@ function exportDxfOssature() {
         if (Math.round(ge - gs) >= 100) {
           const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : gs;
           const geExt = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : ge;
-          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 6, fixCuts, ossTop, ossBottom);
+          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 6, jointCuts);
           if (prol > 0 && gs <= fymin + 5) violetXsSet.add(jx);
           if (prolH > 0 && ge >= fymax - 5) violetXsSetHaut.add(jx);
         }
@@ -5571,12 +5583,12 @@ function exportDxfOssature() {
       const yStart = isBottomP ? fymin - prol : p.ymin;
       const yEnd = isTopP ? fymax + prolH : p.ymax;
       if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP)) {
-        addSplitProfile(p.xmax - ZED_W/2, yStart, p.xmax + ZED_W/2, yEnd, 'ZED_BORD', 6, fixCuts, ossTop, ossBottom);
+        addSplitProfile(p.xmax - ZED_W/2, yStart, p.xmax + ZED_W/2, yEnd, 'ZED_BORD', 6, jointCuts);
         if (isBottomP) violetXsSet.add(Math.round(p.xmax));
         if (isTopP) violetXsSetHaut.add(Math.round(p.xmax));
       }
       if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP)) {
-        addSplitProfile(p.xmin - ZED_W/2, yStart, p.xmin + ZED_W/2, yEnd, 'ZED_BORD', 6, fixCuts, ossTop, ossBottom);
+        addSplitProfile(p.xmin - ZED_W/2, yStart, p.xmin + ZED_W/2, yEnd, 'ZED_BORD', 6, jointCuts);
         if (isBottomP) violetXsSet.add(Math.round(p.xmin));
         if (isTopP) violetXsSetHaut.add(Math.round(p.xmin));
       }
@@ -5611,7 +5623,7 @@ function exportDxfOssature() {
               const step = gap / (nz + 1);
               for (let z = 1; z <= nz; z++) {
                 const cx = pts[j] + z * step;
-                addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2, fixCuts, ossTop, ossBottom);
+                addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2, jointCuts);
               }
             }
           }
@@ -5646,7 +5658,7 @@ function exportDxfOssature() {
               const step = gap / (nz + 1);
               for (let z = 1; z <= nz; z++) {
                 const cx = pts[j] + z * step;
-                addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2, fixCuts, ossTop, ossBottom);
+                addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2, jointCuts);
               }
             }
           }
