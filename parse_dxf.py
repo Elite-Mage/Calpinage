@@ -334,9 +334,16 @@ def detect_pliage_openings(panels_by_facade):
     Détecte les ouvertures (fenêtres / portes) et calcule les longueurs posées
     pour linteau, tableaux, appuis, plinthe et couvertine par façade.
 
+    Approche : gaps verticaux (Y) dans des colonnes de panneaux.
+    Une colonne = panneaux avec le même xmin/xmax (±50mm).
+    Une ouverture = gap Y entre deux panneaux consécutifs de la même colonne,
+    d'une hauteur ≥ 200mm. Les colonnes adjacentes avec le même gap sont fusionnées.
+
     Retourne un dict {facade_name: {"openings": [...], "plinthe_mm": int, "couvertine_mm": int}}
     Chaque ouverture : {"id", "name", "width_mm" (linteau/appuis), "height_mm" (tableau)}
     """
+    MIN_OPENING_H = 200  # mm minimum pour compter comme ouverture
+
     result = {}
     for fname, panels in panels_by_facade.items():
         if not panels:
@@ -344,56 +351,70 @@ def detect_pliage_openings(panels_by_facade):
             continue
 
         facade_xmin = min(p["xmin"] for p in panels)
+        facade_ymin = min(p["ymin"] for p in panels)
         facade_xmax = max(p["xmax"] for p in panels)
         facade_width = round(facade_xmax - facade_xmin)
 
-        # Group panels into horizontal rows (same floor, ±30mm tolerance)
-        sorted_panels = sorted(panels, key=lambda p: p["ymin"])
-        rows = []
-        for p in sorted_panels:
+        # 1. Grouper les panneaux en colonnes verticales (même xmin/xmax ±50mm)
+        cols = []
+        for p in sorted(panels, key=lambda p: p["xmin"]):
+            found = False
+            for col in cols:
+                if abs(p["xmin"] - col["xmin"]) < 50 and abs(p["xmax"] - col["xmax"]) < 50:
+                    col["panels"].append(p)
+                    found = True
+                    break
+            if not found:
+                cols.append({"xmin": p["xmin"], "xmax": p["xmax"], "panels": [p]})
+
+        # 2. Pour chaque colonne, trouver les gaps Y
+        col_gaps = []
+        for col in cols:
+            sorted_col = sorted(col["panels"], key=lambda p: p["ymin"])
+
+            # A. Gaps intérieurs (bornés en haut ET en bas) → fenêtres
+            for i in range(len(sorted_col) - 1):
+                gap_ymin = sorted_col[i]["ymax"]
+                gap_ymax = sorted_col[i + 1]["ymin"]
+                if gap_ymax - gap_ymin >= MIN_OPENING_H:
+                    col_gaps.append({
+                        "xmin": col["xmin"], "xmax": col["xmax"],
+                        "ymin": round(gap_ymin), "ymax": round(gap_ymax),
+                        "is_bottom": False
+                    })
+
+            # B. Gap en bas (premier panneau au-dessus de facade_ymin) → porte RDC
+            # Filtre hauteur max 3000mm pour exclure les colonnes bandeau toiture (H~6000mm)
+            col_ymin = sorted_col[0]["ymin"]
+            bottom_gap_h = col_ymin - facade_ymin
+            if MIN_OPENING_H <= bottom_gap_h <= 3000:
+                has_neighbor_at_bottom = any(
+                    (abs(other["xmin"] - col["xmax"]) < 40 or abs(other["xmax"] - col["xmin"]) < 40)
+                    and min(p["ymin"] for p in other["panels"]) <= facade_ymin + 40
+                    for other in cols if other is not col
+                )
+                if has_neighbor_at_bottom:
+                    col_gaps.append({
+                        "xmin": col["xmin"], "xmax": col["xmax"],
+                        "ymin": round(facade_ymin), "ymax": round(col_ymin),
+                        "is_bottom": True
+                    })
+
+        # 3. Fusionner les colonnes adjacentes avec le même gap Y
+        col_gaps.sort(key=lambda g: (g["ymin"], g["xmin"]))
+        openings = []
+        for gap in col_gaps:
             merged = False
-            for row in rows:
-                if p["ymin"] < row["ymax"] + 30 and p["ymax"] > row["ymin"] - 30:
-                    row["panels"].append(p)
-                    row["ymin"] = min(row["ymin"], p["ymin"])
-                    row["ymax"] = max(row["ymax"], p["ymax"])
+            for o in openings:
+                if (abs(o["ymin"] - gap["ymin"]) < 40 and abs(o["ymax"] - gap["ymax"]) < 40
+                        and gap["xmin"] <= o["xmax"] + 30):
+                    o["xmax"] = max(o["xmax"], gap["xmax"])
                     merged = True
                     break
             if not merged:
-                rows.append({"panels": [p], "ymin": p["ymin"], "ymax": p["ymax"]})
-        rows.sort(key=lambda r: r["ymin"])
+                openings.append(dict(gap))
 
-        def get_interior_gaps(row_panels):
-            """Retourne les gaps x intérieurs à la façade (pas les bords libres)."""
-            covered = sorted([[p["xmin"], p["xmax"]] for p in row_panels], key=lambda x: x[0])
-            gaps = []
-            cursor = facade_xmin
-            for pxmin, pxmax in covered:
-                if pxmin > cursor + 50:
-                    has_left = any(mx <= pxmin + 5 and mx >= cursor - 5 for _, mx in covered)
-                    has_right = any(mn >= pxmax - 5 for mn, _ in covered)
-                    if has_left and has_right:
-                        gaps.append({"xmin": round(cursor), "xmax": round(pxmin)})
-                cursor = max(cursor, pxmax)
-            return gaps
-
-        # Merge vertically adjacent gaps with same x-range into openings
-        openings = []
-        for row in rows:
-            row_gaps = get_interior_gaps(row["panels"])
-            for gap in row_gaps:
-                merged = False
-                for o in openings:
-                    if (abs(o["xmin"] - gap["xmin"]) < 60 and abs(o["xmax"] - gap["xmax"]) < 60
-                            and abs(o["ymax"] - row["ymin"]) < 40):
-                        o["ymax"] = round(row["ymax"])
-                        merged = True
-                        break
-                if not merged:
-                    openings.append({
-                        "xmin": gap["xmin"], "xmax": gap["xmax"],
-                        "ymin": round(row["ymin"]), "ymax": round(row["ymax"])
-                    })
+        openings.sort(key=lambda o: o["xmin"])
 
         result[fname] = {
             "openings": [
@@ -402,6 +423,7 @@ def detect_pliage_openings(panels_by_facade):
                     "name": f"Ouverture {i + 1}",
                     "width_mm": round(o["xmax"] - o["xmin"]),
                     "height_mm": round(o["ymax"] - o["ymin"]),
+                    "is_bottom": o.get("is_bottom", False),
                 }
                 for i, o in enumerate(openings)
             ],
