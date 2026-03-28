@@ -3936,6 +3936,9 @@ function renderOssature() {
 
   let html = '';
 
+  // Compute real profile segments from spatial data
+  const profileReport = computeOssatureProfilesReport();
+
   for (const gd of data) {
     const g = gd.group;
     html += `<div class="result-group-header" style="border-color:${g.color}44; background:${g.color}0a;">
@@ -3955,33 +3958,54 @@ function renderOssature() {
       grandOmegaML += sd.totalOmegaML;
       grandZedML += sd.totalZedML;
 
+      const pr = profileReport[sub.name];
       html += `<div class="oss-card" style="border-left: 3px solid ${subColor};">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
           <span style="width:10px;height:10px;border-radius:50%;background:${subColor};display:inline-block;"></span>
           <span style="font-weight:700;font-size:14px;">${sub.name}</span>
-          <span class="oss-badge omega">&#937; ${sd.totalOmegaML.toFixed(2)} ml utiles</span>
-          <span class="oss-badge zed">Z ${sd.totalZedML.toFixed(2)} ml utiles</span>
-        </div>
-        <table class="oss-table">
-          <tr><th>Pièce (L×H)</th><th>Qté</th><th>Zed/pièce</th><th>Total Zed</th><th>ML Zed</th></tr>`;
+        </div>`;
 
-      for (const pd of sd.pieces) {
-        html += `<tr>
-          <td class="mono">${pd.w} × ${pd.h} mm</td>
-          <td style="text-align:center;">${pd.qty}</td>
-          <td style="text-align:center;color:var(--yellow);">${pd.nbZedPerPanel}</td>
-          <td style="text-align:center;color:var(--yellow);font-weight:700;">${pd.totalZed}</td>
-          <td class="mono">${pd.zedML.toFixed(2)} ml</td>
+      if (pr) {
+        // Group segments by length and count
+        function groupByLen(arr) {
+          const map = {};
+          for (const l of arr) { const k = l; map[k] = (map[k] || 0) + 1; }
+          return Object.entries(map).sort((a, b) => +b[0] - +a[0]).map(([len, qty]) => ({ len: +len, qty }));
+        }
+        const omegaGroups = groupByLen(pr.omega);
+        const zedGroups = groupByLen(pr.zed);
+        const totalOmegaML = pr.omega.reduce((s, l) => s + l, 0) / 1000;
+        const totalZedML = pr.zed.reduce((s, l) => s + l, 0) / 1000;
+
+        html += `<table class="oss-table">
+          <tr><th>Type</th><th>Longueur</th><th>Qté</th><th>ML total</th></tr>`;
+        for (const g of omegaGroups) {
+          html += `<tr>
+            <td><span class="oss-badge omega">&#937; Oméga</span></td>
+            <td class="mono">${g.len} mm</td>
+            <td style="text-align:center;">${g.qty}</td>
+            <td class="mono">${(g.len * g.qty / 1000).toFixed(2)} ml</td>
+          </tr>`;
+        }
+        for (const g of zedGroups) {
+          html += `<tr>
+            <td><span class="oss-badge zed">Z Zed</span></td>
+            <td class="mono">${g.len} mm</td>
+            <td style="text-align:center;">${g.qty}</td>
+            <td class="mono">${(g.len * g.qty / 1000).toFixed(2)} ml</td>
+          </tr>`;
+        }
+        html += `<tr class="total-row">
+          <td colspan="2" style="text-align:right;color:var(--text3);">Totaux façade</td>
+          <td style="text-align:center;">${pr.omega.length + pr.zed.length}</td>
+          <td class="mono"><span class="oss-badge omega">&#937; ${totalOmegaML.toFixed(2)} ml</span> <span class="oss-badge zed">Z ${totalZedML.toFixed(2)} ml</span></td>
         </tr>`;
+        html += `</table>`;
+      } else {
+        html += `<div style="color:var(--text3);font-size:12px;">Pas de données spatiales</div>`;
       }
 
-      html += `<tr class="total-row">
-        <td colspan="2" style="text-align:right;color:var(--text3);">Totaux façade</td>
-        <td colspan="2" style="text-align:center;"><span class="oss-badge omega">&#937; ${sd.totalOmegas} pcs = ${sd.totalOmegaML.toFixed(2)} ml</span></td>
-        <td><span class="oss-badge zed">Z ${sd.totalZedML.toFixed(2)} ml</span></td>
-      </tr>`;
-
-      html += `</table></div>`;
+      html += `</div>`;
     }
   }
 
@@ -5272,6 +5296,163 @@ function exportDxfPanneaux() {
 
   const nom = chantier.nom || 'calpinage';
   downloadDxf(dxf.toString(), nom.replace(/[^a-zA-Z0-9]/g, '_') + '_panneaux.dxf');
+}
+
+// ── COMPUTE OSSATURE PROFILES (for report) ──
+function computeOssatureProfilesReport() {
+  if (!projectRectsSpatial || !projectRectsSpatial.length) return {};
+  const ENTRAXE_REGULAR = ossatureConfig.entaxeMax || 600;
+  const MAX_GAP = 20;
+  const ZED_W = 40, OMEGA_W = 80;
+  const prol = (ossatureConfig.prolongementEnabled && ossatureConfig.prolongement > 0) ? ossatureConfig.prolongement : 0;
+  const prolH = (ossatureConfig.prolongementHautEnabled && ossatureConfig.prolongementHaut > 0) ? ossatureConfig.prolongementHaut : 0;
+  const fixGap = ossatureConfig.fixationGap || 20;
+  const halfGap = fixGap / 2;
+  const MIN_CUT_LEN = 1500;
+  const FIXATION_MARGIN = 50;
+
+  const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+  const result = {}; // facadeName → { omega: [len,...], zed: [len,...] }
+
+  function detectJoints(panels) {
+    const js = new Set();
+    for (const p of panels) for (const q of panels) {
+      if (q === p) continue;
+      const g = q.ymin - p.ymax;
+      if (g >= 5 && g <= MAX_GAP && p.xmax > q.xmin + 5 && q.xmax > p.xmin + 5) js.add(Math.round((p.ymax + q.ymin) / 2));
+    }
+    return [...js].sort((a, b) => a - b);
+  }
+
+  function getCutPositions(jointYs, fixZones) {
+    if (!fixZones.length || !jointYs.length) return [];
+    const cuts = new Set();
+    for (const jy of jointYs) {
+      let inside = false;
+      for (const fz of fixZones) {
+        if (jy >= fz.yBottom + FIXATION_MARGIN && jy <= fz.yTop - FIXATION_MARGIN) { cuts.add(jy); inside = true; break; }
+      }
+      if (!inside) {
+        let nearest = null, minD = Infinity;
+        for (const fz of fixZones) { const d = Math.abs(jy - fz.yCentre); if (d < minD) { minD = d; nearest = fz; } }
+        if (nearest) cuts.add(nearest.yCentre);
+      }
+    }
+    return [...cuts].sort((a, b) => a - b);
+  }
+
+  function splitAtCuts(yBottom, yTop, cutPositions) {
+    const relevant = cutPositions.filter(cy => cy - halfGap > yBottom + 1 && cy + halfGap < yTop - 1);
+    if (!relevant.length) return [Math.round(yTop - yBottom)];
+    if ((yTop - yBottom) < MIN_CUT_LEN) return [Math.round(yTop - yBottom)];
+    relevant.sort((a, b) => b - a);
+    const segs = [];
+    let segTop = yTop;
+    for (const cy of relevant) {
+      const segBot = cy + halfGap;
+      if (segTop - segBot > 1) segs.push({ top: segTop, bot: segBot });
+      segTop = cy - halfGap;
+    }
+    if (segTop - yBottom > 1) segs.push({ top: segTop, bot: yBottom });
+    const interior = segs.length > 2 ? segs.slice(1, -1) : segs;
+    if (interior.some(s => (s.top - s.bot) < MIN_CUT_LEN)) return [Math.round(yTop - yBottom)];
+    return segs.map(s => Math.round(s.top - s.bot));
+  }
+
+  for (const [fname, panels] of Object.entries(byFacade)) {
+    const omegaLens = [], zedLens = [];
+    let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
+    for (const p of panels) {
+      fxmin = Math.min(fxmin, p.xmin); fxmax = Math.max(fxmax, p.xmax);
+      fymin = Math.min(fymin, p.ymin); fymax = Math.max(fymax, p.ymax);
+    }
+    const ossTop = fymax + prolH, ossBottom = fymin - prol;
+    const fixZones = [];
+    const zones = getFixationZonesForFacade(fname);
+    if (zones && zones.length) {
+      let cursor = ossTop;
+      for (const z of zones) {
+        cursor -= (z.offset || 0);
+        const yC = cursor - z.height / 2;
+        if (yC - z.height / 2 < ossBottom) break;
+        fixZones.push({ yCentre: yC, yTop: cursor, yBottom: cursor - z.height });
+        cursor -= z.height;
+      }
+    }
+    const joints = detectJoints(panels);
+    const cutPos = getCutPositions(joints, fixZones);
+
+    // Entraxe ZED — merge across joints
+    const rawZ = [];
+    for (const p of panels) {
+      const pw = Math.round(p.xmax - p.xmin);
+      const nz = Math.max(0, Math.ceil(pw / ENTRAXE_REGULAR) - 1);
+      if (nz > 0) {
+        const step = pw / (nz + 1);
+        for (let z = 1; z <= nz; z++) rawZ.push({ cx: p.xmin + z * step, yS: p.ymin, yE: p.ymax });
+      }
+    }
+    const usedZ = new Array(rawZ.length).fill(false);
+    for (let i = 0; i < rawZ.length; i++) {
+      if (usedZ[i]) continue;
+      let { yS, yE } = rawZ[i]; const cx = rawZ[i].cx; usedZ[i] = true;
+      let ch = true;
+      while (ch) { ch = false; for (let j = 0; j < rawZ.length; j++) {
+        if (usedZ[j] || Math.abs(rawZ[j].cx - cx) > 5) continue;
+        if ((rawZ[j].yS - yE >= -5 && rawZ[j].yS - yE <= MAX_GAP) || (yS - rawZ[j].yE >= -5 && yS - rawZ[j].yE <= MAX_GAP)) {
+          yS = Math.min(yS, rawZ[j].yS); yE = Math.max(yE, rawZ[j].yE); usedZ[j] = true; ch = true;
+        }
+      }}
+      if (prol > 0 && Math.abs(yS - fymin) < 5) yS = fymin - prol;
+      if (prolH > 0 && Math.abs(yE - fymax) < 5) yE = fymax + prolH;
+      zedLens.push(...splitAtCuts(yS, yE, cutPos));
+    }
+
+    // Omega + gap/free-edge ZED at junctions
+    const junctions = {}, hasRN = new Set(), hasLN = new Set();
+    for (const p of panels) for (const q of panels) {
+      if (q === p) continue;
+      const gap = q.xmin - p.xmax;
+      if (gap >= -5 && gap <= MAX_GAP && q.xmin > p.xmin + 20) {
+        const jx = Math.round((p.xmax + q.xmin) / 2);
+        if (!junctions[jx]) junctions[jx] = { left: [], right: [] };
+        junctions[jx].left.push(p); junctions[jx].right.push(q);
+        hasRN.add(p); hasLN.add(q);
+      }
+    }
+    for (const jx of Object.keys(junctions).map(Number)) {
+      const { left, right } = junctions[jx];
+      const overlaps = [];
+      for (const pl of left) for (const pr of right) {
+        const s = Math.max(pl.ymin, pr.ymin), e = Math.min(pl.ymax, pr.ymax);
+        if (e - s > 1) overlaps.push({ start: s, end: e });
+      }
+      overlaps.sort((a, b) => a.start - b.start);
+      if (overlaps.length) {
+        const merged = [{ ...overlaps[0] }];
+        for (let oi = 1; oi < overlaps.length; oi++) {
+          if (overlaps[oi].start <= merged[merged.length-1].end + MAX_GAP) merged[merged.length-1].end = Math.max(merged[merged.length-1].end, overlaps[oi].end);
+          else merged.push({ ...overlaps[oi] });
+        }
+        for (const m of merged) {
+          let mS = (prol > 0 && m.start <= fymin + 5) ? fymin - prol : m.start;
+          let mE = (prolH > 0 && m.end >= fymax - 5) ? fymax + prolH : m.end;
+          omegaLens.push(...splitAtCuts(mS, mE, cutPos));
+        }
+      }
+    }
+    // Free-edge ZED
+    for (const p of panels) {
+      let yS = p.ymin, yE = p.ymax;
+      if (prol > 0 && Math.abs(yS - fymin) < 5) yS = fymin - prol;
+      if (prolH > 0 && Math.abs(yE - fymax) < 5) yE = fymax + prolH;
+      if (!hasRN.has(p) && panels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP)) zedLens.push(...splitAtCuts(yS, yE, cutPos));
+      if (!hasLN.has(p) && panels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP)) zedLens.push(...splitAtCuts(yS, yE, cutPos));
+    }
+
+    result[fname] = { omega: omegaLens, zed: zedLens };
+  }
+  return result;
 }
 
 // ── EXPORT DXF OSSATURE ──
