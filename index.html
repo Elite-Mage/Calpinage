@@ -3930,16 +3930,19 @@ function renderOssature() {
     return;
   }
 
-  // Collect ALL cuts across all groups/subsections
+  // Collect ALL cuts across all groups/subsections (for bin packing)
   let allOmegaCuts = [], allZedCuts = [];
-  let grandOmegaML = 0, grandZedML = 0;
-  // Collect cuts per facade (for global recap, matches sidebar values)
-  const facadeCuts = {};
 
   let html = '';
 
-  // Compute real profile segments from spatial data
+  // Compute real profile segments from spatial data (includes prolongement, fixation zones)
   const profileReport = computeOssatureProfilesReport();
+  // Grand totals from profileReport — source unique, inclut prolongement, dédupliqué par façade
+  let grandOmegaML = 0, grandZedML = 0;
+  for (const pr of Object.values(profileReport)) {
+    grandOmegaML += pr.omega.reduce((s,l) => s+l, 0) / 1000;
+    grandZedML   += pr.zed.reduce((s,l) => s+l, 0) / 1000;
+  }
 
   for (const gd of data) {
     const g = gd.group;
@@ -3957,13 +3960,6 @@ function renderOssature() {
 
       allOmegaCuts.push(...sd.omegaCuts);
       allZedCuts.push(...sd.zedCuts);
-      grandOmegaML += sd.totalOmegaML;
-      grandZedML += sd.totalZedML;
-      // Accumulate cut lengths per facade name
-      const fname_ = sub.name;
-      if (!facadeCuts[fname_]) facadeCuts[fname_] = { omega: [], zed: [] };
-      facadeCuts[fname_].omega.push(...sd.omegaCuts.map(c => c.len));
-      facadeCuts[fname_].zed.push(...sd.zedCuts.map(c => c.len));
 
       const pr = profileReport[sub.name];
       html += `<div class="oss-card" style="border-left: 3px solid ${subColor};">
@@ -4016,15 +4012,15 @@ function renderOssature() {
   }
 
   // ── RÉCAPITULATIF GLOBAL ──
-  // Construit depuis facadeCuts (même source que grandOmegaML/grandZedML = sidebar).
-  // Tri : tous les Oméga (façade par façade) puis tous les Zed (façade par façade).
+  // Source : profileReport (inclut prolongement + fixation + fusion joints, dédupliqué par façade)
+  // Même source que la sidebar et les cartes par façade → cohérence garantie.
   {
     function grpLen(arr) {
       const map = {};
       for (const l of arr) map[l] = (map[l] || 0) + 1;
       return Object.entries(map).sort((a,b) => +b[0] - +a[0]).map(([len,qty]) => ({len:+len,qty}));
     }
-    const facadeNames = Object.keys(facadeCuts);
+    const facadeNames = Object.keys(profileReport);
 
     if (facadeNames.length) {
       let totalOmegaQty = 0, totalOmegaMM = 0;
@@ -4040,9 +4036,9 @@ function renderOssature() {
 
       // ─ Oméga (façade par façade) ─
       for (const fname of facadeNames) {
-        const cuts = facadeCuts[fname].omega;
-        if (!cuts.length) continue;
-        for (const g of grpLen(cuts)) {
+        const pr = profileReport[fname];
+        if (!pr || !pr.omega.length) continue;
+        for (const g of grpLen(pr.omega)) {
           totalOmegaQty += g.qty;
           totalOmegaMM  += g.len * g.qty;
           omegaLens[g.len] = (omegaLens[g.len] || 0) + g.qty;
@@ -4063,9 +4059,9 @@ function renderOssature() {
 
       // ─ Zed (façade par façade) ─
       for (const fname of facadeNames) {
-        const cuts = facadeCuts[fname].zed;
-        if (!cuts.length) continue;
-        for (const g of grpLen(cuts)) {
+        const pr = profileReport[fname];
+        if (!pr || !pr.zed.length) continue;
+        for (const g of grpLen(pr.zed)) {
           totalZedQty += g.qty;
           totalZedMM  += g.len * g.qty;
           zedLens[g.len] = (zedLens[g.len] || 0) + g.qty;
