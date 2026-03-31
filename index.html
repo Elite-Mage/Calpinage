@@ -4050,6 +4050,32 @@ function renderOssature() {
         <td style="text-align:center;">${totalOmegaQty + totalZedQty}</td>
         <td class="mono"><span class="oss-badge omega">&#937; ${totalOmegaML.toFixed(2)} ml</span> <span class="oss-badge zed">Z ${totalZedML.toFixed(2)} ml</span></td>
       </tr></table></div>`;
+
+      // ── Total commande toutes pièces confondues ──
+      const allLens = {};
+      for (const [l, q] of sortedOmega) allLens[l] = (allLens[l] || 0) + q;
+      for (const [l, q] of sortedZed)   allLens[l] = (allLens[l] || 0) + q;
+      const sortedAll = Object.entries(allLens).sort((a,b) => +b[0] - +a[0]);
+      const totalAllQty = sortedAll.reduce((s,[,q]) => s + q, 0);
+      const totalAllML  = sortedAll.reduce((s,[l,q]) => s + +l*q, 0) / 1000;
+      html += `<div class="oss-card" style="border-color:var(--green)66;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+          <span style="font-weight:700;font-size:14px;">&#128203; Total commande — toutes pièces confondues</span>
+        </div>
+        <table class="oss-table">
+          <tr><th>Longueur</th><th>Qté</th><th>ML total</th></tr>`;
+      for (const [len, qty] of sortedAll) {
+        html += `<tr>
+          <td class="mono">${len} mm</td>
+          <td style="text-align:center;">${qty}</td>
+          <td class="mono">${(+len * qty / 1000).toFixed(2)} ml</td>
+        </tr>`;
+      }
+      html += `<tr class="total-row">
+        <td style="text-align:right;color:var(--text3);">TOTAL</td>
+        <td style="text-align:center;font-weight:700;">${totalAllQty}</td>
+        <td class="mono" style="font-weight:700;">${totalAllML.toFixed(2)} ml</td>
+      </tr></table></div>`;
     }
   }
 
