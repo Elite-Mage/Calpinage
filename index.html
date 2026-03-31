@@ -3933,6 +3933,8 @@ function renderOssature() {
   // Collect ALL cuts across all groups/subsections
   let allOmegaCuts = [], allZedCuts = [];
   let grandOmegaML = 0, grandZedML = 0;
+  // Collect cuts per facade (for global recap, matches sidebar values)
+  const facadeCuts = {};
 
   let html = '';
 
@@ -3957,6 +3959,11 @@ function renderOssature() {
       allZedCuts.push(...sd.zedCuts);
       grandOmegaML += sd.totalOmegaML;
       grandZedML += sd.totalZedML;
+      // Accumulate cut lengths per facade name
+      const fname_ = sub.name;
+      if (!facadeCuts[fname_]) facadeCuts[fname_] = { omega: [], zed: [] };
+      facadeCuts[fname_].omega.push(...sd.omegaCuts.map(c => c.len));
+      facadeCuts[fname_].zed.push(...sd.zedCuts.map(c => c.len));
 
       const pr = profileReport[sub.name];
       html += `<div class="oss-card" style="border-left: 3px solid ${subColor};">
@@ -4009,32 +4016,20 @@ function renderOssature() {
   }
 
   // ── RÉCAPITULATIF GLOBAL ──
-  // Construit depuis profileReport (clés uniques par façade) — pas de double comptage.
+  // Construit depuis facadeCuts (même source que grandOmegaML/grandZedML = sidebar).
   // Tri : tous les Oméga (façade par façade) puis tous les Zed (façade par façade).
   {
-    function groupByLen2(arr) {
+    function grpLen(arr) {
       const map = {};
       for (const l of arr) map[l] = (map[l] || 0) + 1;
       return Object.entries(map).sort((a,b) => +b[0] - +a[0]).map(([len,qty]) => ({len:+len,qty}));
     }
-    // Façades dans l'ordre d'affichage, dédupliquées
-    const seenFacades = new Set();
-    const facadeOrder = [];
-    for (const gd of data) {
-      for (const sd of gd.subsections) {
-        if (sd.pieces.length === 0) continue;
-        const name = sd.subsection.name;
-        if (!seenFacades.has(name) && profileReport[name]) {
-          seenFacades.add(name);
-          facadeOrder.push(name);
-        }
-      }
-    }
+    const facadeNames = Object.keys(facadeCuts);
 
-    if (facadeOrder.length) {
+    if (facadeNames.length) {
       let totalOmegaQty = 0, totalOmegaMM = 0;
       let totalZedQty = 0, totalZedMM = 0;
-      const allLens = {};
+      const omegaLens = {}, zedLens = {};
 
       html += `<div class="oss-card" style="border-color:var(--accent)66;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
@@ -4044,13 +4039,13 @@ function renderOssature() {
           <tr><th>Type</th><th>Façade</th><th>Longueur</th><th>Qté</th><th>ML total</th></tr>`;
 
       // ─ Oméga (façade par façade) ─
-      for (const fname of facadeOrder) {
-        const pr = profileReport[fname];
-        if (!pr || !pr.omega.length) continue;
-        for (const g of groupByLen2(pr.omega)) {
+      for (const fname of facadeNames) {
+        const cuts = facadeCuts[fname].omega;
+        if (!cuts.length) continue;
+        for (const g of grpLen(cuts)) {
           totalOmegaQty += g.qty;
           totalOmegaMM  += g.len * g.qty;
-          allLens[g.len] = (allLens[g.len] || 0) + g.qty;
+          omegaLens[g.len] = (omegaLens[g.len] || 0) + g.qty;
           html += `<tr>
             <td><span class="oss-badge omega">&#937; Oméga</span></td>
             <td style="font-size:12px;color:var(--text3);">${fname}</td>
@@ -4067,13 +4062,13 @@ function renderOssature() {
       </tr>`;
 
       // ─ Zed (façade par façade) ─
-      for (const fname of facadeOrder) {
-        const pr = profileReport[fname];
-        if (!pr || !pr.zed.length) continue;
-        for (const g of groupByLen2(pr.zed)) {
+      for (const fname of facadeNames) {
+        const cuts = facadeCuts[fname].zed;
+        if (!cuts.length) continue;
+        for (const g of grpLen(cuts)) {
           totalZedQty += g.qty;
           totalZedMM  += g.len * g.qty;
-          allLens[g.len] = (allLens[g.len] || 0) + g.qty;
+          zedLens[g.len] = (zedLens[g.len] || 0) + g.qty;
           html += `<tr>
             <td><span class="oss-badge zed">Z Zed</span></td>
             <td style="font-size:12px;color:var(--text3);">${fname}</td>
@@ -4095,28 +4090,53 @@ function renderOssature() {
       </tr>
       </table></div>`;
 
-      // ── Total commande — toutes pièces confondues ──
-      const sortedAll = Object.entries(allLens).sort((a,b) => +b[0] - +a[0]);
-      const totalAllQty = sortedAll.reduce((s,[,q]) => s + q, 0);
-      const totalAllML  = sortedAll.reduce((s,[l,q]) => s + +l*q, 0) / 1000;
-      html += `<div class="oss-card" style="border-color:var(--green)66;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-          <span style="font-weight:700;font-size:14px;">&#128203; Total commande — toutes pièces confondues</span>
-        </div>
-        <table class="oss-table">
-          <tr><th>Longueur</th><th>Qté</th><th>ML total</th></tr>`;
-      for (const [len, qty] of sortedAll) {
-        html += `<tr>
-          <td class="mono">${len} mm</td>
-          <td style="text-align:center;">${qty}</td>
-          <td class="mono">${(+len * qty / 1000).toFixed(2)} ml</td>
-        </tr>`;
+      // ── Total commande — Oméga ──
+      const sortedOmega = Object.entries(omegaLens).sort((a,b) => +b[0] - +a[0]);
+      if (sortedOmega.length) {
+        html += `<div class="oss-card" style="border-color:var(--green)66;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+            <span class="oss-badge omega" style="font-size:12px;">&#937;</span>
+            <span style="font-weight:700;font-size:14px;">Total commande Oméga</span>
+          </div>
+          <table class="oss-table">
+            <tr><th>Longueur</th><th>Qté</th><th>ML total</th></tr>`;
+        for (const [len, qty] of sortedOmega) {
+          html += `<tr>
+            <td class="mono">${len} mm</td>
+            <td style="text-align:center;">${qty}</td>
+            <td class="mono">${(+len * qty / 1000).toFixed(2)} ml</td>
+          </tr>`;
+        }
+        html += `<tr class="total-row">
+          <td style="text-align:right;color:var(--text3);">TOTAL OMÉGA</td>
+          <td style="text-align:center;font-weight:700;">${totalOmegaQty}</td>
+          <td class="mono" style="font-weight:700;">${(totalOmegaMM/1000).toFixed(2)} ml</td>
+        </tr></table></div>`;
       }
-      html += `<tr class="total-row">
-        <td style="text-align:right;color:var(--text3);">TOTAL</td>
-        <td style="text-align:center;font-weight:700;">${totalAllQty}</td>
-        <td class="mono" style="font-weight:700;">${totalAllML.toFixed(2)} ml</td>
-      </tr></table></div>`;
+
+      // ── Total commande — Zed ──
+      const sortedZed = Object.entries(zedLens).sort((a,b) => +b[0] - +a[0]);
+      if (sortedZed.length) {
+        html += `<div class="oss-card" style="border-color:var(--green)66;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+            <span class="oss-badge zed" style="font-size:12px;">Z</span>
+            <span style="font-weight:700;font-size:14px;">Total commande Zed</span>
+          </div>
+          <table class="oss-table">
+            <tr><th>Longueur</th><th>Qté</th><th>ML total</th></tr>`;
+        for (const [len, qty] of sortedZed) {
+          html += `<tr>
+            <td class="mono">${len} mm</td>
+            <td style="text-align:center;">${qty}</td>
+            <td class="mono">${(+len * qty / 1000).toFixed(2)} ml</td>
+          </tr>`;
+        }
+        html += `<tr class="total-row">
+          <td style="text-align:right;color:var(--text3);">TOTAL ZED</td>
+          <td style="text-align:center;font-weight:700;">${totalZedQty}</td>
+          <td class="mono" style="font-weight:700;">${(totalZedMM/1000).toFixed(2)} ml</td>
+        </tr></table></div>`;
+      }
     }
   }
 
