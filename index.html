@@ -3933,6 +3933,8 @@ function renderOssature() {
   // Collect ALL cuts across all groups/subsections
   let allOmegaCuts = [], allZedCuts = [];
   let grandOmegaML = 0, grandZedML = 0;
+  // Global length accumulators (for global recap)
+  let globalOmegaLens = {}, globalZedLens = {};
 
   let html = '';
 
@@ -3976,6 +3978,9 @@ function renderOssature() {
         const zedGroups = groupByLen(pr.zed);
         const totalOmegaML = pr.omega.reduce((s, l) => s + l, 0) / 1000;
         const totalZedML = pr.zed.reduce((s, l) => s + l, 0) / 1000;
+        // Accumulate into global counters
+        for (const l of pr.omega) globalOmegaLens[l] = (globalOmegaLens[l] || 0) + 1;
+        for (const l of pr.zed)   globalZedLens[l]   = (globalZedLens[l]   || 0) + 1;
 
         html += `<table class="oss-table">
           <tr><th>Type</th><th>Longueur</th><th>Qté</th><th>ML total</th></tr>`;
@@ -4006,6 +4011,71 @@ function renderOssature() {
       }
 
       html += `</div>`;
+    }
+  }
+
+  // ── RÉCAPITULATIF GLOBAL ──
+  {
+    const sortedOmega = Object.entries(globalOmegaLens).sort((a,b) => +b[0] - +a[0]);
+    const sortedZed   = Object.entries(globalZedLens).sort((a,b) => +b[0] - +a[0]);
+    const totalOmegaQty = sortedOmega.reduce((s,[,q]) => s + q, 0);
+    const totalZedQty   = sortedZed.reduce((s,[,q]) => s + q, 0);
+    const totalOmegaML  = sortedOmega.reduce((s,[l,q]) => s + +l*q, 0) / 1000;
+    const totalZedML    = sortedZed.reduce((s,[l,q]) => s + +l*q, 0) / 1000;
+    if (sortedOmega.length || sortedZed.length) {
+      html += `<div class="oss-card" style="border-color:var(--accent)66;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+          <span style="font-weight:700;font-size:14px;">&#931; Récapitulatif global — toutes façades</span>
+        </div>
+        <table class="oss-table">
+          <tr><th>Type</th><th>Longueur</th><th>Qté</th><th>ML total</th></tr>`;
+      for (const [len, qty] of sortedOmega) {
+        html += `<tr>
+          <td><span class="oss-badge omega">&#937; Oméga</span></td>
+          <td class="mono">${len} mm</td>
+          <td style="text-align:center;">${qty}</td>
+          <td class="mono">${(+len * qty / 1000).toFixed(2)} ml</td>
+        </tr>`;
+      }
+      for (const [len, qty] of sortedZed) {
+        html += `<tr>
+          <td><span class="oss-badge zed">Z Zed</span></td>
+          <td class="mono">${len} mm</td>
+          <td style="text-align:center;">${qty}</td>
+          <td class="mono">${(+len * qty / 1000).toFixed(2)} ml</td>
+        </tr>`;
+      }
+      html += `<tr class="total-row">
+        <td colspan="2" style="text-align:right;color:var(--text3);">Total général</td>
+        <td style="text-align:center;">${totalOmegaQty + totalZedQty}</td>
+        <td class="mono"><span class="oss-badge omega">&#937; ${totalOmegaML.toFixed(2)} ml</span> <span class="oss-badge zed">Z ${totalZedML.toFixed(2)} ml</span></td>
+      </tr></table></div>`;
+
+      // ── Total commande toutes pièces confondues ──
+      const allLens = {};
+      for (const [l, q] of sortedOmega) allLens[l] = (allLens[l] || 0) + q;
+      for (const [l, q] of sortedZed)   allLens[l] = (allLens[l] || 0) + q;
+      const sortedAll = Object.entries(allLens).sort((a,b) => +b[0] - +a[0]);
+      const totalAllQty = sortedAll.reduce((s,[,q]) => s + q, 0);
+      const totalAllML  = sortedAll.reduce((s,[l,q]) => s + +l*q, 0) / 1000;
+      html += `<div class="oss-card" style="border-color:var(--green)66;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+          <span style="font-weight:700;font-size:14px;">&#128203; Total commande — toutes pièces confondues</span>
+        </div>
+        <table class="oss-table">
+          <tr><th>Longueur</th><th>Qté</th><th>ML total</th></tr>`;
+      for (const [len, qty] of sortedAll) {
+        html += `<tr>
+          <td class="mono">${len} mm</td>
+          <td style="text-align:center;">${qty}</td>
+          <td class="mono">${(+len * qty / 1000).toFixed(2)} ml</td>
+        </tr>`;
+      }
+      html += `<tr class="total-row">
+        <td style="text-align:right;color:var(--text3);">TOTAL</td>
+        <td style="text-align:center;font-weight:700;">${totalAllQty}</td>
+        <td class="mono" style="font-weight:700;">${totalAllML.toFixed(2)} ml</td>
+      </tr></table></div>`;
     }
   }
 
