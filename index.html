@@ -2257,7 +2257,7 @@ function exportExcel() {
   function sheetPanneaux() {
     const rows = [];
     const COLS = 8;
-    rows.push(R(C(`${nom} — Panneaux`, 'sh1'), ...Array(COLS-1).fill(Bl('sh1'))));
+    rows.push(R(C(`${nom} — Récapitulatif panneaux`, 'sh1'), ...Array(COLS-1).fill(Bl('sh1'))));
     rows.push(R(C('Date :', 'sh2'), C(date, 'sh2'), ...Array(COLS-2).fill(Bl('sh2'))));
     rows.push(Sp());
     rows.push(R(C('Type','sh2'), C('Façade','sh2'), C('Sous-type','sh2'), C('L (mm)','sh2'), C('H (mm)','sh2'), C('Qté','sh2'), C('Surf. unit. (m²)','sh2'), C('Surf. totale (m²)','sh2')));
@@ -2287,6 +2287,50 @@ function exportExcel() {
     }
     rows.push(Sp());
     rows.push(R(C('TOTAL GÉNÉRAL','sgt'), ...Array(4).fill(Bl('sgt')), C(grandQty,'sgt'), Bl('sgt'), C(+grandSurf.toFixed(4),'sgt4')));
+
+    // ── Bon de commande (résultats de découpe) ──
+    if (allResults) {
+      rows.push(Sp()); rows.push(Sp());
+      rows.push(R(C('BON DE COMMANDE — Détail découpe', 'sh1'), ...Array(COLS-1).fill(Bl('sh1'))));
+      rows.push(Sp());
+
+      // Résumé commande par groupe (nombre de panneaux stock à commander)
+      rows.push(R(C('Type','sh2'), C('Format stock','sh2'), C('Qté à commander','sh2'), C('Surf. stock (m²)','sh2'), ...Array(COLS-4).fill(Bl('sh2'))));
+      for (const g of groups) {
+        const result = allResults[g.id];
+        if (!result || !result.panels || !result.panels.length) continue;
+        const stockCount = {};
+        result.panels.forEach(p => {
+          const lbl = p.stock.label || (p.stock.w+'×'+p.stock.h);
+          if (!stockCount[lbl]) stockCount[lbl] = { qty: 0, w: p.stock.w, h: p.stock.h };
+          stockCount[lbl].qty++;
+        });
+        rows.push(Sp());
+        for (const [lbl, sc] of Object.entries(stockCount)) {
+          const surfTot = +(sc.w * sc.h * sc.qty / 1e6).toFixed(4);
+          rows.push(R(C(g.name,`sg${g.id}`), C(lbl,`sg${g.id}`), C(sc.qty,`sg${g.id}`), C(surfTot,`sg${g.id}n`), ...Array(COLS-4).fill(Bl(`sg${g.id}`))));
+        }
+      }
+
+      // Détail des placements
+      rows.push(Sp()); rows.push(Sp());
+      const DC = 13;
+      rows.push(R(C('DÉTAIL DES PLACEMENTS', 'sh1'), ...Array(DC-1).fill(Bl('sh1'))));
+      rows.push(Sp());
+      rows.push(R(C('Type','sh2'), C('Réf. fourn.','sh2'), C('Coloris','sh2'), C('Ép. (mm)','sh2'), C('Façade','sh2'), C('Panneau','sh2'), C('Format','sh2'), C('Réf. pièce','sh2'), C('Pièce L','sh2'), C('Pièce H','sh2'), C('Rotation','sh2'), C('Pos X','sh2'), C('Pos Y','sh2')));
+      for (const g of groups) {
+        const result = allResults[g.id];
+        if (!result) continue;
+        let any = false;
+        for (const panel of (result.panels || [])) {
+          for (const p of panel.placements) {
+            if (!any) { rows.push(Sp()); any = true; }
+            rows.push(R(C(g.name,`sg${g.id}`), C(g.reference||'',`sg${g.id}`), C(g.coloris||'',`sg${g.id}`), C(g.epaisseur||18,`sg${g.id}`), C(p.subsectionName||'',`sg${g.id}`), C(panel.idx,`sg${g.id}`), C(panel.stock.label||'',`sg${g.id}`), C(panel.idx+'.'+p.pieceNum,`sg${g.id}`), C(p.w,`sg${g.id}`), C(p.h,`sg${g.id}`), C(p.rotated?'Oui':'Non',`sg${g.id}`), C(p.x,`sg${g.id}`), C(p.y,`sg${g.id}`)));
+          }
+        }
+      }
+    }
+
     return `<Worksheet ss:Name="Panneaux"><Table ss:DefaultColumnWidth="100" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
   }
 
@@ -2296,10 +2340,11 @@ function exportExcel() {
     rows.push(R(C(`${nom} — Ossature`, 'sh1'), ...Array(5).fill(Bl('sh1'))));
     rows.push(R(C('Date :', 'sh2'), C(date, 'sh2'), ...Array(4).fill(Bl('sh2'))));
     rows.push(Sp());
-    rows.push(R(C('Type panneau','sh2'), C('Façade','sh2'), C('Profil','sh2'), C('Longueur (mm)','sh2'), C('Qté','sh2'), C('ML total','sh2')));
+    rows.push(R(C('Façade','sh2'), C('Profil','sh2'), C('Longueur (mm)','sh2'), C('Qté','sh2'), C('ML total','sh2'), Bl('sh2')));
 
-    const hasSpatial = projectRectsSpatial && projectRectsSpatial.length > 0;
-    const byFacadeAll = hasSpatial ? groupRectsByFacade(projectRectsSpatial, projectFacadeLabels).byFacade : {};
+    // Utilise computeOssatureProfilesReport() — identique à l'affichage UI
+    // (inclut prolongements bas/haut, zones de fixation, normalisation, etc.)
+    const profileReport = computeOssatureProfilesReport();
     let grandOmML = 0, grandZdML = 0;
 
     function gbLen(arr) {
@@ -2308,42 +2353,26 @@ function exportExcel() {
       return Object.entries(m).sort((a,b) => +b[0]-+a[0]).map(([l,q]) => ({len:+l, qty:+q}));
     }
 
-    for (const g of groups) {
-      let grpOmML = 0, grpZdML = 0;
-      const groupAci = getGroupAciLocal(g);
-      let anyContent = false;
+    const facadeNames = Object.keys(profileReport).sort();
+    for (const fname of facadeNames) {
+      const pr = profileReport[fname];
+      const omGrps = gbLen(pr.omega), zdGrps = gbLen(pr.zed);
+      const facOmML = pr.omega.reduce((s,l) => s+l, 0)/1000;
+      const facZdML = pr.zed.reduce((s,l) => s+l, 0)/1000;
+      if (!omGrps.length && !zdGrps.length) continue;
 
-      for (const sub of g.subsections) {
-        if (!hasSpatial) continue;
-        const allPanels = byFacadeAll[sub.name] || [];
-        const groupPanels = groupAci !== null ? allPanels.filter(r => r.color === groupAci) : allPanels;
-        if (!groupPanels.length) continue;
-
-        const pr = computeOssatFacadeProfiles(sub.name, groupPanels);
-        const omGrps = gbLen(pr.omega), zdGrps = gbLen(pr.zed);
-        const facOmML = pr.omega.reduce((s,l) => s+l, 0)/1000;
-        const facZdML = pr.zed.reduce((s,l) => s+l, 0)/1000;
-        if (!omGrps.length && !zdGrps.length) continue;
-
-        if (!anyContent) { rows.push(Sp()); anyContent = true; }
-        rows.push(R(C(g.name,`sg${g.id}`), C(sub.name,`sg${g.id}`), ...Array(4).fill(Bl(`sg${g.id}`))));
-        for (const c of omGrps) rows.push(R(Bl(), C(sub.name), C('Oméga'), C(c.len), C(c.qty), C(+(c.len*c.qty/1000).toFixed(3),'sn3')));
-        for (const c of zdGrps) rows.push(R(Bl(), C(sub.name), C('Zed'),   C(c.len), C(c.qty), C(+(c.len*c.qty/1000).toFixed(3),'sn3')));
-        rows.push(R(Bl('ssub'), C(`Sous-total ${sub.name}`,'ssub'), C('Oméga','ssub'), Bl('ssub'), Bl('ssub'), C(+facOmML.toFixed(3),'ssub3')));
-        rows.push(R(Bl('ssub'), C(`Sous-total ${sub.name}`,'ssub'), C('Zed',  'ssub'), Bl('ssub'), Bl('ssub'), C(+facZdML.toFixed(3),'ssub3')));
-        grpOmML += facOmML; grpZdML += facZdML;
-      }
-      if (grpOmML || grpZdML) {
-        rows.push(R(C(`TOTAL ${g.name}`,'ssub'), Bl('ssub'), C('Oméga','ssub'), Bl('ssub'), Bl('ssub'), C(+grpOmML.toFixed(3),'ssub3')));
-        rows.push(R(C(`TOTAL ${g.name}`,'ssub'), Bl('ssub'), C('Zed',  'ssub'), Bl('ssub'), Bl('ssub'), C(+grpZdML.toFixed(3),'ssub3')));
-        rows.push(Sp());
-        grandOmML += grpOmML; grandZdML += grpZdML;
-      }
+      rows.push(Sp());
+      rows.push(R(C(fname,'sfac'), ...Array(5).fill(Bl('sfac'))));
+      for (const c of omGrps) rows.push(R(C(fname), C('Oméga'), C(c.len), C(c.qty), C(+(c.len*c.qty/1000).toFixed(3),'sn3'), Bl()));
+      for (const c of zdGrps) rows.push(R(C(fname), C('Zed'),   C(c.len), C(c.qty), C(+(c.len*c.qty/1000).toFixed(3),'sn3'), Bl()));
+      rows.push(R(C(`Sous-total ${fname}`,'ssub'), C('Oméga','ssub'), Bl('ssub'), Bl('ssub'), C(+facOmML.toFixed(3),'ssub3'), Bl('ssub')));
+      rows.push(R(C(`Sous-total ${fname}`,'ssub'), C('Zed',  'ssub'), Bl('ssub'), Bl('ssub'), C(+facZdML.toFixed(3),'ssub3'), Bl('ssub')));
+      grandOmML += facOmML; grandZdML += facZdML;
     }
     rows.push(Sp());
-    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Oméga','sgt'), Bl('sgt'), Bl('sgt'), C(+grandOmML.toFixed(3),'sgt3')));
-    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Zed',  'sgt'), Bl('sgt'), Bl('sgt'), C(+grandZdML.toFixed(3),'sgt3')));
-    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Total','sgt'), Bl('sgt'), Bl('sgt'), C(+(grandOmML+grandZdML).toFixed(3),'sgt3')));
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), C('Oméga','sgt'), Bl('sgt'), Bl('sgt'), C(+grandOmML.toFixed(3),'sgt3'), Bl('sgt')));
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), C('Zed',  'sgt'), Bl('sgt'), Bl('sgt'), C(+grandZdML.toFixed(3),'sgt3'), Bl('sgt')));
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), C('Total','sgt'), Bl('sgt'), Bl('sgt'), C(+(grandOmML+grandZdML).toFixed(3),'sgt3'), Bl('sgt')));
     return `<Worksheet ss:Name="Ossature"><Table ss:DefaultColumnWidth="110" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
   }
 
