@@ -483,7 +483,6 @@
     .pdf-page-break { page-break-before: always; }
   }
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -2203,181 +2202,261 @@ function exportPDF() {
 // EXPORT EXCEL
 // ============================================================
 function exportExcel() {
-  if (typeof XLSX === 'undefined') {
-    alert('Librairie Excel non chargée. Veuillez rafraîchir la page.');
-    return;
-  }
   const nom = chantier.nom || 'Chantier';
   const date = chantier.date || new Date().toISOString().slice(0, 10);
-  const wb = XLSX.utils.book_new();
 
-  // ── Onglet 1 : Panneaux ──
-  const pannRows = [];
-  pannRows.push([nom, '', '', 'Date :', date]);
-  pannRows.push([]);
-  pannRows.push(['Type', 'Façade', 'Sous-type', 'L (mm)', 'H (mm)', 'Qté', 'Surface unit. (m²)', 'Surface totale (m²)']);
+  // ── XML SpreadsheetML helpers ────────────────────────────────
+  const ESC = v => String(v === null || v === undefined ? '' : v)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const C = (v, sid) => {
+    const t = typeof v === 'number' ? 'Number' : 'String';
+    const s = sid ? ` ss:StyleID="${sid}"` : '';
+    return `<Cell${s}><Data ss:Type="${t}">${ESC(v)}</Data></Cell>`;
+  };
+  const Bl = sid => `<Cell${sid ? ` ss:StyleID="${sid}"` : ''}><Data ss:Type="String"></Data></Cell>`;
+  const R = (...cells) => `<Row ss:Height="18">${cells.join('')}</Row>`;
+  const Sp = () => `<Row ss:Height="7"></Row>`;
 
-  let grandPannQty = 0, grandPannSurf = 0;
-  for (const g of groups) {
-    let groupQty = 0, groupSurf = 0;
-    for (const sub of g.subsections) {
-      let facQty = 0, facSurf = 0;
-      for (const st of (sub.panelSubtypes || [])) {
-        for (const p of [...st.pieces].sort((a, b) => b.w * b.h - a.w * a.h)) {
-          const sUnit = p.w * p.h / 1e6;
-          const sTot = sUnit * p.qty;
-          facQty += p.qty; facSurf += sTot;
-          pannRows.push([g.name, sub.name, st.name, p.w, p.h, p.qty, +sUnit.toFixed(4), +sTot.toFixed(4)]);
+  // Tint hex color toward white (t = 0..1)
+  function tint(hex, t) {
+    const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+    return '#'+[r,g,b].map(c=>Math.round(c+(255-c)*t).toString(16).padStart(2,'0')).join('');
+  }
+
+  // Per-group dynamic style IDs
+  const groupStyleDefs = groups.map(g => {
+    const bg = tint(g.color, 0.72);
+    return `<Style ss:ID="sg${g.id}"><Font ss:Bold="1" ss:FontName="Calibri" ss:Size="11"/><Interior ss:Color="${bg}" ss:Pattern="Solid"/><Alignment ss:Vertical="Center"/></Style>
+    <Style ss:ID="sg${g.id}n"><Font ss:Bold="1" ss:FontName="Calibri"/><Interior ss:Color="${bg}" ss:Pattern="Solid"/><NumberFormat ss:Format="0.0000"/><Alignment ss:Vertical="Center"/></Style>
+    <Style ss:ID="sg${g.id}n3"><Font ss:Bold="1" ss:FontName="Calibri"/><Interior ss:Color="${bg}" ss:Pattern="Solid"/><NumberFormat ss:Format="0.000"/><Alignment ss:Vertical="Center"/></Style>`;
+  }).join('');
+
+  const STYLES = `<Styles>
+    <Style ss:ID="Default"><Font ss:FontName="Calibri" ss:Size="11"/><Alignment ss:Vertical="Center"/></Style>
+    <Style ss:ID="sh1"><Font ss:Bold="1" ss:Color="#FFFFFF" ss:Size="13" ss:FontName="Calibri"/><Interior ss:Color="#1E293B" ss:Pattern="Solid"/><Alignment ss:Vertical="Center"/></Style>
+    <Style ss:ID="sh2"><Font ss:Bold="1" ss:Color="#FFFFFF" ss:Size="11" ss:FontName="Calibri"/><Interior ss:Color="#475569" ss:Pattern="Solid"/><Alignment ss:Vertical="Center"/></Style>
+    <Style ss:ID="sfac"><Font ss:Bold="1" ss:FontName="Calibri"/><Interior ss:Color="#E2E8F0" ss:Pattern="Solid"/><Alignment ss:Vertical="Center"/></Style>
+    <Style ss:ID="ssub"><Font ss:Bold="1" ss:Italic="1" ss:FontName="Calibri"/><Interior ss:Color="#FEF3C7" ss:Pattern="Solid"/><Alignment ss:Vertical="Center"/></Style>
+    <Style ss:ID="ssub3"><Font ss:Bold="1" ss:Italic="1" ss:FontName="Calibri"/><Interior ss:Color="#FEF3C7" ss:Pattern="Solid"/><NumberFormat ss:Format="0.000"/><Alignment ss:Vertical="Center"/></Style>
+    <Style ss:ID="ssub4"><Font ss:Bold="1" ss:Italic="1" ss:FontName="Calibri"/><Interior ss:Color="#FEF3C7" ss:Pattern="Solid"/><NumberFormat ss:Format="0.0000"/><Alignment ss:Vertical="Center"/></Style>
+    <Style ss:ID="sgt"><Font ss:Bold="1" ss:Color="#FFFFFF" ss:FontName="Calibri"/><Interior ss:Color="#166534" ss:Pattern="Solid"/><Alignment ss:Vertical="Center"/></Style>
+    <Style ss:ID="sgt3"><Font ss:Bold="1" ss:Color="#FFFFFF" ss:FontName="Calibri"/><Interior ss:Color="#166534" ss:Pattern="Solid"/><NumberFormat ss:Format="0.000"/><Alignment ss:Vertical="Center"/></Style>
+    <Style ss:ID="sgt4"><Font ss:Bold="1" ss:Color="#FFFFFF" ss:FontName="Calibri"/><Interior ss:Color="#166534" ss:Pattern="Solid"/><NumberFormat ss:Format="0.0000"/><Alignment ss:Vertical="Center"/></Style>
+    <Style ss:ID="sn3"><NumberFormat ss:Format="0.000"/></Style>
+    ${groupStyleDefs}
+  </Styles>`;
+
+  function getGroupAciLocal(g) {
+    if (g.colorAci != null) return g.colorAci;
+    for (const [aci, info] of Object.entries(ACI_COLOR_MAP_JS))
+      if (info.color === g.color) return parseInt(aci);
+    return null;
+  }
+
+  // ── Onglet Panneaux ──────────────────────────────────────────
+  function sheetPanneaux() {
+    const rows = [];
+    const COLS = 8;
+    rows.push(R(C(`${nom} — Panneaux`, 'sh1'), ...Array(COLS-1).fill(Bl('sh1'))));
+    rows.push(R(C('Date :', 'sh2'), C(date, 'sh2'), ...Array(COLS-2).fill(Bl('sh2'))));
+    rows.push(Sp());
+    rows.push(R(C('Type','sh2'), C('Façade','sh2'), C('Sous-type','sh2'), C('L (mm)','sh2'), C('H (mm)','sh2'), C('Qté','sh2'), C('Surf. unit. (m²)','sh2'), C('Surf. totale (m²)','sh2')));
+
+    let grandQty = 0, grandSurf = 0;
+    for (const g of groups) {
+      let grpQty = 0, grpSurf = 0, anyContent = false;
+      for (const sub of g.subsections) {
+        let facQty = 0, facSurf = 0;
+        for (const st of (sub.panelSubtypes || [])) {
+          for (const p of [...st.pieces].sort((a,b) => b.w*b.h - a.w*a.h)) {
+            if (!anyContent) { rows.push(Sp()); anyContent = true; }
+            const su = p.w*p.h/1e6, stot = su*p.qty;
+            facQty += p.qty; facSurf += stot;
+            rows.push(R(C(g.name,`sg${g.id}`), C(sub.name,`sg${g.id}`), C(st.name,`sg${g.id}`), C(p.w,`sg${g.id}`), C(p.h,`sg${g.id}`), C(p.qty,`sg${g.id}`), C(+su.toFixed(4),`sg${g.id}n`), C(+stot.toFixed(4),`sg${g.id}n`)));
+          }
+        }
+        if (facQty > 0) {
+          rows.push(R(Bl('ssub'), C(`Sous-total ${sub.name}`,'ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), C(facQty,'ssub'), Bl('ssub'), C(+facSurf.toFixed(4),'ssub4')));
+          grpQty += facQty; grpSurf += facSurf;
         }
       }
-      if (facQty > 0) {
-        pannRows.push(['', 'Sous-total ' + sub.name, '', '', '', facQty, '', +facSurf.toFixed(4)]);
-        groupQty += facQty; groupSurf += facSurf;
+      if (grpQty > 0) {
+        rows.push(R(C(`TOTAL ${g.name}`,'ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), C(grpQty,'ssub'), Bl('ssub'), C(+grpSurf.toFixed(4),'ssub4')));
+        grandQty += grpQty; grandSurf += grpSurf;
       }
     }
-    if (groupQty > 0) {
-      pannRows.push(['TOTAL ' + g.name, '', '', '', '', groupQty, '', +groupSurf.toFixed(4)]);
-      grandPannQty += groupQty; grandPannSurf += groupSurf;
-      pannRows.push([]);
+    rows.push(Sp());
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), ...Array(4).fill(Bl('sgt')), C(grandQty,'sgt'), Bl('sgt'), C(+grandSurf.toFixed(4),'sgt4')));
+    return `<Worksheet ss:Name="Panneaux"><Table ss:DefaultColumnWidth="100" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
+  }
+
+  // ── Onglet Ossature ──────────────────────────────────────────
+  function sheetOssature() {
+    const rows = [];
+    rows.push(R(C(`${nom} — Ossature`, 'sh1'), ...Array(5).fill(Bl('sh1'))));
+    rows.push(R(C('Date :', 'sh2'), C(date, 'sh2'), ...Array(4).fill(Bl('sh2'))));
+    rows.push(Sp());
+    rows.push(R(C('Type panneau','sh2'), C('Façade','sh2'), C('Profil','sh2'), C('Longueur (mm)','sh2'), C('Qté','sh2'), C('ML total','sh2')));
+
+    const hasSpatial = projectRectsSpatial && projectRectsSpatial.length > 0;
+    const byFacadeAll = hasSpatial ? groupRectsByFacade(projectRectsSpatial, projectFacadeLabels).byFacade : {};
+    let grandOmML = 0, grandZdML = 0;
+
+    function gbLen(arr) {
+      const m = {};
+      for (const l of arr) m[l] = (m[l]||0)+1;
+      return Object.entries(m).sort((a,b) => +b[0]-+a[0]).map(([l,q]) => ({len:+l, qty:+q}));
     }
-  }
-  pannRows.push(['TOTAL GÉNÉRAL', '', '', '', '', grandPannQty, '', +grandPannSurf.toFixed(4)]);
-  const wsPann = XLSX.utils.aoa_to_sheet(pannRows);
-  wsPann['!cols'] = [{ wch: 20 }, { wch: 18 }, { wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 18 }, { wch: 18 }];
-  XLSX.utils.book_append_sheet(wb, wsPann, 'Panneaux');
 
-  // ── Onglet 2 : Ossature ──
-  const ossRows = [];
-  ossRows.push([nom, '', '', 'Date :', date]);
-  ossRows.push([]);
-  ossRows.push(['Type panneau', 'Façade', 'Profil', 'Longueur (mm)', 'Qté', 'ML total']);
+    for (const g of groups) {
+      let grpOmML = 0, grpZdML = 0;
+      const groupAci = getGroupAciLocal(g);
+      let anyContent = false;
 
-  const ossData = calcOssature();
-  let grandOmML = 0, grandZdML = 0;
-  function groupCutsByLen(arr) {
-    const map = {};
-    for (const c of arr) map[c.len] = (map[c.len] || 0) + 1;
-    return Object.entries(map).sort((a, b) => +b[0] - +a[0]).map(([len, qty]) => ({ len: +len, qty }));
-  }
-  for (const gd of ossData) {
-    const g = gd.group;
-    let grpOmML = 0, grpZdML = 0;
-    for (const sd of gd.subsections) {
-      if (!sd.pieces.length) continue;
-      const omGrps = groupCutsByLen(sd.omegaCuts);
-      const zdGrps = groupCutsByLen(sd.zedCuts);
-      const facOmML = sd.omegaCuts.reduce((s, c) => s + c.len, 0) / 1000;
-      const facZdML = sd.zedCuts.reduce((s, c) => s + c.len, 0) / 1000;
-      for (const c of omGrps) ossRows.push([g.name, sd.subsection.name, 'Oméga', c.len, c.qty, +(c.len * c.qty / 1000).toFixed(3)]);
-      for (const c of zdGrps) ossRows.push([g.name, sd.subsection.name, 'Zed',   c.len, c.qty, +(c.len * c.qty / 1000).toFixed(3)]);
-      if (omGrps.length || zdGrps.length) {
-        ossRows.push(['', 'Sous-total ' + sd.subsection.name, 'Oméga', '', '', +facOmML.toFixed(3)]);
-        ossRows.push(['', 'Sous-total ' + sd.subsection.name, 'Zed',   '', '', +facZdML.toFixed(3)]);
+      for (const sub of g.subsections) {
+        if (!hasSpatial) continue;
+        const allPanels = byFacadeAll[sub.name] || [];
+        const groupPanels = groupAci !== null ? allPanels.filter(r => r.color === groupAci) : allPanels;
+        if (!groupPanels.length) continue;
+
+        const pr = computeOssatFacadeProfiles(sub.name, groupPanels);
+        const omGrps = gbLen(pr.omega), zdGrps = gbLen(pr.zed);
+        const facOmML = pr.omega.reduce((s,l) => s+l, 0)/1000;
+        const facZdML = pr.zed.reduce((s,l) => s+l, 0)/1000;
+        if (!omGrps.length && !zdGrps.length) continue;
+
+        if (!anyContent) { rows.push(Sp()); anyContent = true; }
+        rows.push(R(C(g.name,`sg${g.id}`), C(sub.name,`sg${g.id}`), ...Array(4).fill(Bl(`sg${g.id}`))));
+        for (const c of omGrps) rows.push(R(Bl(), C(sub.name), C('Oméga'), C(c.len), C(c.qty), C(+(c.len*c.qty/1000).toFixed(3),'sn3')));
+        for (const c of zdGrps) rows.push(R(Bl(), C(sub.name), C('Zed'),   C(c.len), C(c.qty), C(+(c.len*c.qty/1000).toFixed(3),'sn3')));
+        rows.push(R(Bl('ssub'), C(`Sous-total ${sub.name}`,'ssub'), C('Oméga','ssub'), Bl('ssub'), Bl('ssub'), C(+facOmML.toFixed(3),'ssub3')));
+        rows.push(R(Bl('ssub'), C(`Sous-total ${sub.name}`,'ssub'), C('Zed',  'ssub'), Bl('ssub'), Bl('ssub'), C(+facZdML.toFixed(3),'ssub3')));
+        grpOmML += facOmML; grpZdML += facZdML;
       }
-      grpOmML += facOmML; grpZdML += facZdML;
-    }
-    if (grpOmML || grpZdML) {
-      ossRows.push(['TOTAL ' + g.name, '', 'Oméga', '', '', +grpOmML.toFixed(3)]);
-      ossRows.push(['TOTAL ' + g.name, '', 'Zed',   '', '', +grpZdML.toFixed(3)]);
-      ossRows.push([]);
-      grandOmML += grpOmML; grandZdML += grpZdML;
-    }
-  }
-  ossRows.push(['TOTAL GÉNÉRAL', '', 'Oméga', '', '', +grandOmML.toFixed(3)]);
-  ossRows.push(['TOTAL GÉNÉRAL', '', 'Zed',   '', '', +grandZdML.toFixed(3)]);
-  ossRows.push(['TOTAL GÉNÉRAL', '', 'Total', '', '', +(grandOmML + grandZdML).toFixed(3)]);
-  const wsOss = XLSX.utils.aoa_to_sheet(ossRows);
-  wsOss['!cols'] = [{ wch: 20 }, { wch: 18 }, { wch: 10 }, { wch: 14 }, { wch: 8 }, { wch: 12 }];
-  XLSX.utils.book_append_sheet(wb, wsOss, 'Ossature');
-
-  // ── Onglet 3 : Fixations ──
-  const fixRows = [];
-  fixRows.push([nom, '', '', 'Date :', date]);
-  fixRows.push([]);
-  fixRows.push(['Type panneau', 'Façade', 'Profil', 'Réf', 'Longueur (mm)', 'Rangées', 'Fix./rangée', 'Total fixations']);
-
-  const { result: fixData, grandTotalOmega, grandTotalZed, grandTotal: grandTotalFix } = calcFixation();
-  for (const gd of fixData) {
-    const g = gd.group;
-    let grpOmFix = 0, grpZdFix = 0;
-    for (const sd of gd.subsections) {
-      for (const row of sd.omegaRows) fixRows.push([g.name, sd.subsection.name, 'Oméga', row.ref, row.len, row.nbRows, 2, row.fixings]);
-      for (const row of sd.zedRows)   fixRows.push([g.name, sd.subsection.name, 'Zed',   row.ref, row.len, row.nbRows, 1, row.fixings]);
-      if (sd.omegaRows.length || sd.zedRows.length) {
-        fixRows.push(['', 'Sous-total ' + sd.subsection.name, 'Oméga', '', '', '', '', sd.subOmegaFixings]);
-        fixRows.push(['', 'Sous-total ' + sd.subsection.name, 'Zed',   '', '', '', '', sd.subZedFixings]);
-        fixRows.push(['', 'Sous-total ' + sd.subsection.name, 'Total', '', '', '', '', sd.subTotal]);
+      if (grpOmML || grpZdML) {
+        rows.push(R(C(`TOTAL ${g.name}`,'ssub'), Bl('ssub'), C('Oméga','ssub'), Bl('ssub'), Bl('ssub'), C(+grpOmML.toFixed(3),'ssub3')));
+        rows.push(R(C(`TOTAL ${g.name}`,'ssub'), Bl('ssub'), C('Zed',  'ssub'), Bl('ssub'), Bl('ssub'), C(+grpZdML.toFixed(3),'ssub3')));
+        rows.push(Sp());
+        grandOmML += grpOmML; grandZdML += grpZdML;
       }
-      grpOmFix += sd.subOmegaFixings; grpZdFix += sd.subZedFixings;
     }
-    if (grpOmFix || grpZdFix) {
-      fixRows.push(['TOTAL ' + g.name, '', 'Oméga', '', '', '', '', grpOmFix]);
-      fixRows.push(['TOTAL ' + g.name, '', 'Zed',   '', '', '', '', grpZdFix]);
-      fixRows.push(['TOTAL ' + g.name, '', 'Total', '', '', '', '', grpOmFix + grpZdFix]);
-      fixRows.push([]);
-    }
+    rows.push(Sp());
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Oméga','sgt'), Bl('sgt'), Bl('sgt'), C(+grandOmML.toFixed(3),'sgt3')));
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Zed',  'sgt'), Bl('sgt'), Bl('sgt'), C(+grandZdML.toFixed(3),'sgt3')));
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Total','sgt'), Bl('sgt'), Bl('sgt'), C(+(grandOmML+grandZdML).toFixed(3),'sgt3')));
+    return `<Worksheet ss:Name="Ossature"><Table ss:DefaultColumnWidth="110" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
   }
-  fixRows.push(['TOTAL GÉNÉRAL', '', 'Oméga', '', '', '', '', grandTotalOmega]);
-  fixRows.push(['TOTAL GÉNÉRAL', '', 'Zed',   '', '', '', '', grandTotalZed]);
-  fixRows.push(['TOTAL GÉNÉRAL', '', 'TOTAL', '', '', '', '', grandTotalFix]);
-  const wsFix = XLSX.utils.aoa_to_sheet(fixRows);
-  wsFix['!cols'] = [{ wch: 20 }, { wch: 18 }, { wch: 10 }, { wch: 20 }, { wch: 14 }, { wch: 10 }, { wch: 12 }, { wch: 16 }];
-  XLSX.utils.book_append_sheet(wb, wsFix, 'Fixations');
 
-  // ── Onglet 4 : Pliages ──
-  const pliRows = [];
-  pliRows.push([nom, '', '', 'Date :', date]);
-  pliRows.push([]);
-  pliRows.push(['Façade', 'Élément', 'Mesure (mm)', 'Ext./côté (mm)', 'Total (mm)', 'ML']);
+  // ── Onglet Fixations ─────────────────────────────────────────
+  function sheetFixations() {
+    const rows = [];
+    rows.push(R(C(`${nom} — Fixations`, 'sh1'), ...Array(7).fill(Bl('sh1'))));
+    rows.push(R(C('Date :', 'sh2'), C(date, 'sh2'), ...Array(6).fill(Bl('sh2'))));
+    rows.push(Sp());
+    rows.push(R(C('Type panneau','sh2'), C('Façade','sh2'), C('Profil','sh2'), C('Réf','sh2'), C('Longueur (mm)','sh2'), C('Rangées','sh2'), C('Fix./rangée','sh2'), C('Total fixations','sh2')));
 
-  if (projectRectsSpatial && projectRectsSpatial.length) {
+    const { result: fixData, grandTotalOmega, grandTotalZed, grandTotal: grandTotalFix } = calcFixation();
+    for (const gd of fixData) {
+      const g = gd.group;
+      let grpOmFix = 0, grpZdFix = 0, anyContent = false;
+      for (const sd of gd.subsections) {
+        if (!sd.omegaRows.length && !sd.zedRows.length) continue;
+        if (!anyContent) { rows.push(Sp()); anyContent = true; }
+        for (const row of sd.omegaRows) rows.push(R(C(g.name,`sg${g.id}`), C(sd.subsection.name,`sg${g.id}`), C('Oméga',`sg${g.id}`), C(row.ref,`sg${g.id}`), C(row.len,`sg${g.id}`), C(row.nbRows,`sg${g.id}`), C(2,`sg${g.id}`), C(row.fixings,`sg${g.id}`)));
+        for (const row of sd.zedRows)   rows.push(R(C(g.name,`sg${g.id}`), C(sd.subsection.name,`sg${g.id}`), C('Zed',`sg${g.id}`),   C(row.ref,`sg${g.id}`), C(row.len,`sg${g.id}`), C(row.nbRows,`sg${g.id}`), C(1,`sg${g.id}`), C(row.fixings,`sg${g.id}`)));
+        rows.push(R(Bl('ssub'), C(`Sous-total ${sd.subsection.name}`,'ssub'), C('Oméga','ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), C(sd.subOmegaFixings,'ssub')));
+        rows.push(R(Bl('ssub'), C(`Sous-total ${sd.subsection.name}`,'ssub'), C('Zed',  'ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), C(sd.subZedFixings,'ssub')));
+        rows.push(R(Bl('ssub'), C(`Sous-total ${sd.subsection.name}`,'ssub'), C('Total','ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), C(sd.subTotal,'ssub')));
+        grpOmFix += sd.subOmegaFixings; grpZdFix += sd.subZedFixings;
+      }
+      if (grpOmFix || grpZdFix) {
+        rows.push(R(C(`TOTAL ${g.name}`,'ssub'), Bl('ssub'), C('Oméga','ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), C(grpOmFix,'ssub')));
+        rows.push(R(C(`TOTAL ${g.name}`,'ssub'), Bl('ssub'), C('Zed',  'ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), C(grpZdFix,'ssub')));
+        rows.push(R(C(`TOTAL ${g.name}`,'ssub'), Bl('ssub'), C('Total','ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), C(grpOmFix+grpZdFix,'ssub')));
+        rows.push(Sp());
+      }
+    }
+    rows.push(Sp());
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Oméga','sgt'), ...Array(4).fill(Bl('sgt')), C(grandTotalOmega,'sgt')));
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Zed',  'sgt'), ...Array(4).fill(Bl('sgt')), C(grandTotalZed,'sgt')));
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('TOTAL','sgt'), ...Array(4).fill(Bl('sgt')), C(grandTotalFix,'sgt')));
+    return `<Worksheet ss:Name="Fixations"><Table ss:DefaultColumnWidth="100" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
+  }
+
+  // ── Onglet Pliages ───────────────────────────────────────────
+  function sheetPliages() {
+    const rows = [];
+    rows.push(R(C(`${nom} — Pliages`, 'sh1'), ...Array(5).fill(Bl('sh1'))));
+    rows.push(R(C('Date :', 'sh2'), C(date, 'sh2'), ...Array(4).fill(Bl('sh2'))));
+    rows.push(Sp());
+    rows.push(R(C('Façade','sh2'), C('Élément','sh2'), C('Mesure (mm)','sh2'), C('Ext./côté (mm)','sh2'), C('Total (mm)','sh2'), C('ML','sh2')));
+
+    if (!projectRectsSpatial || !projectRectsSpatial.length) {
+      rows.push(Sp());
+      rows.push(R(C('Aucune donnée DXF disponible pour les pliages.')));
+      return `<Worksheet ss:Name="Pliages"><Table ss:DefaultColumnWidth="110" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
+    }
+
     const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
     const facadeNames = Object.keys(byFacade).sort();
-    const gCounts = { linteaux: {}, tableaux: {}, appuis: {}, plinthes: {}, couvertines: {} };
-    function pliAddCount(map, len) { map[len] = (map[len] || 0) + 1; }
-    function pliMerge(dst, src) { for (const [k, v] of Object.entries(src)) dst[k] = (dst[k] || 0) + v; }
-    function pliML(map) { return +(Object.entries(map).reduce((s, [l, q]) => s + Number(l) * q, 0) / 1000).toFixed(3); }
+    const gC = { linteaux:{}, tableaux:{}, appuis:{}, plinthes:{}, couvertines:{} };
+    const addC = (m,l) => { m[l]=(m[l]||0)+1; };
+    const merge = (d,s) => { for (const [k,v] of Object.entries(s)) d[k]=(d[k]||0)+v; };
+    const toML = m => +(Object.entries(m).reduce((s,[l,q]) => s+Number(l)*q, 0)/1000).toFixed(3);
 
     for (const fname of facadeNames) {
       const { openings, plinthWidth, couvertineWidth } = detectPliageOpenings(byFacade[fname]);
-      const facCounts = { linteaux: {}, tableaux: {}, appuis: {} };
+      const fC = { linteaux:{}, tableaux:{}, appuis:{} };
+      rows.push(Sp());
+      rows.push(R(C(fname,'sfac'), C(openings.length+' ouverture(s)','sfac'), ...Array(4).fill(Bl('sfac'))));
       for (const ov of openings) {
         const idx = ov.id - 1;
-        const lExt  = getPliageExt(fname, 'linteau',  idx);
-        const gExt  = getPliageExt(fname, 'tableauG', idx);
-        const dExt  = getPliageExt(fname, 'tableauD', idx);
-        const aExt  = getPliageExt(fname, 'appuis',   idx);
-        const lTot = ov.width  + 2 * lExt, gTot = ov.height + 2 * gExt;
-        const dTot = ov.height + 2 * dExt, aTot = ov.width  + 2 * aExt;
-        pliRows.push([fname, ov.name + ' — Linteau',   ov.width,  lExt, lTot, +(lTot/1000).toFixed(3)]);
-        pliRows.push([fname, ov.name + ' — Tableau G', ov.height, gExt, gTot, +(gTot/1000).toFixed(3)]);
-        pliRows.push([fname, ov.name + ' — Tableau D', ov.height, dExt, dTot, +(dTot/1000).toFixed(3)]);
-        pliRows.push([fname, ov.name + ' — Appuis',    ov.width,  aExt, aTot, +(aTot/1000).toFixed(3)]);
-        pliAddCount(facCounts.linteaux, lTot); pliAddCount(facCounts.tableaux, gTot);
-        pliAddCount(facCounts.tableaux, dTot); pliAddCount(facCounts.appuis, aTot);
+        const lE=getPliageExt(fname,'linteau',idx), gE=getPliageExt(fname,'tableauG',idx);
+        const dE=getPliageExt(fname,'tableauD',idx), aE=getPliageExt(fname,'appuis',idx);
+        const lT=ov.width+2*lE, gT=ov.height+2*gE, dT=ov.height+2*dE, aT=ov.width+2*aE;
+        rows.push(R(C(fname), C(ov.name+' — Linteau'),   C(ov.width),  C(lE), C(lT), C(+(lT/1000).toFixed(3),'sn3')));
+        rows.push(R(C(fname), C(ov.name+' — Tableau G'), C(ov.height), C(gE), C(gT), C(+(gT/1000).toFixed(3),'sn3')));
+        rows.push(R(C(fname), C(ov.name+' — Tableau D'), C(ov.height), C(dE), C(dT), C(+(dT/1000).toFixed(3),'sn3')));
+        rows.push(R(C(fname), C(ov.name+' — Appuis'),    C(ov.width),  C(aE), C(aT), C(+(aT/1000).toFixed(3),'sn3')));
+        addC(fC.linteaux,lT); addC(fC.tableaux,gT); addC(fC.tableaux,dT); addC(fC.appuis,aT);
       }
-      const plExt = getPliageExt(fname, 'plinthe', 0), coExt = getPliageExt(fname, 'couvertine', 0);
-      const plTot = plinthWidth + 2 * plExt, coTot = couvertineWidth + 2 * coExt;
-      pliRows.push([fname, 'Plinthe',    plinthWidth,     plExt, plTot, +(plTot/1000).toFixed(3)]);
-      pliRows.push([fname, 'Couvertine', couvertineWidth, coExt, coTot, +(coTot/1000).toFixed(3)]);
-      pliRows.push([]);
-      pliMerge(gCounts.linteaux, facCounts.linteaux); pliMerge(gCounts.tableaux, facCounts.tableaux);
-      pliMerge(gCounts.appuis, facCounts.appuis);
-      pliAddCount(gCounts.plinthes, plTot); pliAddCount(gCounts.couvertines, coTot);
+      const plE=getPliageExt(fname,'plinthe',0), coE=getPliageExt(fname,'couvertine',0);
+      const plT=plinthWidth+2*plE, coT=couvertineWidth+2*coE;
+      rows.push(R(C(fname), C('Plinthe'),    C(plinthWidth),     C(plE), C(plT), C(+(plT/1000).toFixed(3),'sn3')));
+      rows.push(R(C(fname), C('Couvertine'), C(couvertineWidth), C(coE), C(coT), C(+(coT/1000).toFixed(3),'sn3')));
+      rows.push(R(Bl('ssub'), C(`Sous-total ${fname}`,'ssub'), C('Linteaux','ssub'), Bl('ssub'), Bl('ssub'), C(toML(fC.linteaux),'ssub3')));
+      rows.push(R(Bl('ssub'), C(`Sous-total ${fname}`,'ssub'), C('Tableaux','ssub'), Bl('ssub'), Bl('ssub'), C(toML(fC.tableaux),'ssub3')));
+      rows.push(R(Bl('ssub'), C(`Sous-total ${fname}`,'ssub'), C('Appuis',  'ssub'), Bl('ssub'), Bl('ssub'), C(toML(fC.appuis),  'ssub3')));
+      merge(gC.linteaux,fC.linteaux); merge(gC.tableaux,fC.tableaux); merge(gC.appuis,fC.appuis);
+      addC(gC.plinthes,plT); addC(gC.couvertines,coT);
     }
-    pliRows.push(['TOTAL GÉNÉRAL', 'Linteaux',    '', '', '', pliML(gCounts.linteaux)]);
-    pliRows.push(['TOTAL GÉNÉRAL', 'Tableaux',    '', '', '', pliML(gCounts.tableaux)]);
-    pliRows.push(['TOTAL GÉNÉRAL', 'Appuis',      '', '', '', pliML(gCounts.appuis)]);
-    pliRows.push(['TOTAL GÉNÉRAL', 'Plinthes',    '', '', '', pliML(gCounts.plinthes)]);
-    pliRows.push(['TOTAL GÉNÉRAL', 'Couvertines', '', '', '', pliML(gCounts.couvertines)]);
-  } else {
-    pliRows.push(['Aucune donnée DXF disponible pour les pliages.']);
+    rows.push(Sp());
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), C('Linteaux',   'sgt'), ...Array(3).fill(Bl('sgt')), C(toML(gC.linteaux),   'sgt3')));
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), C('Tableaux',   'sgt'), ...Array(3).fill(Bl('sgt')), C(toML(gC.tableaux),   'sgt3')));
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), C('Appuis',     'sgt'), ...Array(3).fill(Bl('sgt')), C(toML(gC.appuis),     'sgt3')));
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), C('Plinthes',   'sgt'), ...Array(3).fill(Bl('sgt')), C(toML(gC.plinthes),   'sgt3')));
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), C('Couvertines','sgt'), ...Array(3).fill(Bl('sgt')), C(toML(gC.couvertines),'sgt3')));
+    return `<Worksheet ss:Name="Pliages"><Table ss:DefaultColumnWidth="110" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
   }
-  const wsPli = XLSX.utils.aoa_to_sheet(pliRows);
-  wsPli['!cols'] = [{ wch: 18 }, { wch: 25 }, { wch: 14 }, { wch: 16 }, { wch: 12 }, { wch: 10 }];
-  XLSX.utils.book_append_sheet(wb, wsPli, 'Pliages');
 
-  XLSX.writeFile(wb, (nom.replace(/[^a-zA-Z0-9]/g, '_') || 'calepinage') + '_' + date + '.xlsx');
+  // ── Assemblage et téléchargement ─────────────────────────────
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:o="urn:schemas-microsoft-com:office:office"
+  xmlns:x="urn:schemas-microsoft-com:office:excel"
+  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+  ${STYLES}
+  ${sheetPanneaux()}
+  ${sheetOssature()}
+  ${sheetFixations()}
+  ${sheetPliages()}
+</Workbook>`;
+  const blob = new Blob(['\uFEFF'+xml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = (nom.replace(/[^a-zA-Z0-9]/g,'_')||'calepinage')+'_'+date+'.xls';
+  link.click();
 }
 
 // ============================================================
