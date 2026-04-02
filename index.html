@@ -2337,14 +2337,14 @@ function exportExcel() {
   // ── Onglet Ossature ──────────────────────────────────────────
   function sheetOssature() {
     const rows = [];
-    rows.push(R(C(`${nom} — Ossature`, 'sh1'), ...Array(5).fill(Bl('sh1'))));
-    rows.push(R(C('Date :', 'sh2'), C(date, 'sh2'), ...Array(4).fill(Bl('sh2'))));
+    rows.push(R(C(`${nom} — Ossature`, 'sh1'), ...Array(4).fill(Bl('sh1'))));
+    rows.push(R(C('Date :', 'sh2'), C(date, 'sh2'), ...Array(3).fill(Bl('sh2'))));
     rows.push(Sp());
-    rows.push(R(C('Type panneau','sh2'), C('Façade','sh2'), C('Profil','sh2'), C('Longueur (mm)','sh2'), C('Qté','sh2'), C('ML total','sh2')));
+    rows.push(R(C('Façade','sh2'), C('Profil','sh2'), C('Longueur (mm)','sh2'), C('Qté','sh2'), C('ML total','sh2')));
 
-    // Profils filtrés par groupe/couleur (même logique que l'affichage UI)
-    const hasSpatialX = projectRectsSpatial && projectRectsSpatial.length > 0;
-    const byFacadeX = hasSpatialX ? groupRectsByFacade(projectRectsSpatial, projectFacadeLabels).byFacade : {};
+    // Profils par façade — tous panneaux confondus, même source que l'UI
+    const profileRpt = computeOssatureProfilesReport();
+    const facadeNames = Object.keys(profileRpt).sort();
     let grandOmML = 0, grandZdML = 0;
 
     function gbLen(arr) {
@@ -2353,43 +2353,27 @@ function exportExcel() {
       return Object.entries(m).sort((a,b) => +b[0]-+a[0]).map(([l,q]) => ({len:+l, qty:+q}));
     }
 
-    for (const g of groups) {
-      let grpOmML = 0, grpZdML = 0;
-      const groupAci = getGroupAciLocal(g);
-      let anyContent = false;
+    for (const fname of facadeNames) {
+      const pr = profileRpt[fname];
+      if (!pr) continue;
+      const omGrps = gbLen(pr.omega), zdGrps = gbLen(pr.zed);
+      const facOmML = pr.omega.reduce((s,l) => s+l, 0)/1000;
+      const facZdML = pr.zed.reduce((s,l) => s+l, 0)/1000;
+      if (!omGrps.length && !zdGrps.length) continue;
 
-      for (const sub of g.subsections) {
-        if (!hasSpatialX) continue;
-        const allPanels = byFacadeX[sub.name] || [];
-        const groupPanels = groupAci !== null ? allPanels.filter(r => r.color === groupAci) : allPanels;
-        if (!groupPanels.length) continue;
-
-        const pr = computeOssatFacadeProfiles(sub.name, groupPanels);
-        const omGrps = gbLen(pr.omega), zdGrps = gbLen(pr.zed);
-        const facOmML = pr.omega.reduce((s,l) => s+l, 0)/1000;
-        const facZdML = pr.zed.reduce((s,l) => s+l, 0)/1000;
-        if (!omGrps.length && !zdGrps.length) continue;
-
-        if (!anyContent) { rows.push(Sp()); anyContent = true; }
-        rows.push(R(C(g.name,`sg${g.id}`), C(sub.name,`sg${g.id}`), ...Array(4).fill(Bl(`sg${g.id}`))));
-        for (const c of omGrps) rows.push(R(Bl(), C(sub.name), C('Oméga'), C(c.len), C(c.qty), C(+(c.len*c.qty/1000).toFixed(3),'sn3')));
-        for (const c of zdGrps) rows.push(R(Bl(), C(sub.name), C('Zed'),   C(c.len), C(c.qty), C(+(c.len*c.qty/1000).toFixed(3),'sn3')));
-        rows.push(R(Bl('ssub'), C(`Sous-total ${sub.name}`,'ssub'), C('Oméga','ssub'), Bl('ssub'), Bl('ssub'), C(+facOmML.toFixed(3),'ssub3')));
-        rows.push(R(Bl('ssub'), C(`Sous-total ${sub.name}`,'ssub'), C('Zed',  'ssub'), Bl('ssub'), Bl('ssub'), C(+facZdML.toFixed(3),'ssub3')));
-        grpOmML += facOmML; grpZdML += facZdML;
-      }
-      if (grpOmML || grpZdML) {
-        rows.push(R(C(`TOTAL ${g.name}`,'ssub'), Bl('ssub'), C('Oméga','ssub'), Bl('ssub'), Bl('ssub'), C(+grpOmML.toFixed(3),'ssub3')));
-        rows.push(R(C(`TOTAL ${g.name}`,'ssub'), Bl('ssub'), C('Zed',  'ssub'), Bl('ssub'), Bl('ssub'), C(+grpZdML.toFixed(3),'ssub3')));
-        rows.push(Sp());
-        grandOmML += grpOmML; grandZdML += grpZdML;
-      }
+      rows.push(Sp());
+      rows.push(R(C(fname,'sfac'), ...Array(4).fill(Bl('sfac'))));
+      for (const c of omGrps) rows.push(R(C(fname), C('Oméga'), C(c.len), C(c.qty), C(+(c.len*c.qty/1000).toFixed(3),'sn3')));
+      for (const c of zdGrps) rows.push(R(C(fname), C('Zed'),   C(c.len), C(c.qty), C(+(c.len*c.qty/1000).toFixed(3),'sn3')));
+      rows.push(R(C(`Sous-total ${fname}`,'ssub'), C('Oméga','ssub'), Bl('ssub'), Bl('ssub'), C(+facOmML.toFixed(3),'ssub3')));
+      rows.push(R(C(`Sous-total ${fname}`,'ssub'), C('Zed',  'ssub'), Bl('ssub'), Bl('ssub'), C(+facZdML.toFixed(3),'ssub3')));
+      grandOmML += facOmML; grandZdML += facZdML;
     }
     rows.push(Sp());
-    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Oméga','sgt'), Bl('sgt'), Bl('sgt'), C(+grandOmML.toFixed(3),'sgt3')));
-    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Zed',  'sgt'), Bl('sgt'), Bl('sgt'), C(+grandZdML.toFixed(3),'sgt3')));
-    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Total','sgt'), Bl('sgt'), Bl('sgt'), C(+(grandOmML+grandZdML).toFixed(3),'sgt3')));
-    return `<Worksheet ss:Name="Ossature"><Table ss:DefaultColumnWidth="110" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), C('Oméga','sgt'), Bl('sgt'), Bl('sgt'), C(+grandOmML.toFixed(3),'sgt3')));
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), C('Zed',  'sgt'), Bl('sgt'), Bl('sgt'), C(+grandZdML.toFixed(3),'sgt3')));
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), C('Total','sgt'), Bl('sgt'), Bl('sgt'), C(+(grandOmML+grandZdML).toFixed(3),'sgt3')));
+    return `<Worksheet ss:Name="Ossature"><Table ss:DefaultColumnWidth="120" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
   }
 
   // ── Onglet Fixations ─────────────────────────────────────────
@@ -4186,55 +4170,29 @@ function renderOssature() {
 
   let html = '';
 
-  // Compute real profile segments from spatial data (includes prolongement, fixation zones)
-  // profileReport (all panels) sert aux totaux globaux et récap commande
+  // Profils par façade (tous panneaux confondus) — source unique
   const profileReport = computeOssatureProfilesReport();
-  // Grand totals from profileReport — source unique, inclut prolongement, dédupliqué par façade
   let grandOmegaML = 0, grandZedML = 0;
   for (const pr of Object.values(profileReport)) {
     grandOmegaML += pr.omega.reduce((s,l) => s+l, 0) / 1000;
     grandZedML   += pr.zed.reduce((s,l) => s+l, 0) / 1000;
   }
 
-  // Profils par groupe (filtrés par couleur) pour l'affichage par type
-  function getGroupAciRender(g) {
-    if (g.colorAci != null) return g.colorAci;
-    for (const [aci, info] of Object.entries(ACI_COLOR_MAP_JS))
-      if (info.color === g.color) return parseInt(aci);
-    return null;
-  }
-  const hasSpatialOss = projectRectsSpatial && projectRectsSpatial.length > 0;
-  const byFacadeOss = hasSpatialOss ? groupRectsByFacade(projectRectsSpatial, projectFacadeLabels).byFacade : {};
-  const perGroupProfiles = {}; // `${g.id}_${sub.name}` → profile
-  for (const g of groups) {
-    const gaci = getGroupAciRender(g);
-    for (const sub of g.subsections) {
-      if (!hasSpatialOss) continue;
-      const allP = byFacadeOss[sub.name] || [];
-      const gP = gaci !== null ? allP.filter(r => r.color === gaci) : allP;
-      if (!gP.length) continue;
-      perGroupProfiles[`${g.id}_${sub.name}`] = computeOssatFacadeProfiles(sub.name, gP);
-    }
-  }
-
+  // Affichage par façade (une seule carte par façade, indépendant des types)
+  const renderedFacades = new Set();
   for (const gd of data) {
     const g = gd.group;
-    html += `<div class="result-group-header" style="border-color:${g.color}44; background:${g.color}0a;">
-      <span class="dot" style="background:${g.color};"></span>
-      <span class="name">${g.name}</span>
-      <span class="info">${gd.subsections.length} facade${gd.subsections.length>1?'s':''}</span>
-    </div>`;
-
     for (const sd of gd.subsections) {
       const sub = sd.subsection;
-      const subIdx = g.subsections.indexOf(sub);
-      const subColor = PIECE_COLORS[subIdx % PIECE_COLORS.length];
       if (sd.pieces.length === 0) continue;
-
       allOmegaCuts.push(...sd.omegaCuts);
       allZedCuts.push(...sd.zedCuts);
+      if (renderedFacades.has(sub.name)) continue;
+      renderedFacades.add(sub.name);
 
-      const pr = perGroupProfiles[`${g.id}_${sub.name}`];
+      const pr = profileReport[sub.name];
+      const subIdx = g.subsections.indexOf(sub);
+      const subColor = PIECE_COLORS[subIdx % PIECE_COLORS.length];
       html += `<div class="oss-card" style="border-left: 3px solid ${subColor};">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
           <span style="width:10px;height:10px;border-radius:50%;background:${subColor};display:inline-block;"></span>
