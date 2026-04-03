@@ -2434,6 +2434,22 @@ function exportExcel() {
     rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Oméga','sgt'), ...Array(4).fill(Bl('sgt')), C(grandTotalOmega,'sgt')));
     rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Zed',  'sgt'), ...Array(4).fill(Bl('sgt')), C(grandTotalZed,'sgt')));
     rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('TOTAL','sgt'), ...Array(4).fill(Bl('sgt')), C(grandTotalFix,'sgt')));
+
+    // ── Fixations panneau (trous) ──
+    const trouData = calcTrouFixations();
+    if (trouData.total > 0) {
+      rows.push(Sp()); rows.push(Sp());
+      rows.push(R(C('FIXATIONS PANNEAU','sh1'), ...Array(7).fill(Bl('sh1'))));
+      rows.push(Sp());
+      rows.push(R(C('Façade','sh2'), C('Nb fixations','sh2'), ...Array(6).fill(Bl('sh2'))));
+      for (const [fname, count] of Object.entries(trouData.byFacade).sort()) {
+        rows.push(R(C(fname,'sfac'), C(count,'sfac'), ...Array(6).fill(Bl('sfac'))));
+      }
+      rows.push(Sp());
+      rows.push(R(C('TOTAL FIXATIONS PANNEAU','sgt'), C(trouData.total,'sgt'), ...Array(6).fill(Bl('sgt'))));
+      rows.push(R(C('TOTAL GÉNÉRAL (ossature + panneau)','sgt'), C(grandTotalFix + trouData.total,'sgt'), ...Array(6).fill(Bl('sgt'))));
+    }
+
     return `<Worksheet ss:Name="Fixations"><Table ss:DefaultColumnWidth="100" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
   }
 
@@ -4831,6 +4847,28 @@ function calcFixation() {
   return { result, grandTotalOmega, grandTotalZed, grandTotal: grandTotalOmega + grandTotalZed };
 }
 
+function calcTrouFixations() {
+  // Returns { byFacade: {fname: count}, total: count }
+  if (!fixationConfig.trouEnabled || !projectRectsSpatial || !projectRectsSpatial.length) {
+    return { byFacade: {}, total: 0 };
+  }
+  const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+  const result = {};
+  let total = 0;
+  for (const [fname, panels] of Object.entries(byFacade)) {
+    const cfg = getTrouConfigForFacade(fname);
+    let count = 0;
+    for (const p of panels) {
+      const pw = Math.round(p.xmax - p.xmin);
+      const ph = Math.round(p.ymax - p.ymin);
+      count += calcHolePositions(pw, ph, cfg).length;
+    }
+    result[fname] = count;
+    total += count;
+  }
+  return { byFacade: result, total };
+}
+
 function getTrouConfigForFacade(facadeName) {
   const defaults = { corner: 'bl', offsetX: 50, offsetY: 50, diameter: 8, entraxeH: 600, entraxeV: 600, minH: 1, minV: 1 };
   if (fixationConfig.trouApplyAll) {
@@ -5055,6 +5093,22 @@ function renderFixation() {
     }
   }
 
+  // Fixations de panneau (trous)
+  const trouData = calcTrouFixations();
+  if (trouData.total > 0) {
+    html += `<div class="oss-card" style="border-color:#e74c3c44;">
+      <div style="font-weight:700;font-size:14px;margin-bottom:8px;">Fixations panneau</div>
+      <table class="oss-table">
+        <tr><th>Façade</th><th>Nb fixations</th></tr>`;
+    for (const [fname, count] of Object.entries(trouData.byFacade).sort()) {
+      html += `<tr><td>${fname}</td><td style="text-align:center;font-weight:700;color:#e74c3c;">${count}</td></tr>`;
+    }
+    html += `<tr class="total-row">
+      <td style="font-weight:800;">TOTAL</td>
+      <td style="text-align:center;font-weight:800;color:#e74c3c;">${trouData.total}</td>
+    </tr></table></div>`;
+  }
+
   // Totaux globaux
   html += `<div class="oss-card" style="border-color:var(--accent)44;">
     <table class="oss-table">
@@ -5067,9 +5121,10 @@ function renderFixation() {
         <td><span class="oss-badge zed">Z Zed (1/rangée)</span></td>
         <td style="font-weight:700;color:var(--yellow);">${grandTotalZed} fixations</td>
       </tr>
+      ${trouData.total > 0 ? `<tr><td style="color:#e74c3c;">Fixations panneau</td><td style="font-weight:700;color:#e74c3c;">${trouData.total} fixations</td></tr>` : ''}
       <tr class="total-row">
         <td style="font-weight:800;font-size:14px;">TOTAL</td>
-        <td style="font-weight:800;font-size:14px;color:var(--accent);">${grandTotal} fixations${prixFixation ? ` — ${(grandTotal * prixFixation).toFixed(2)} €` : ''}</td>
+        <td style="font-weight:800;font-size:14px;color:var(--accent);">${grandTotal + trouData.total} fixations${prixFixation ? ` — ${((grandTotal + trouData.total) * prixFixation).toFixed(2)} €` : ''}</td>
       </tr>
     </table>
   </div>`;
@@ -5081,10 +5136,14 @@ function renderFixation() {
   let sumHTML = '';
   sumHTML += `<div class="summary-row"><span class="summary-label">Fix. Oméga (×2)</span><span class="summary-value" style="color:var(--accent);">${grandTotalOmega}</span></div>`;
   sumHTML += `<div class="summary-row"><span class="summary-label">Fix. Zed (×1)</span><span class="summary-value" style="color:var(--yellow);">${grandTotalZed}</span></div>`;
+  if (trouData.total > 0) {
+    sumHTML += `<div class="summary-row"><span class="summary-label">Fix. panneau</span><span class="summary-value" style="color:#e74c3c;">${trouData.total}</span></div>`;
+  }
   sumHTML += `<div class="summary-divider"></div>`;
-  sumHTML += `<div class="summary-row"><span class="summary-label" style="font-weight:800;">Total</span><span class="summary-value" style="font-size:15px;color:var(--accent);">${grandTotal} pts</span></div>`;
+  const totalAll = grandTotal + trouData.total;
+  sumHTML += `<div class="summary-row"><span class="summary-label" style="font-weight:800;">Total</span><span class="summary-value" style="font-size:15px;color:var(--accent);">${totalAll} pts</span></div>`;
   if (prixFixation) {
-    sumHTML += `<div class="summary-row"><span class="summary-label">Coût fixations</span><span class="summary-value">${(grandTotal * prixFixation).toFixed(2)} €</span></div>`;
+    sumHTML += `<div class="summary-row"><span class="summary-label">Coût fixations</span><span class="summary-value">${(totalAll * prixFixation).toFixed(2)} €</span></div>`;
   }
   sumEl.innerHTML = sumHTML;
   document.getElementById('fixationSummaryCard').style.display = 'block';
