@@ -728,7 +728,21 @@
           <input type="number" id="fixationPrix" value="" placeholder="0.00" min="0" step="0.01" oninput="fixationConfig.prixFixation=this.value; renderFixation(); scheduleSave();">
         </div>
       </div>
-      <div style="font-size:12px;color:var(--text4);margin-top:8px;">Intervalle max : <strong id="fixationIntervalleDisplay">600</strong> mm<br><span style="font-size:11px;">(depuis config ossature)</span></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Fixation ossature</div>
+      <div class="oss-config">
+        <div>
+          <label>Entraxe fixations (mm)</label>
+          <input type="number" id="fixEntraxeOss" value="600" min="10" max="3000" step="10"
+            oninput="fixationConfig.entraxeOssature=+this.value; renderFixation(); scheduleSave();">
+        </div>
+        <div>
+          <label>Min. fixations / pièce</label>
+          <input type="number" id="fixMinOss" value="2" min="1" max="20" step="1"
+            oninput="fixationConfig.minFixOssature=+this.value; renderFixation(); scheduleSave();">
+        </div>
+      </div>
     </div>
     <div class="card">
       <div class="card-title">Trous de fixation</div>
@@ -929,6 +943,8 @@ let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omeg
 let devisConfig = { prixMO: '' };
 let fixationConfig = {
   prixFixation: '',
+  entraxeOssature: 600,
+  minFixOssature: 2,
   trouEnabled: false,
   trouApplyAll: true,
   trouGlobal: { corner: 'bl', offsetX: 50, offsetY: 50, diameter: 8, entraxeH: 600, entraxeV: 600, minH: 1, minV: 1 },
@@ -2404,46 +2420,21 @@ function exportExcel() {
   // ── Onglet Fixations ─────────────────────────────────────────
   function sheetFixations() {
     const rows = [];
-    rows.push(R(C(`${nom} — Fixations`, 'sh1'), ...Array(7).fill(Bl('sh1'))));
-    rows.push(R(C('Date :', 'sh2'), C(date, 'sh2'), ...Array(6).fill(Bl('sh2'))));
+    rows.push(R(C(`${nom} — Fixations`, 'sh1'), Bl('sh1')));
+    rows.push(R(C('Date :', 'sh2'), C(date, 'sh2')));
     rows.push(Sp());
-    rows.push(R(C('Type panneau','sh2'), C('Façade','sh2'), C('Profil','sh2'), C('Réf','sh2'), C('Longueur (mm)','sh2'), C('Rangées','sh2'), C('Fix./rangée','sh2'), C('Total fixations','sh2')));
+    rows.push(R(C('Type','sh2'), C('Quantité','sh2')));
 
-    const { result: fixData, grandTotalOmega, grandTotalZed, grandTotal: grandTotalFix } = calcFixation();
-    for (const gd of fixData) {
-      const g = gd.group;
-      let grpOmFix = 0, grpZdFix = 0, anyContent = false;
-      for (const sd of gd.subsections) {
-        if (!sd.omegaRows.length && !sd.zedRows.length) continue;
-        if (!anyContent) { rows.push(Sp()); anyContent = true; }
-        for (const row of sd.omegaRows) rows.push(R(C(g.name,`sg${g.id}`), C(sd.subsection.name,`sg${g.id}`), C('Oméga',`sg${g.id}`), C(row.ref,`sg${g.id}`), C(row.len,`sg${g.id}`), C(row.nbRows,`sg${g.id}`), C(2,`sg${g.id}`), C(row.fixings,`sg${g.id}`)));
-        for (const row of sd.zedRows)   rows.push(R(C(g.name,`sg${g.id}`), C(sd.subsection.name,`sg${g.id}`), C('Zed',`sg${g.id}`),   C(row.ref,`sg${g.id}`), C(row.len,`sg${g.id}`), C(row.nbRows,`sg${g.id}`), C(1,`sg${g.id}`), C(row.fixings,`sg${g.id}`)));
-        rows.push(R(Bl('ssub'), C(`Sous-total ${sd.subsection.name}`,'ssub'), C('Oméga','ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), C(sd.subOmegaFixings,'ssub')));
-        rows.push(R(Bl('ssub'), C(`Sous-total ${sd.subsection.name}`,'ssub'), C('Zed',  'ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), C(sd.subZedFixings,'ssub')));
-        rows.push(R(Bl('ssub'), C(`Sous-total ${sd.subsection.name}`,'ssub'), C('Total','ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), C(sd.subTotal,'ssub')));
-        grpOmFix += sd.subOmegaFixings; grpZdFix += sd.subZedFixings;
-      }
-      if (grpOmFix || grpZdFix) {
-        rows.push(R(C(`TOTAL ${g.name}`,'ssub'), Bl('ssub'), C('Oméga','ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), C(grpOmFix,'ssub')));
-        rows.push(R(C(`TOTAL ${g.name}`,'ssub'), Bl('ssub'), C('Zed',  'ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), C(grpZdFix,'ssub')));
-        rows.push(R(C(`TOTAL ${g.name}`,'ssub'), Bl('ssub'), C('Total','ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), C(grpOmFix+grpZdFix,'ssub')));
-        rows.push(Sp());
-      }
-    }
-    rows.push(Sp());
-    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Oméga','sgt'), ...Array(4).fill(Bl('sgt')), C(grandTotalOmega,'sgt')));
-    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Zed',  'sgt'), ...Array(4).fill(Bl('sgt')), C(grandTotalZed,'sgt')));
-    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('TOTAL','sgt'), ...Array(4).fill(Bl('sgt')), C(grandTotalFix,'sgt')));
-
-    // ── Fixations panneau ──
+    const { grandTotalOmega, grandTotalZed, grandTotal } = calcFixation();
     const trouData = calcTrouFixations();
-    if (trouData.total > 0) {
-      rows.push(Sp());
-      rows.push(R(C('TOTAL FIXATIONS PANNEAU','sgt'), ...Array(6).fill(Bl('sgt')), C(trouData.total,'sgt')));
-      rows.push(R(C('TOTAL GÉNÉRAL (ossature + panneau)','sgt'), ...Array(6).fill(Bl('sgt')), C(grandTotalFix + trouData.total,'sgt')));
-    }
+    rows.push(Sp());
+    rows.push(R(C('Fixations Oméga'), C(grandTotalOmega)));
+    rows.push(R(C('Fixations Zed'),   C(grandTotalZed)));
+    if (trouData.total > 0) rows.push(R(C('Fixations panneau'), C(trouData.total)));
+    rows.push(Sp());
+    rows.push(R(C('TOTAL','sgt'), C(grandTotal + trouData.total,'sgt')));
 
-    return `<Worksheet ss:Name="Fixations"><Table ss:DefaultColumnWidth="100" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
+    return `<Worksheet ss:Name="Fixations"><Table ss:DefaultColumnWidth="160" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
   }
 
   // ── Onglet Pliages ───────────────────────────────────────────
@@ -2682,6 +2673,10 @@ function applyProjectData(data) {
   if (data.fixationConfig) {
     fixationConfig = { ...fixationConfig, ...data.fixationConfig };
     document.getElementById('fixationPrix').value = fixationConfig.prixFixation || '';
+    const feEl = document.getElementById('fixEntraxeOss');
+    const fmEl = document.getElementById('fixMinOss');
+    if (feEl) feEl.value = fixationConfig.entraxeOssature || 600;
+    if (fmEl) fmEl.value = fixationConfig.minFixOssature || 2;
     const trouEl = document.getElementById('trouEnabled');
     const trouAllEl = document.getElementById('trouApplyAll');
     if (trouEl) trouEl.checked = !!fixationConfig.trouEnabled;
@@ -4800,44 +4795,24 @@ function renderPliage() {
 
 function calcFixation() {
   const data = calcOssature();
-  const entaxeMax = ossatureConfig.entaxeMax || 600;
-  const result = [];
+  const entraxeFix = fixationConfig.entraxeOssature || 600;
+  const minFix = Math.max(1, fixationConfig.minFixOssature || 2);
   let grandTotalOmega = 0, grandTotalZed = 0;
 
+  // Number of fixing positions along a piece of given length
+  function fixPositions(len) {
+    const natural = Math.ceil(len / entraxeFix) + 1;
+    return Math.max(natural, minFix);
+  }
+
   for (const gd of data) {
-    const g = gd.group;
-    const groupFixData = { group: g, subsections: [] };
     for (const sd of gd.subsections) {
       if (sd.pieces.length === 0) continue;
-      let subOmegaFixings = 0, subZedFixings = 0;
-      const omegaRows = [];
-      const zedRows = [];
-
-      for (const cut of sd.omegaCuts) {
-        const nbRows = Math.ceil(cut.len / entaxeMax);
-        const fixings = nbRows * 2; // 2 par rangée (2 panneaux)
-        subOmegaFixings += fixings;
-        omegaRows.push({ ref: cut.ref, len: cut.len, nbRows, fixings });
-      }
-      for (const cut of sd.zedCuts) {
-        const nbRows = Math.ceil(cut.len / entaxeMax);
-        const fixings = nbRows * 1; // 1 par rangée
-        subZedFixings += fixings;
-        zedRows.push({ ref: cut.ref, len: cut.len, nbRows, fixings });
-      }
-
-      grandTotalOmega += subOmegaFixings;
-      grandTotalZed += subZedFixings;
-      groupFixData.subsections.push({
-        subsection: sd.subsection,
-        omegaRows, zedRows,
-        subOmegaFixings, subZedFixings,
-        subTotal: subOmegaFixings + subZedFixings,
-      });
+      for (const cut of sd.omegaCuts) grandTotalOmega += fixPositions(cut.len) * 2;
+      for (const cut of sd.zedCuts)   grandTotalZed   += fixPositions(cut.len) * 1;
     }
-    result.push(groupFixData);
   }
-  return { result, grandTotalOmega, grandTotalZed, grandTotal: grandTotalOmega + grandTotalZed };
+  return { grandTotalOmega, grandTotalZed, grandTotal: grandTotalOmega + grandTotalZed };
 }
 
 function calcTrouFixations() {
@@ -4983,10 +4958,7 @@ function setTrouField(key, field, value) {
 }
 
 function renderFixation() {
-  const entaxeMax = ossatureConfig.entaxeMax || 600;
   const el = document.getElementById('fixationContent');
-  const intervalleEl = document.getElementById('fixationIntervalleDisplay');
-  if (intervalleEl) intervalleEl.textContent = entaxeMax;
 
   if (groups.every(g => g.subsections.every(s => s.panelSubtypes.every(st => st.pieces.length === 0)))) {
     el.innerHTML = '<div class="card placeholder"><div class="icon">&#9670;</div><div class="text">Aucune pièce configurée.<br>Ajoute des pièces dans l\'onglet <span style="color:var(--accent);font-weight:700;">Panneaux</span>.</div></div>';
@@ -4994,151 +4966,70 @@ function renderFixation() {
     return;
   }
 
-  const { result, grandTotalOmega, grandTotalZed, grandTotal } = calcFixation();
+  const { grandTotalOmega, grandTotalZed, grandTotal } = calcFixation();
+  const trouData = calcTrouFixations();
   const prixFixation = parseFloat(fixationConfig.prixFixation) || 0;
+  const totalAll = grandTotal + trouData.total;
   let html = '';
 
-  // ── Aperçu visuel des trous par façade ──
-  if (fixationConfig.trouEnabled && projectRectsSpatial && projectRectsSpatial.length) {
-    const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
-    const facadeNames = Object.keys(byFacade).sort();
-    for (const fname of facadeNames) {
-      const panels = byFacade[fname];
-      const cfg = getTrouConfigForFacade(fname);
-      // Compute facade bounding box for SVG scaling
-      let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
-      for (const p of panels) {
-        fxmin = Math.min(fxmin, p.xmin); fxmax = Math.max(fxmax, p.xmax);
-        fymin = Math.min(fymin, p.ymin); fymax = Math.max(fymax, p.ymax);
-      }
-      const fw = fxmax - fxmin, fh = fymax - fymin;
-      const maxW = 700, maxH = 320;
-      const scale = Math.min(maxW / fw, maxH / fh, 1);
-      const svgW = Math.round(fw * scale), svgH = Math.round(fh * scale);
-      let svgContent = '';
-      for (const p of panels) {
-        const px = (p.xmin - fxmin) * scale, py = (fymax - p.ymax) * scale;
-        const pw = (p.xmax - p.xmin) * scale, ph = (p.ymax - p.ymin) * scale;
-        const panW = Math.round(p.xmax - p.xmin), panH = Math.round(p.ymax - p.ymin);
-        const aciColor = p.color || 7;
-        const panelColor = (ACI_COLOR_MAP_JS[aciColor] || {}).color || '#888888';
-        svgContent += `<rect x="${px.toFixed(1)}" y="${py.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="${panelColor}22" stroke="${panelColor}" stroke-width="1"/>`;
-        const { holes } = calcHolePositions(panW, panH, cfg);
-        for (const h of holes) {
-          const hx = px + h.x * scale, hy = py + (panH - h.y) * scale;
-          const hr = Math.max(1.5, h.r * scale);
-          svgContent += `<circle cx="${hx.toFixed(1)}" cy="${hy.toFixed(1)}" r="${hr.toFixed(1)}" fill="#fff" stroke="#e74c3c" stroke-width="1.2"/>`;
-        }
-      }
-      html += `<div class="oss-card">
-        <div style="font-weight:700;font-size:13px;margin-bottom:8px;">${fname} — aperçu fixations</div>
-        <div style="overflow-x:auto;">
-          <svg width="${svgW}" height="${svgH}" style="display:block;background:var(--bg2);border-radius:4px;">${svgContent}</svg>
-        </div>
-      </div>`;
-    }
-  }
-
-  for (const gd of result) {
-    const g = gd.group;
-    if (!gd.subsections.length) continue;
-    html += `<div class="result-group-header" style="border-color:${g.color}44; background:${g.color}0a;">
-      <span class="dot" style="background:${g.color};"></span>
-      <span class="name">${g.name}</span>
-      <span class="info">${gd.subsections.length} facade${gd.subsections.length>1?'s':''}</span>
-    </div>`;
-
-    for (const sd of gd.subsections) {
-      const sub = sd.subsection;
-      const subIdx = g.subsections.indexOf(sub);
-      const subColor = PIECE_COLORS[subIdx % PIECE_COLORS.length];
-
-      html += `<div class="oss-card" style="border-left: 3px solid ${subColor};">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-          <span style="width:10px;height:10px;border-radius:50%;background:${subColor};display:inline-block;"></span>
-          <span style="font-weight:700;font-size:14px;">${sub.name}</span>
-          <span class="oss-badge omega">&#937; ${sd.subOmegaFixings} fixations</span>
-          <span class="oss-badge zed">Z ${sd.subZedFixings} fixations</span>
-          <span style="font-size:12px;font-weight:700;color:var(--accent);">Total : ${sd.subTotal} pts</span>
-        </div>
-        <table class="oss-table">
-          <tr>
-            <th>Élément</th><th>Réf</th><th>Longueur</th>
-            <th>Rangées (/ ${entaxeMax}mm)</th><th>Fix./rangée</th><th>Total fixations</th>
-          </tr>`;
-
-      for (const row of sd.omegaRows) {
-        html += `<tr>
-          <td><span class="oss-badge omega">&#937; Oméga</span></td>
-          <td class="mono" style="font-size:11px;color:var(--text3);">${row.ref}</td>
-          <td class="mono">${row.len} mm</td>
-          <td style="text-align:center;">${row.nbRows}</td>
-          <td style="text-align:center;">× 2</td>
-          <td style="text-align:center;font-weight:700;color:var(--accent);">${row.fixings}</td>
-        </tr>`;
-      }
-      for (const row of sd.zedRows) {
-        html += `<tr>
-          <td><span class="oss-badge zed">Z Zed</span></td>
-          <td class="mono" style="font-size:11px;color:var(--text3);">${row.ref}</td>
-          <td class="mono">${row.len} mm</td>
-          <td style="text-align:center;">${row.nbRows}</td>
-          <td style="text-align:center;">× 1</td>
-          <td style="text-align:center;font-weight:700;color:var(--yellow);">${row.fixings}</td>
-        </tr>`;
-      }
-
-      html += `<tr class="total-row">
-        <td colspan="5" style="text-align:right;color:var(--text3);">Sous-total façade</td>
-        <td style="text-align:center;font-weight:700;">${sd.subTotal} fixations</td>
-      </tr>`;
-      html += `</table></div>`;
-    }
-  }
-
-  // Fixations de panneau
-  const trouData = calcTrouFixations();
+  // ── Avertissements panneaux trop petits ──
   if (trouData.warnings && trouData.warnings.length > 0) {
     const seen = new Set();
     const uniq = trouData.warnings.filter(w => { const k = `${w.fname}-${w.pw}x${w.ph}-${w.axis}`; if (seen.has(k)) return false; seen.add(k); return true; });
     html += `<div class="oss-card" style="border-color:#f59e0b;background:#fef3c711;">
       <div style="font-weight:700;font-size:13px;color:#f59e0b;margin-bottom:6px;">&#9888; Panneaux trop petits pour placement symétrique</div>
-      <div style="font-size:12px;color:var(--text3);margin-bottom:6px;">Ces panneaux ont un seul trou centré (trop étroits pour offsetX ou offsetY des deux côtés) :</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:6px;">Un seul trou centré placé (trop étroits pour les 2 côtés) :</div>
       <ul style="margin:0;padding-left:18px;font-size:12px;">`;
     for (const w of uniq) {
-      const axe = w.axis === 'H' ? 'largeur' : 'hauteur';
-      html += `<li><strong>${w.fname}</strong> — panneau ${w.pw}×${w.ph} mm : trou centré en ${axe}</li>`;
+      html += `<li><strong>${w.fname}</strong> — panneau ${w.pw}×${w.ph} mm (${w.axis === 'H' ? 'largeur' : 'hauteur'})</li>`;
     }
     html += `</ul></div>`;
   }
-  if (trouData.total > 0) {
-    html += `<div class="oss-card" style="border-color:#e74c3c44;">
-      <div style="font-weight:700;font-size:14px;margin-bottom:8px;">Fixations panneau</div>
-      <table class="oss-table">
-        <tr class="total-row">
-          <td style="font-weight:800;">TOTAL fixations panneau</td>
-          <td style="text-align:center;font-weight:800;color:#e74c3c;">${trouData.total}</td>
-        </tr>
-      </table>
-    </div>`;
+
+  // ── Aperçu visuel des fixations par façade ──
+  if (fixationConfig.trouEnabled && projectRectsSpatial && projectRectsSpatial.length) {
+    const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+    for (const fname of Object.keys(byFacade).sort()) {
+      const panels = byFacade[fname];
+      const cfg = getTrouConfigForFacade(fname);
+      let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
+      for (const p of panels) {
+        fxmin = Math.min(fxmin, p.xmin); fxmax = Math.max(fxmax, p.xmax);
+        fymin = Math.min(fymin, p.ymin); fymax = Math.max(fymax, p.ymax);
+      }
+      const scale = Math.min(700 / (fxmax - fxmin), 320 / (fymax - fymin), 1);
+      const svgW = Math.round((fxmax - fxmin) * scale), svgH = Math.round((fymax - fymin) * scale);
+      let svgContent = '';
+      for (const p of panels) {
+        const px = (p.xmin - fxmin) * scale, py = (fymax - p.ymax) * scale;
+        const pw = (p.xmax - p.xmin) * scale, ph = (p.ymax - p.ymin) * scale;
+        const panW = Math.round(p.xmax - p.xmin), panH = Math.round(p.ymax - p.ymin);
+        const panelColor = (ACI_COLOR_MAP_JS[p.color || 7] || {}).color || '#888888';
+        svgContent += `<rect x="${px.toFixed(1)}" y="${py.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="${panelColor}22" stroke="${panelColor}" stroke-width="1"/>`;
+        const { holes } = calcHolePositions(panW, panH, cfg);
+        for (const h of holes) {
+          const hx = (px + h.x * scale).toFixed(1), hy = (py + (panH - h.y) * scale).toFixed(1);
+          const hr = Math.max(1.5, h.r * scale).toFixed(1);
+          svgContent += `<circle cx="${hx}" cy="${hy}" r="${hr}" fill="#fff" stroke="#e74c3c" stroke-width="1.2"/>`;
+        }
+      }
+      html += `<div class="oss-card">
+        <div style="font-weight:700;font-size:13px;margin-bottom:8px;">${fname} — aperçu fixations panneau</div>
+        <div style="overflow-x:auto;"><svg width="${svgW}" height="${svgH}" style="display:block;background:var(--bg2);border-radius:4px;">${svgContent}</svg></div>
+      </div>`;
+    }
   }
 
-  // Totaux globaux
+  // ── Totaux ──
   html += `<div class="oss-card" style="border-color:var(--accent)44;">
     <table class="oss-table">
       <tr><th colspan="2" style="font-size:13px;">TOTAL FIXATIONS CHANTIER</th></tr>
-      <tr>
-        <td><span class="oss-badge omega">&#937; Oméga (2/rangée)</span></td>
-        <td style="font-weight:700;color:var(--accent);">${grandTotalOmega} fixations</td>
-      </tr>
-      <tr>
-        <td><span class="oss-badge zed">Z Zed (1/rangée)</span></td>
-        <td style="font-weight:700;color:var(--yellow);">${grandTotalZed} fixations</td>
-      </tr>
-      ${trouData.total > 0 ? `<tr><td style="color:#e74c3c;">Fixations panneau</td><td style="font-weight:700;color:#e74c3c;">${trouData.total} fixations</td></tr>` : ''}
+      <tr><td><span class="oss-badge omega">&#937; Oméga</span></td><td style="font-weight:700;color:var(--accent);">${grandTotalOmega}</td></tr>
+      <tr><td><span class="oss-badge zed">Z Zed</span></td><td style="font-weight:700;color:var(--yellow);">${grandTotalZed}</td></tr>
+      ${trouData.total > 0 ? `<tr><td style="color:#e74c3c;">Panneau</td><td style="font-weight:700;color:#e74c3c;">${trouData.total}</td></tr>` : ''}
       <tr class="total-row">
         <td style="font-weight:800;font-size:14px;">TOTAL</td>
-        <td style="font-weight:800;font-size:14px;color:var(--accent);">${grandTotal + trouData.total} fixations${prixFixation ? ` — ${((grandTotal + trouData.total) * prixFixation).toFixed(2)} €` : ''}</td>
+        <td style="font-weight:800;font-size:14px;color:var(--accent);">${totalAll}${prixFixation ? ` — ${(totalAll * prixFixation).toFixed(2)} €` : ''}</td>
       </tr>
     </table>
   </div>`;
@@ -5147,18 +5038,12 @@ function renderFixation() {
 
   // Sidebar summary
   const sumEl = document.getElementById('fixationSummaryContent');
-  let sumHTML = '';
-  sumHTML += `<div class="summary-row"><span class="summary-label">Fix. Oméga (×2)</span><span class="summary-value" style="color:var(--accent);">${grandTotalOmega}</span></div>`;
-  sumHTML += `<div class="summary-row"><span class="summary-label">Fix. Zed (×1)</span><span class="summary-value" style="color:var(--yellow);">${grandTotalZed}</span></div>`;
-  if (trouData.total > 0) {
-    sumHTML += `<div class="summary-row"><span class="summary-label">Fix. panneau</span><span class="summary-value" style="color:#e74c3c;">${trouData.total}</span></div>`;
-  }
+  let sumHTML = `<div class="summary-row"><span class="summary-label">Oméga</span><span class="summary-value" style="color:var(--accent);">${grandTotalOmega}</span></div>`;
+  sumHTML += `<div class="summary-row"><span class="summary-label">Zed</span><span class="summary-value" style="color:var(--yellow);">${grandTotalZed}</span></div>`;
+  if (trouData.total > 0) sumHTML += `<div class="summary-row"><span class="summary-label">Panneau</span><span class="summary-value" style="color:#e74c3c;">${trouData.total}</span></div>`;
   sumHTML += `<div class="summary-divider"></div>`;
-  const totalAll = grandTotal + trouData.total;
-  sumHTML += `<div class="summary-row"><span class="summary-label" style="font-weight:800;">Total</span><span class="summary-value" style="font-size:15px;color:var(--accent);">${totalAll} pts</span></div>`;
-  if (prixFixation) {
-    sumHTML += `<div class="summary-row"><span class="summary-label">Coût fixations</span><span class="summary-value">${(totalAll * prixFixation).toFixed(2)} €</span></div>`;
-  }
+  sumHTML += `<div class="summary-row"><span class="summary-label" style="font-weight:800;">Total</span><span class="summary-value" style="font-size:15px;color:var(--accent);">${totalAll}</span></div>`;
+  if (prixFixation) sumHTML += `<div class="summary-row"><span class="summary-label">Coût</span><span class="summary-value">${(totalAll * prixFixation).toFixed(2)} €</span></div>`;
   sumEl.innerHTML = sumHTML;
   document.getElementById('fixationSummaryCard').style.display = 'block';
 }
