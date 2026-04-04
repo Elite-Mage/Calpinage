@@ -721,15 +721,6 @@
 <div class="layout">
   <div class="sidebar">
     <div class="card">
-      <div class="card-title">Configuration fixation</div>
-      <div class="oss-config">
-        <div>
-          <label>Prix / fixation (€/u)</label>
-          <input type="number" id="fixationPrix" value="" placeholder="0.00" min="0" step="0.01" oninput="fixationConfig.prixFixation=this.value; renderFixation(); scheduleSave();">
-        </div>
-      </div>
-    </div>
-    <div class="card">
       <div class="card-title">Fixation ossature</div>
       <div class="oss-config">
         <div>
@@ -741,6 +732,20 @@
           <label>Min. fixations / pièce</label>
           <input type="number" id="fixMinOss" value="2" min="1" max="20" step="1"
             oninput="fixationConfig.minFixOssature=+this.value; renderFixation(); scheduleSave();">
+        </div>
+        <div>
+          <label>Prix / fix. ossature (€/u)</label>
+          <input type="number" id="fixationPrixOss" value="" placeholder="0.00" min="0" step="0.01"
+            oninput="fixationConfig.prixFixationOss=this.value; renderFixation(); scheduleSave();">
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Configuration fixation</div>
+      <div class="oss-config">
+        <div>
+          <label>Prix / fix. panneau (€/u)</label>
+          <input type="number" id="fixationPrix" value="" placeholder="0.00" min="0" step="0.01" oninput="fixationConfig.prixFixation=this.value; renderFixation(); scheduleSave();">
         </div>
       </div>
     </div>
@@ -943,6 +948,7 @@ let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omeg
 let devisConfig = { prixMO: '' };
 let fixationConfig = {
   prixFixation: '',
+  prixFixationOss: '',
   entraxeOssature: 600,
   minFixOssature: 2,
   trouEnabled: false,
@@ -2420,19 +2426,22 @@ function exportExcel() {
   // ── Onglet Fixations ─────────────────────────────────────────
   function sheetFixations() {
     const rows = [];
-    rows.push(R(C(`${nom} — Fixations`, 'sh1'), Bl('sh1')));
-    rows.push(R(C('Date :', 'sh2'), C(date, 'sh2')));
+    rows.push(R(C(`${nom} — Fixations`, 'sh1'), ...Array(2).fill(Bl('sh1'))));
+    rows.push(R(C('Date :', 'sh2'), C(date, 'sh2'), Bl('sh2')));
     rows.push(Sp());
-    rows.push(R(C('Type','sh2'), C('Quantité','sh2')));
+    rows.push(R(C('Type','sh2'), C('Quantité','sh2'), C('Prix/u (€)','sh2')));
 
     const { grandTotalOmega, grandTotalZed, grandTotal } = calcFixation();
     const trouData = calcTrouFixations();
+    const prixOss = parseFloat(fixationConfig.prixFixationOss) || 0;
+    const prixPan = parseFloat(fixationConfig.prixFixation) || 0;
     rows.push(Sp());
-    rows.push(R(C('Fixations Oméga'), C(grandTotalOmega)));
-    rows.push(R(C('Fixations Zed'),   C(grandTotalZed)));
-    if (trouData.total > 0) rows.push(R(C('Fixations panneau'), C(trouData.total)));
+    rows.push(R(C('Fixations Oméga'), C(grandTotalOmega), prixOss ? C(prixOss) : Bl()));
+    rows.push(R(C('Fixations Zed'),   C(grandTotalZed),   prixOss ? C(prixOss) : Bl()));
+    rows.push(R(C('Fixations ossature total','ssub'), C(grandTotal,'ssub'), Bl('ssub')));
+    if (trouData.total > 0) rows.push(R(C('Fixations panneau','ssub'), C(trouData.total,'ssub'), prixPan ? C(prixPan,'ssub') : Bl('ssub')));
     rows.push(Sp());
-    rows.push(R(C('TOTAL','sgt'), C(grandTotal + trouData.total,'sgt')));
+    rows.push(R(C('TOTAL','sgt'), C(grandTotal + trouData.total,'sgt'), Bl('sgt')));
 
     return `<Worksheet ss:Name="Fixations"><Table ss:DefaultColumnWidth="160" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
   }
@@ -2673,6 +2682,8 @@ function applyProjectData(data) {
   if (data.fixationConfig) {
     fixationConfig = { ...fixationConfig, ...data.fixationConfig };
     document.getElementById('fixationPrix').value = fixationConfig.prixFixation || '';
+    const prixOssEl = document.getElementById('fixationPrixOss');
+    if (prixOssEl) prixOssEl.value = fixationConfig.prixFixationOss || '';
     const feEl = document.getElementById('fixEntraxeOss');
     const fmEl = document.getElementById('fixMinOss');
     if (feEl) feEl.value = fixationConfig.entraxeOssature || 600;
@@ -4969,6 +4980,7 @@ function renderFixation() {
   const { grandTotalOmega, grandTotalZed, grandTotal } = calcFixation();
   const trouData = calcTrouFixations();
   const prixFixation = parseFloat(fixationConfig.prixFixation) || 0;
+  const prixFixationOss = parseFloat(fixationConfig.prixFixationOss) || 0;
   const totalAll = grandTotal + trouData.total;
   let html = '';
 
@@ -5021,15 +5033,20 @@ function renderFixation() {
   }
 
   // ── Totaux ──
+  const coutOss = prixFixationOss ? (grandTotal * prixFixationOss).toFixed(2) + ' €' : '';
+  const coutPan = prixFixation ? (trouData.total * prixFixation).toFixed(2) + ' €' : '';
+  const coutTotal = (prixFixationOss || prixFixation)
+    ? (grandTotal * prixFixationOss + trouData.total * prixFixation).toFixed(2) + ' €' : '';
   html += `<div class="oss-card" style="border-color:var(--accent)44;">
     <table class="oss-table">
-      <tr><th colspan="2" style="font-size:13px;">TOTAL FIXATIONS CHANTIER</th></tr>
-      <tr><td><span class="oss-badge omega">&#937; Oméga</span></td><td style="font-weight:700;color:var(--accent);">${grandTotalOmega}</td></tr>
-      <tr><td><span class="oss-badge zed">Z Zed</span></td><td style="font-weight:700;color:var(--yellow);">${grandTotalZed}</td></tr>
-      ${trouData.total > 0 ? `<tr><td style="color:#e74c3c;">Panneau</td><td style="font-weight:700;color:#e74c3c;">${trouData.total}</td></tr>` : ''}
+      <tr><th colspan="3" style="font-size:13px;">TOTAL FIXATIONS CHANTIER</th></tr>
+      <tr><td><span class="oss-badge omega">&#937; Oméga</span></td><td style="font-weight:700;color:var(--accent);">${grandTotalOmega}</td><td></td></tr>
+      <tr><td><span class="oss-badge zed">Z Zed</span></td><td style="font-weight:700;color:var(--yellow);">${grandTotalZed}</td><td></td></tr>
+      <tr><td style="color:var(--accent);">Ossature total</td><td style="font-weight:700;color:var(--accent);">${grandTotal}</td><td style="color:var(--text3);font-size:11px;">${coutOss}</td></tr>
+      ${trouData.total > 0 ? `<tr><td style="color:#e74c3c;">Panneau</td><td style="font-weight:700;color:#e74c3c;">${trouData.total}</td><td style="color:var(--text3);font-size:11px;">${coutPan}</td></tr>` : ''}
       <tr class="total-row">
-        <td style="font-weight:800;font-size:14px;">TOTAL</td>
-        <td style="font-weight:800;font-size:14px;color:var(--accent);">${totalAll}${prixFixation ? ` — ${(totalAll * prixFixation).toFixed(2)} €` : ''}</td>
+        <td style="font-weight:800;font-size:14px;" colspan="2">TOTAL ${totalAll}</td>
+        <td style="font-weight:700;color:var(--accent);">${coutTotal}</td>
       </tr>
     </table>
   </div>`;
@@ -5043,7 +5060,7 @@ function renderFixation() {
   if (trouData.total > 0) sumHTML += `<div class="summary-row"><span class="summary-label">Panneau</span><span class="summary-value" style="color:#e74c3c;">${trouData.total}</span></div>`;
   sumHTML += `<div class="summary-divider"></div>`;
   sumHTML += `<div class="summary-row"><span class="summary-label" style="font-weight:800;">Total</span><span class="summary-value" style="font-size:15px;color:var(--accent);">${totalAll}</span></div>`;
-  if (prixFixation) sumHTML += `<div class="summary-row"><span class="summary-label">Coût</span><span class="summary-value">${(totalAll * prixFixation).toFixed(2)} €</span></div>`;
+  if (coutTotal) sumHTML += `<div class="summary-row"><span class="summary-label">Coût total</span><span class="summary-value">${coutTotal}</span></div>`;
   sumEl.innerHTML = sumHTML;
   document.getElementById('fixationSummaryCard').style.display = 'block';
 }
@@ -6160,8 +6177,41 @@ function exportDxfOssature() {
   dxf.addLayer('ZED_ENTRAXE', 2);
   dxf.addLayer('ZED_BORD', 6);
   dxf.addLayer('FIXATION', 3);
+  dxf.addLayer('FIXATION_OSS', 1);
   dxf.addLayer('TITRE', 7);
   dxf.addLayer('TEXTE', 7);
+
+  const OSS_FIX_MARGIN = 14; // centre du trou à 14mm du bord (10mm bord + rayon 4mm)
+  const OSS_FIX_RADIUS = 4;  // rayon = diamètre 8mm / 2
+  const ossEntraxeFix = fixationConfig.entraxeOssature || 600;
+  const ossMinFix = Math.max(1, fixationConfig.minFixOssature || 2);
+
+  // Y positions relatives dans un segment de longueur len
+  function ossFixPositions(len) {
+    if (len < 2 * OSS_FIX_MARGIN) return [len / 2]; // trop court → trou centré
+    const first = OSS_FIX_MARGIN, last = len - OSS_FIX_MARGIN;
+    const gap = last - first;
+    const nIntervals = Math.max(1, Math.ceil(gap / ossEntraxeFix));
+    const n = Math.max(nIntervals + 1, ossMinFix);
+    const spacing = gap / (n - 1);
+    return Array.from({ length: n }, (_, i) => first + i * spacing);
+  }
+
+  // Dessine les trous de fixation sur un tronçon de profil
+  function addOssFixHoles(xmin, yBot, xmax, yTop, isOmega) {
+    const relYs = ossFixPositions(yTop - yBot);
+    if (isOmega) {
+      for (const ry of relYs) {
+        dxf.addCircle(xmin + OSS_FIX_MARGIN, yBot + ry, OSS_FIX_RADIUS, 'FIXATION_OSS', 1);
+        dxf.addCircle(xmax - OSS_FIX_MARGIN, yBot + ry, OSS_FIX_RADIUS, 'FIXATION_OSS', 1);
+      }
+    } else {
+      const cx = (xmin + xmax) / 2;
+      for (const ry of relYs) {
+        dxf.addCircle(cx, yBot + ry, OSS_FIX_RADIUS, 'FIXATION_OSS', 1);
+      }
+    }
+  }
 
   const fixGap = ossatureConfig.fixationGap || 20;
 
@@ -6236,21 +6286,20 @@ function exportDxfOssature() {
   const MIN_CUT_LEN = 1500; // tronçon min pour appliquer une découpe
 
   // Helper: draw a vertical profile split at cut points
-  function addSplitProfile(xmin, yBottom, xmax, yTop, layer, color, cutPositions) {
+  function addSplitProfile(xmin, yBottom, xmax, yTop, layer, color, cutPositions, isOmega) {
     if (!cutPositions || cutPositions.length === 0) {
       dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
+      addOssFixHoles(xmin, yBottom, xmax, yTop, isOmega);
       return;
     }
     const halfGap = 20;
-    // Filter cuts that intersect this profile's Y range
     const relevant = cutPositions.filter(cy => cy - halfGap > yBottom + 1 && cy + halfGap < yTop - 1);
     if (relevant.length === 0) {
       dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
+      addOssFixHoles(xmin, yBottom, xmax, yTop, isOmega);
       return;
     }
-    // Sort top to bottom
     relevant.sort((a, b) => b - a);
-    // Compute segments
     const segments = [];
     let segTop = yTop;
     for (const cy of relevant) {
@@ -6259,19 +6308,20 @@ function exportDxfOssature() {
       segTop = cy - halfGap;
     }
     if (segTop - yBottom > 1) segments.push({ top: segTop, bot: yBottom });
-    // Profil total < MIN_CUT_LEN → pas de découpe
     if ((yTop - yBottom) < MIN_CUT_LEN) {
       dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
+      addOssFixHoles(xmin, yBottom, xmax, yTop, isOmega);
       return;
     }
-    // Si un tronçon intérieur < MIN_CUT_LEN, ne pas découper (exclure bords)
     const interior = segments.length > 2 ? segments.slice(1, -1) : segments;
     if (interior.some(s => (s.top - s.bot) < MIN_CUT_LEN)) {
       dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
+      addOssFixHoles(xmin, yBottom, xmax, yTop, isOmega);
       return;
     }
     for (const s of segments) {
       dxf.addRect(xmin, s.bot, xmax, s.top, layer, color);
+      addOssFixHoles(xmin, s.bot, xmax, s.top, isOmega);
     }
   }
 
@@ -6430,7 +6480,7 @@ function exportDxfOssature() {
           // Étendre l'Oméga vers le bas/haut si segment touche fymin/fymax et prolongement actif
           const mStart = (prol > 0 && m.start <= fymin + 5) ? fymin - prol : clipStartF(m.start);
           const mEnd = (prolH > 0 && m.end >= fymax - 5) ? fymax + prolH : clipEndF(m.end);
-          addSplitProfile(jx - OMEGA_W/2, mStart, jx + OMEGA_W/2, mEnd, 'OMEGA', 4, jointCuts);
+          addSplitProfile(jx - OMEGA_W/2, mStart, jx + OMEGA_W/2, mEnd, 'OMEGA', 4, jointCuts, true);
           if (prol > 0 && m.start <= fymin + 5) omegaXsExt.push(jx);
           if (prolH > 0 && m.end >= fymax - 5) omegaXsExtHaut.push(jx);
         }
