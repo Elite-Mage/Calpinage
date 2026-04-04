@@ -730,6 +730,25 @@
       </div>
       <div style="font-size:12px;color:var(--text4);margin-top:8px;">Intervalle max : <strong id="fixationIntervalleDisplay">600</strong> mm<br><span style="font-size:11px;">(depuis config ossature)</span></div>
     </div>
+    <div class="card">
+      <div class="card-title">Trous de fixation</div>
+      <div class="oss-config">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="trouEnabled" onchange="fixationConfig.trouEnabled=this.checked; renderTrouConfigUI(); renderFixation(); scheduleSave();">
+          <label style="margin:0;font-weight:600;">Activer les trous</label>
+        </div>
+      </div>
+      <div id="trouConfigPanel" style="display:none;margin-top:8px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <input type="checkbox" id="trouApplyAll" onchange="fixationConfig.trouApplyAll=this.checked; renderTrouConfigUI(); scheduleSave();">
+          <label style="margin:0;font-size:12px;">Toutes les façades</label>
+        </div>
+        <div id="trouFacadeSelector" style="display:none;margin-bottom:8px;">
+          <select id="trouFacadeSelect" onchange="renderTrouConfigUI()" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 8px;font-size:12px;"></select>
+        </div>
+        <div id="trouConfigFields"></div>
+      </div>
+    </div>
     <div class="card card-accent" id="fixationSummaryCard" style="display:none;">
       <div class="card-title">Résumé fixation</div>
       <div id="fixationSummaryContent"></div>
@@ -908,7 +927,13 @@ let allResults = null;
 let activeSection = 'panneaux'; // 'panneaux' | 'ossature' | 'devis'
 let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false, prolongEntaxe: 600, prolongementHaut: 0, prolongementHautEnabled: false, fixationGap: 20, fixationZones: {}, fixationApplyAll: false };
 let devisConfig = { prixMO: '' };
-let fixationConfig = { prixFixation: '' };
+let fixationConfig = {
+  prixFixation: '',
+  trouEnabled: false,
+  trouApplyAll: true,
+  trouGlobal: { corner: 'bl', offsetX: 50, offsetY: 50, diameter: 8, entraxeH: 600, entraxeV: 600, minH: 1, minV: 1 },
+  trouByFacade: {}
+};
 // pliageConfig.extensions[facadeName] = { ouvertures:[{linteau,tableauG,tableauD,appuis}…], plinthe, couvertine }
 // each ext field = { ext: mm (added each side), mesureManuelle: null|mm }
 let pliageConfig = { material: '', epaisseur: '', extensions: {} };
@@ -2409,6 +2434,22 @@ function exportExcel() {
     rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Oméga','sgt'), ...Array(4).fill(Bl('sgt')), C(grandTotalOmega,'sgt')));
     rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Zed',  'sgt'), ...Array(4).fill(Bl('sgt')), C(grandTotalZed,'sgt')));
     rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('TOTAL','sgt'), ...Array(4).fill(Bl('sgt')), C(grandTotalFix,'sgt')));
+
+    // ── Fixations panneau (trous) ──
+    const trouData = calcTrouFixations();
+    if (trouData.total > 0) {
+      rows.push(Sp()); rows.push(Sp());
+      rows.push(R(C('FIXATIONS PANNEAU','sh1'), ...Array(7).fill(Bl('sh1'))));
+      rows.push(Sp());
+      rows.push(R(C('Façade','sh2'), C('Nb fixations','sh2'), ...Array(6).fill(Bl('sh2'))));
+      for (const [fname, count] of Object.entries(trouData.byFacade).sort()) {
+        rows.push(R(C(fname,'sfac'), C(count,'sfac'), ...Array(6).fill(Bl('sfac'))));
+      }
+      rows.push(Sp());
+      rows.push(R(C('TOTAL FIXATIONS PANNEAU','sgt'), C(trouData.total,'sgt'), ...Array(6).fill(Bl('sgt'))));
+      rows.push(R(C('TOTAL GÉNÉRAL (ossature + panneau)','sgt'), C(grandTotalFix + trouData.total,'sgt'), ...Array(6).fill(Bl('sgt'))));
+    }
+
     return `<Worksheet ss:Name="Fixations"><Table ss:DefaultColumnWidth="100" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
   }
 
@@ -2648,6 +2689,11 @@ function applyProjectData(data) {
   if (data.fixationConfig) {
     fixationConfig = { ...fixationConfig, ...data.fixationConfig };
     document.getElementById('fixationPrix').value = fixationConfig.prixFixation || '';
+    const trouEl = document.getElementById('trouEnabled');
+    const trouAllEl = document.getElementById('trouApplyAll');
+    if (trouEl) trouEl.checked = !!fixationConfig.trouEnabled;
+    if (trouAllEl) trouAllEl.checked = fixationConfig.trouApplyAll !== false;
+    renderTrouConfigUI();
   }
   if (data.pliageConfig) {
     pliageConfig = { material: '', epaisseur: '', extensions: {}, ...data.pliageConfig };
@@ -3718,7 +3764,7 @@ function switchSection(name) {
   const sectionEl = document.getElementById('section' + name.charAt(0).toUpperCase() + name.slice(1));
   if (sectionEl) sectionEl.classList.add('active');
   if (name === 'ossature') { renderOssature(); renderFixationZonesUI(); }
-  if (name === 'fixation') renderFixation();
+  if (name === 'fixation') { renderTrouConfigUI(); renderFixation(); }
   if (name === 'pliage') renderPliage();
   if (name === 'devis') renderDevis();
 }
@@ -4801,6 +4847,138 @@ function calcFixation() {
   return { result, grandTotalOmega, grandTotalZed, grandTotal: grandTotalOmega + grandTotalZed };
 }
 
+function calcTrouFixations() {
+  // Returns { byFacade: {fname: count}, total: count }
+  if (!fixationConfig.trouEnabled || !projectRectsSpatial || !projectRectsSpatial.length) {
+    return { byFacade: {}, total: 0 };
+  }
+  const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+  const result = {};
+  let total = 0;
+  for (const [fname, panels] of Object.entries(byFacade)) {
+    const cfg = getTrouConfigForFacade(fname);
+    let count = 0;
+    for (const p of panels) {
+      const pw = Math.round(p.xmax - p.xmin);
+      const ph = Math.round(p.ymax - p.ymin);
+      count += calcHolePositions(pw, ph, cfg).length;
+    }
+    result[fname] = count;
+    total += count;
+  }
+  return { byFacade: result, total };
+}
+
+function getTrouConfigForFacade(facadeName) {
+  const defaults = { corner: 'bl', offsetX: 50, offsetY: 50, diameter: 8, entraxeH: 600, entraxeV: 600, minH: 1, minV: 1 };
+  if (fixationConfig.trouApplyAll) {
+    return { ...defaults, ...fixationConfig.trouGlobal };
+  }
+  const fc = (fixationConfig.trouByFacade || {})[facadeName];
+  return { ...defaults, ...(fc || fixationConfig.trouGlobal) };
+}
+
+function calcHolePositions(panelW, panelH, cfg) {
+  const { corner, offsetX, offsetY, diameter, entraxeH, entraxeV, minH, minV } = cfg;
+  function positions(size, offset, entraxe, minCount) {
+    const natural = [];
+    if (offset <= size) {
+      for (let p = offset; p <= size + 0.01; p += entraxe) natural.push(p);
+    }
+    if (natural.length >= minCount) return natural;
+    // Redistribute evenly: divide panel into minCount zones, hole at center of each
+    const spacing = size / minCount;
+    const result = [];
+    for (let i = 0; i < minCount; i++) result.push(spacing / 2 + i * spacing);
+    return result;
+  }
+  const localXs = positions(panelW, offsetX, entraxeH, Math.max(1, minH));
+  const localYs = positions(panelH, offsetY, entraxeV, Math.max(1, minV));
+  const holes = [];
+  for (const lx of localXs) {
+    for (const ly of localYs) {
+      const x = (corner === 'br' || corner === 'tr') ? panelW - lx : lx;
+      const y = (corner === 'tl' || corner === 'tr') ? panelH - ly : ly;
+      holes.push({ x, y, r: (diameter || 8) / 2 });
+    }
+  }
+  return holes;
+}
+
+function renderTrouConfigUI() {
+  const panel = document.getElementById('trouConfigPanel');
+  if (!panel) return;
+  panel.style.display = fixationConfig.trouEnabled ? '' : 'none';
+  if (!fixationConfig.trouEnabled) return;
+
+  const applyAll = fixationConfig.trouApplyAll;
+  const facadeSelector = document.getElementById('trouFacadeSelector');
+  facadeSelector.style.display = applyAll ? 'none' : '';
+
+  // Populate facade select
+  const sel = document.getElementById('trouFacadeSelect');
+  if (!applyAll && projectRectsSpatial && projectRectsSpatial.length) {
+    const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+    const names = Object.keys(byFacade).sort();
+    const current = sel.value;
+    sel.innerHTML = names.map(n => `<option value="${n}"${n===current?' selected':''}>${n}</option>`).join('');
+  }
+
+  // Get the config to display
+  const facadeName = applyAll ? null : (sel.value || '');
+  let cfg;
+  if (applyAll) {
+    if (!fixationConfig.trouGlobal) fixationConfig.trouGlobal = {};
+    cfg = fixationConfig.trouGlobal;
+  } else {
+    if (!fixationConfig.trouByFacade) fixationConfig.trouByFacade = {};
+    if (!fixationConfig.trouByFacade[facadeName]) fixationConfig.trouByFacade[facadeName] = { ...fixationConfig.trouGlobal };
+    cfg = fixationConfig.trouByFacade[facadeName];
+  }
+  const C = { corner: 'bl', offsetX: 50, offsetY: 50, diameter: 8, entraxeH: 600, entraxeV: 600, minH: 1, minV: 1, ...cfg };
+  const key = applyAll ? 'trouGlobal' : `trouByFacade.${facadeName}`;
+
+  function inp(id, field, val, extra) {
+    return `<input type="number" id="${id}" value="${val}" min="0" step="1" style="width:70px;" oninput="setTrouField('${key}','${field}',+this.value)" ${extra||''}>`;
+  }
+  const cornerOpts = [['bl','Bas-gauche'],['br','Bas-droit'],['tl','Haut-gauche'],['tr','Haut-droit']];
+  const cornerSel = `<select id="trouCorner" onchange="setTrouField('${key}','corner',this.value)" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 8px;font-size:12px;">
+    ${cornerOpts.map(([v,l])=>`<option value="${v}"${C.corner===v?' selected':''}>${l}</option>`).join('')}
+  </select>`;
+
+  document.getElementById('trouConfigFields').innerHTML = `
+    <div class="oss-config" style="gap:6px;">
+      <div><label>Angle origine</label>${cornerSel}</div>
+      <div style="display:flex;gap:6px;">
+        <div><label>Écart X (mm)</label>${inp('trouOffsetX','offsetX',C.offsetX)}</div>
+        <div><label>Écart Y (mm)</label>${inp('trouOffsetY','offsetY',C.offsetY)}</div>
+      </div>
+      <div><label>Diamètre (mm)</label>${inp('trouDiameter','diameter',C.diameter,'min="1"')}</div>
+      <div style="display:flex;gap:6px;">
+        <div><label>Entraxe H (mm)</label>${inp('trouEntraxeH','entraxeH',C.entraxeH,'min="10"')}</div>
+        <div><label>Entraxe V (mm)</label>${inp('trouEntraxeV','entraxeV',C.entraxeV,'min="10"')}</div>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <div><label>Min / rangée</label>${inp('trouMinH','minH',C.minH,'min="1"')}</div>
+        <div><label>Min / colonne</label>${inp('trouMinV','minV',C.minV,'min="1"')}</div>
+      </div>
+    </div>`;
+}
+
+function setTrouField(key, field, value) {
+  if (key === 'trouGlobal') {
+    if (!fixationConfig.trouGlobal) fixationConfig.trouGlobal = {};
+    fixationConfig.trouGlobal[field] = value;
+  } else if (key.startsWith('trouByFacade.')) {
+    const fname = key.slice('trouByFacade.'.length);
+    if (!fixationConfig.trouByFacade) fixationConfig.trouByFacade = {};
+    if (!fixationConfig.trouByFacade[fname]) fixationConfig.trouByFacade[fname] = {};
+    fixationConfig.trouByFacade[fname][field] = value;
+  }
+  renderFixation();
+  scheduleSave();
+}
+
 function renderFixation() {
   const entaxeMax = ossatureConfig.entaxeMax || 600;
   const el = document.getElementById('fixationContent');
@@ -4816,6 +4994,47 @@ function renderFixation() {
   const { result, grandTotalOmega, grandTotalZed, grandTotal } = calcFixation();
   const prixFixation = parseFloat(fixationConfig.prixFixation) || 0;
   let html = '';
+
+  // ── Aperçu visuel des trous par façade ──
+  if (fixationConfig.trouEnabled && projectRectsSpatial && projectRectsSpatial.length) {
+    const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+    const facadeNames = Object.keys(byFacade).sort();
+    for (const fname of facadeNames) {
+      const panels = byFacade[fname];
+      const cfg = getTrouConfigForFacade(fname);
+      // Compute facade bounding box for SVG scaling
+      let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
+      for (const p of panels) {
+        fxmin = Math.min(fxmin, p.xmin); fxmax = Math.max(fxmax, p.xmax);
+        fymin = Math.min(fymin, p.ymin); fymax = Math.max(fymax, p.ymax);
+      }
+      const fw = fxmax - fxmin, fh = fymax - fymin;
+      const maxW = 700, maxH = 320;
+      const scale = Math.min(maxW / fw, maxH / fh, 1);
+      const svgW = Math.round(fw * scale), svgH = Math.round(fh * scale);
+      let svgContent = '';
+      for (const p of panels) {
+        const px = (p.xmin - fxmin) * scale, py = (fymax - p.ymax) * scale;
+        const pw = (p.xmax - p.xmin) * scale, ph = (p.ymax - p.ymin) * scale;
+        const panW = Math.round(p.xmax - p.xmin), panH = Math.round(p.ymax - p.ymin);
+        const aciColor = p.color || 7;
+        const panelColor = (ACI_COLOR_MAP_JS[aciColor] || {}).color || '#888888';
+        svgContent += `<rect x="${px.toFixed(1)}" y="${py.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="${panelColor}22" stroke="${panelColor}" stroke-width="1"/>`;
+        const holes = calcHolePositions(panW, panH, cfg);
+        for (const h of holes) {
+          const hx = px + h.x * scale, hy = py + (panH - h.y) * scale;
+          const hr = Math.max(1.5, h.r * scale);
+          svgContent += `<circle cx="${hx.toFixed(1)}" cy="${hy.toFixed(1)}" r="${hr.toFixed(1)}" fill="#fff" stroke="#e74c3c" stroke-width="1.2"/>`;
+        }
+      }
+      html += `<div class="oss-card">
+        <div style="font-weight:700;font-size:13px;margin-bottom:8px;">${fname} — aperçu trous</div>
+        <div style="overflow-x:auto;">
+          <svg width="${svgW}" height="${svgH}" style="display:block;background:var(--bg2);border-radius:4px;">${svgContent}</svg>
+        </div>
+      </div>`;
+    }
+  }
 
   for (const gd of result) {
     const g = gd.group;
@@ -4874,6 +5093,22 @@ function renderFixation() {
     }
   }
 
+  // Fixations de panneau (trous)
+  const trouData = calcTrouFixations();
+  if (trouData.total > 0) {
+    html += `<div class="oss-card" style="border-color:#e74c3c44;">
+      <div style="font-weight:700;font-size:14px;margin-bottom:8px;">Fixations panneau</div>
+      <table class="oss-table">
+        <tr><th>Façade</th><th>Nb fixations</th></tr>`;
+    for (const [fname, count] of Object.entries(trouData.byFacade).sort()) {
+      html += `<tr><td>${fname}</td><td style="text-align:center;font-weight:700;color:#e74c3c;">${count}</td></tr>`;
+    }
+    html += `<tr class="total-row">
+      <td style="font-weight:800;">TOTAL</td>
+      <td style="text-align:center;font-weight:800;color:#e74c3c;">${trouData.total}</td>
+    </tr></table></div>`;
+  }
+
   // Totaux globaux
   html += `<div class="oss-card" style="border-color:var(--accent)44;">
     <table class="oss-table">
@@ -4886,9 +5121,10 @@ function renderFixation() {
         <td><span class="oss-badge zed">Z Zed (1/rangée)</span></td>
         <td style="font-weight:700;color:var(--yellow);">${grandTotalZed} fixations</td>
       </tr>
+      ${trouData.total > 0 ? `<tr><td style="color:#e74c3c;">Fixations panneau</td><td style="font-weight:700;color:#e74c3c;">${trouData.total} fixations</td></tr>` : ''}
       <tr class="total-row">
         <td style="font-weight:800;font-size:14px;">TOTAL</td>
-        <td style="font-weight:800;font-size:14px;color:var(--accent);">${grandTotal} fixations${prixFixation ? ` — ${(grandTotal * prixFixation).toFixed(2)} €` : ''}</td>
+        <td style="font-weight:800;font-size:14px;color:var(--accent);">${grandTotal + trouData.total} fixations${prixFixation ? ` — ${((grandTotal + trouData.total) * prixFixation).toFixed(2)} €` : ''}</td>
       </tr>
     </table>
   </div>`;
@@ -4900,10 +5136,14 @@ function renderFixation() {
   let sumHTML = '';
   sumHTML += `<div class="summary-row"><span class="summary-label">Fix. Oméga (×2)</span><span class="summary-value" style="color:var(--accent);">${grandTotalOmega}</span></div>`;
   sumHTML += `<div class="summary-row"><span class="summary-label">Fix. Zed (×1)</span><span class="summary-value" style="color:var(--yellow);">${grandTotalZed}</span></div>`;
+  if (trouData.total > 0) {
+    sumHTML += `<div class="summary-row"><span class="summary-label">Fix. panneau</span><span class="summary-value" style="color:#e74c3c;">${trouData.total}</span></div>`;
+  }
   sumHTML += `<div class="summary-divider"></div>`;
-  sumHTML += `<div class="summary-row"><span class="summary-label" style="font-weight:800;">Total</span><span class="summary-value" style="font-size:15px;color:var(--accent);">${grandTotal} pts</span></div>`;
+  const totalAll = grandTotal + trouData.total;
+  sumHTML += `<div class="summary-row"><span class="summary-label" style="font-weight:800;">Total</span><span class="summary-value" style="font-size:15px;color:var(--accent);">${totalAll} pts</span></div>`;
   if (prixFixation) {
-    sumHTML += `<div class="summary-row"><span class="summary-label">Coût fixations</span><span class="summary-value">${(grandTotal * prixFixation).toFixed(2)} €</span></div>`;
+    sumHTML += `<div class="summary-row"><span class="summary-label">Coût fixations</span><span class="summary-value">${(totalAll * prixFixation).toFixed(2)} €</span></div>`;
   }
   sumEl.innerHTML = sumHTML;
   document.getElementById('fixationSummaryCard').style.display = 'block';
@@ -5279,6 +5519,15 @@ function createDxfBuilder() {
       this.addLine(xmin, ymax, xmin, ymin, layer, color);
     },
 
+    addCircle(cx, cy, radius, layer, color) {
+      trackPt(cx - radius, cy - radius); trackPt(cx + radius, cy + radius);
+      entityStrings.push(
+        '  0\nCIRCLE\n  5\n' + nextHandle() + '\n  8\n' + layer + '\n 62\n' + color + '\n' +
+        ' 10\n' + f(cx) + '\n 20\n' + f(cy) + '\n 30\n0.0\n' +
+        ' 40\n' + f(radius) + '\n'
+      );
+    },
+
     addText(x, y, h, text, layer, color, halign) {
       // halign: 0=left, 1=center, 2=right
       trackPt(x, y);
@@ -5581,6 +5830,7 @@ function exportDxfPanneaux() {
   dxf.addLayer('TEXTE', 7);
   dxf.addLayer('TITRE', 7);
   dxf.addLayer('COTES', 8);
+  if (fixationConfig.trouEnabled) dxf.addLayer('TROUS', 1);
 
   const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
   const facadeNames = Object.keys(byFacade).sort();
@@ -5635,6 +5885,8 @@ function exportDxfPanneaux() {
       return a.ymin - b.ymin;
     });
 
+    const trouCfg = fixationConfig.trouEnabled ? getTrouConfigForFacade(fname) : null;
+
     for (let i = 0; i < sorted.length; i++) {
       const p = sorted[i];
       const aciColor = p.color || 7;
@@ -5649,6 +5901,14 @@ function exportDxfPanneaux() {
 
       dxf.addText(cx, cy + textH * 0.8, textH, 'P' + (i + 1), 'TEXTE', aciColor, 1);
       dxf.addText(cx, cy - textH * 0.6, textH * 0.7, pw + 'x' + ph, 'COTES', 8, 1);
+
+      if (trouCfg) {
+        const holes = calcHolePositions(pw, ph, trouCfg);
+        for (const h of holes) {
+          // h.x/h.y are from bottom-left of panel
+          dxf.addCircle(p.xmin + h.x, p.ymin + h.y, h.r, 'TROUS', 1);
+        }
+      }
     }
   }
 
