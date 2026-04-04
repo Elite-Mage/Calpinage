@@ -2435,19 +2435,12 @@ function exportExcel() {
     rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('Zed',  'sgt'), ...Array(4).fill(Bl('sgt')), C(grandTotalZed,'sgt')));
     rows.push(R(C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), C('TOTAL','sgt'), ...Array(4).fill(Bl('sgt')), C(grandTotalFix,'sgt')));
 
-    // ── Fixations panneau (trous) ──
+    // ── Fixations panneau ──
     const trouData = calcTrouFixations();
     if (trouData.total > 0) {
-      rows.push(Sp()); rows.push(Sp());
-      rows.push(R(C('FIXATIONS PANNEAU','sh1'), ...Array(7).fill(Bl('sh1'))));
       rows.push(Sp());
-      rows.push(R(C('Façade','sh2'), C('Nb fixations','sh2'), ...Array(6).fill(Bl('sh2'))));
-      for (const [fname, count] of Object.entries(trouData.byFacade).sort()) {
-        rows.push(R(C(fname,'sfac'), C(count,'sfac'), ...Array(6).fill(Bl('sfac'))));
-      }
-      rows.push(Sp());
-      rows.push(R(C('TOTAL FIXATIONS PANNEAU','sgt'), C(trouData.total,'sgt'), ...Array(6).fill(Bl('sgt'))));
-      rows.push(R(C('TOTAL GÉNÉRAL (ossature + panneau)','sgt'), C(grandTotalFix + trouData.total,'sgt'), ...Array(6).fill(Bl('sgt'))));
+      rows.push(R(C('TOTAL FIXATIONS PANNEAU','sgt'), ...Array(6).fill(Bl('sgt')), C(trouData.total,'sgt')));
+      rows.push(R(C('TOTAL GÉNÉRAL (ossature + panneau)','sgt'), ...Array(6).fill(Bl('sgt')), C(grandTotalFix + trouData.total,'sgt')));
     }
 
     return `<Worksheet ss:Name="Fixations"><Table ss:DefaultColumnWidth="100" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
@@ -4848,25 +4841,24 @@ function calcFixation() {
 }
 
 function calcTrouFixations() {
-  // Returns { byFacade: {fname: count}, total: count }
+  // Returns { total: count, warnings: [{fname, panelW, panelH}] }
   if (!fixationConfig.trouEnabled || !projectRectsSpatial || !projectRectsSpatial.length) {
-    return { byFacade: {}, total: 0 };
+    return { total: 0, warnings: [] };
   }
   const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
-  const result = {};
   let total = 0;
+  const warnings = [];
   for (const [fname, panels] of Object.entries(byFacade)) {
     const cfg = getTrouConfigForFacade(fname);
-    let count = 0;
     for (const p of panels) {
       const pw = Math.round(p.xmax - p.xmin);
       const ph = Math.round(p.ymax - p.ymin);
-      count += calcHolePositions(pw, ph, cfg).length;
+      const { holes, warnings: w } = calcHolePositions(pw, ph, cfg);
+      total += holes.length;
+      for (const axis of w) warnings.push({ fname, pw, ph, axis });
     }
-    result[fname] = count;
-    total += count;
   }
-  return { byFacade: result, total };
+  return { total, warnings };
 }
 
 function getTrouConfigForFacade(facadeName) {
@@ -4879,30 +4871,41 @@ function getTrouConfigForFacade(facadeName) {
 }
 
 function calcHolePositions(panelW, panelH, cfg) {
-  const { corner, offsetX, offsetY, diameter, entraxeH, entraxeV, minH, minV } = cfg;
-  function positions(size, offset, entraxe, minCount) {
-    const natural = [];
-    if (offset <= size) {
-      for (let p = offset; p <= size + 0.01; p += entraxe) natural.push(p);
+  // Returns { holes: [{x,y,r}], warnings: ['H'|'V'] }
+  const { corner, offsetX, offsetY, diameter, entraxeH, entraxeV } = cfg;
+  const r = (diameter || 8) / 2;
+  const warnings = [];
+
+  function positions(size, offset, entraxe, axis) {
+    // Panel too small for symmetric placement → 1 hole at center, warn
+    if (size < 2 * offset) {
+      warnings.push(axis);
+      return [size / 2];
     }
-    if (natural.length >= minCount) return natural;
-    // Redistribute evenly: divide panel into minCount zones, hole at center of each
-    const spacing = size / minCount;
-    const result = [];
-    for (let i = 0; i < minCount; i++) result.push(spacing / 2 + i * spacing);
-    return result;
+    const first = offset;
+    const last = size - offset;
+    const gap = last - first;
+    if (gap <= 0) return [first]; // first === last: single centered hole
+    // Number of intervals needed so spacing ≤ entraxe
+    const nIntervals = Math.max(1, Math.ceil(gap / entraxe));
+    const spacing = gap / nIntervals;
+    const pts = [];
+    for (let i = 0; i <= nIntervals; i++) pts.push(first + i * spacing);
+    return pts;
   }
-  const localXs = positions(panelW, offsetX, entraxeH, Math.max(1, minH));
-  const localYs = positions(panelH, offsetY, entraxeV, Math.max(1, minV));
+
+  const localXs = positions(panelW, offsetX, entraxeH, 'H');
+  const localYs = positions(panelH, offsetY, entraxeV, 'V');
+
   const holes = [];
   for (const lx of localXs) {
     for (const ly of localYs) {
       const x = (corner === 'br' || corner === 'tr') ? panelW - lx : lx;
       const y = (corner === 'tl' || corner === 'tr') ? panelH - ly : ly;
-      holes.push({ x, y, r: (diameter || 8) / 2 });
+      holes.push({ x, y, r });
     }
   }
-  return holes;
+  return { holes, warnings };
 }
 
 function renderTrouConfigUI() {
@@ -5020,7 +5023,7 @@ function renderFixation() {
         const aciColor = p.color || 7;
         const panelColor = (ACI_COLOR_MAP_JS[aciColor] || {}).color || '#888888';
         svgContent += `<rect x="${px.toFixed(1)}" y="${py.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="${panelColor}22" stroke="${panelColor}" stroke-width="1"/>`;
-        const holes = calcHolePositions(panW, panH, cfg);
+        const { holes } = calcHolePositions(panW, panH, cfg);
         for (const h of holes) {
           const hx = px + h.x * scale, hy = py + (panH - h.y) * scale;
           const hr = Math.max(1.5, h.r * scale);
@@ -5028,7 +5031,7 @@ function renderFixation() {
         }
       }
       html += `<div class="oss-card">
-        <div style="font-weight:700;font-size:13px;margin-bottom:8px;">${fname} — aperçu trous</div>
+        <div style="font-weight:700;font-size:13px;margin-bottom:8px;">${fname} — aperçu fixations</div>
         <div style="overflow-x:auto;">
           <svg width="${svgW}" height="${svgH}" style="display:block;background:var(--bg2);border-radius:4px;">${svgContent}</svg>
         </div>
@@ -5093,20 +5096,31 @@ function renderFixation() {
     }
   }
 
-  // Fixations de panneau (trous)
+  // Fixations de panneau
   const trouData = calcTrouFixations();
+  if (trouData.warnings && trouData.warnings.length > 0) {
+    const seen = new Set();
+    const uniq = trouData.warnings.filter(w => { const k = `${w.fname}-${w.pw}x${w.ph}-${w.axis}`; if (seen.has(k)) return false; seen.add(k); return true; });
+    html += `<div class="oss-card" style="border-color:#f59e0b;background:#fef3c711;">
+      <div style="font-weight:700;font-size:13px;color:#f59e0b;margin-bottom:6px;">&#9888; Panneaux trop petits pour placement symétrique</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:6px;">Ces panneaux ont un seul trou centré (trop étroits pour offsetX ou offsetY des deux côtés) :</div>
+      <ul style="margin:0;padding-left:18px;font-size:12px;">`;
+    for (const w of uniq) {
+      const axe = w.axis === 'H' ? 'largeur' : 'hauteur';
+      html += `<li><strong>${w.fname}</strong> — panneau ${w.pw}×${w.ph} mm : trou centré en ${axe}</li>`;
+    }
+    html += `</ul></div>`;
+  }
   if (trouData.total > 0) {
     html += `<div class="oss-card" style="border-color:#e74c3c44;">
       <div style="font-weight:700;font-size:14px;margin-bottom:8px;">Fixations panneau</div>
       <table class="oss-table">
-        <tr><th>Façade</th><th>Nb fixations</th></tr>`;
-    for (const [fname, count] of Object.entries(trouData.byFacade).sort()) {
-      html += `<tr><td>${fname}</td><td style="text-align:center;font-weight:700;color:#e74c3c;">${count}</td></tr>`;
-    }
-    html += `<tr class="total-row">
-      <td style="font-weight:800;">TOTAL</td>
-      <td style="text-align:center;font-weight:800;color:#e74c3c;">${trouData.total}</td>
-    </tr></table></div>`;
+        <tr class="total-row">
+          <td style="font-weight:800;">TOTAL fixations panneau</td>
+          <td style="text-align:center;font-weight:800;color:#e74c3c;">${trouData.total}</td>
+        </tr>
+      </table>
+    </div>`;
   }
 
   // Totaux globaux
@@ -5903,9 +5917,8 @@ function exportDxfPanneaux() {
       dxf.addText(cx, cy - textH * 0.6, textH * 0.7, pw + 'x' + ph, 'COTES', 8, 1);
 
       if (trouCfg) {
-        const holes = calcHolePositions(pw, ph, trouCfg);
+        const { holes } = calcHolePositions(pw, ph, trouCfg);
         for (const h of holes) {
-          // h.x/h.y are from bottom-left of panel
           dxf.addCircle(p.xmin + h.x, p.ymin + h.y, h.r, 'TROUS', 1);
         }
       }
