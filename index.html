@@ -4194,6 +4194,162 @@ function calcOssature() {
   return results;
 }
 
+function buildOssatureSvg(fname, panels) {
+  const ENTRAXE = ossatureConfig.entaxeMax || 600;
+  const MAX_GAP = 20;
+  const ZED_W = 40, OMEGA_W = 80;
+  const prol  = (ossatureConfig.prolongementEnabled  && ossatureConfig.prolongement  > 0) ? ossatureConfig.prolongement  : 0;
+  const prolH = (ossatureConfig.prolongementHautEnabled && ossatureConfig.prolongementHaut > 0) ? ossatureConfig.prolongementHaut : 0;
+
+  let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
+  for (const p of panels) {
+    fxmin = Math.min(fxmin, p.xmin); fxmax = Math.max(fxmax, p.xmax);
+    fymin = Math.min(fymin, p.ymin); fymax = Math.max(fymax, p.ymax);
+  }
+  const yBot = fymin - prol, yTop = fymax + prolH;
+
+  const maxW = 700, maxH = 400;
+  const fw = fxmax - fxmin, fh = yTop - yBot;
+  const scale = Math.min(maxW / fw, maxH / fh, 1);
+  const svgW = Math.round(fw * scale), svgH = Math.round(fh * scale);
+
+  // Convert real coords → SVG coords (Y flipped)
+  const sx = x => (x - fxmin) * scale;
+  const sy = y => (yTop - y) * scale;
+  const sw = w => w * scale;
+
+  let svg = '';
+
+  // Helper: draw a rect in SVG space
+  function rect(xr, yb, xr2, yt, fill, stroke, opacity) {
+    const x = sx(xr), y = sy(yt), w = sw(xr2 - xr), h = sw(yt - yb);
+    if (w < 0.5 || h < 0.5) return;
+    svg += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" fill-opacity="${opacity||1}" stroke="${stroke}" stroke-width="0.7"/>`;
+  }
+
+  // Panels (gray)
+  for (const p of panels) {
+    const col = (ACI_COLOR_MAP_JS[p.color || 7] || {}).color || '#888888';
+    rect(p.xmin, p.ymin, p.xmax, p.ymax, col + '22', col, 1);
+  }
+
+  // Prolongement zones (light gray)
+  if (prol > 0)  rect(fxmin, fymin - prol, fxmax, fymin, '#88888811', '#888', 1);
+  if (prolH > 0) rect(fxmin, fymax, fxmax, fymax + prolH, '#88888811', '#888', 1);
+
+  // ── Zed entraxe ──
+  const rawZeds = [];
+  for (const p of panels) {
+    const pw = Math.round(p.xmax - p.xmin);
+    const nz = Math.max(0, Math.ceil(pw / ENTRAXE) - 1);
+    if (nz > 0) {
+      const step = (p.xmax - p.xmin) / (nz + 1);
+      for (let z = 1; z <= nz; z++) rawZeds.push({ cx: p.xmin + z * step, yStart: p.ymin, yEnd: p.ymax });
+    }
+  }
+  // Merge zeds at same X across joints
+  const usedZ = new Array(rawZeds.length).fill(false);
+  for (let i = 0; i < rawZeds.length; i++) {
+    if (usedZ[i]) continue;
+    let { cx, yStart, yEnd } = rawZeds[i]; usedZ[i] = true;
+    let changed = true;
+    while (changed) { changed = false;
+      for (let j = 0; j < rawZeds.length; j++) {
+        if (usedZ[j] || Math.abs(rawZeds[j].cx - cx) > 5) continue;
+        const g1 = rawZeds[j].yStart - yEnd, g2 = yStart - rawZeds[j].yEnd;
+        if ((g1 >= -5 && g1 <= MAX_GAP) || (g2 >= -5 && g2 <= MAX_GAP)) {
+          yStart = Math.min(yStart, rawZeds[j].yStart); yEnd = Math.max(yEnd, rawZeds[j].yEnd);
+          usedZ[j] = true; changed = true;
+        }
+      }
+    }
+    if (prol  > 0 && Math.abs(yStart - fymin) < 5) yStart = fymin - prol;
+    if (prolH > 0 && Math.abs(yEnd   - fymax) < 5) yEnd   = fymax + prolH;
+    rect(cx - ZED_W/2, yStart, cx + ZED_W/2, yEnd, '#facc1566', '#ca8a04', 1);
+  }
+
+  // ── Junctions → Omega ──
+  const junctions = {}, hasRN = new Set(), hasLN = new Set();
+  for (const p of panels) for (const q of panels) {
+    if (q === p) continue;
+    const gap = q.xmin - p.xmax;
+    if (gap >= -5 && gap <= MAX_GAP && q.xmin > p.xmin + 20) {
+      const jx = Math.round((p.xmax + q.xmin) / 2);
+      if (!junctions[jx]) junctions[jx] = { left: [], right: [] };
+      junctions[jx].left.push(p); junctions[jx].right.push(q);
+      hasRN.add(p); hasLN.add(q);
+    }
+  }
+  for (const jx of Object.keys(junctions).map(Number)) {
+    const { left, right } = junctions[jx];
+    const overlaps = [];
+    for (const pl of left) for (const pr of right) {
+      const s = Math.max(pl.ymin, pr.ymin), e = Math.min(pl.ymax, pr.ymax);
+      if (e - s > 1) overlaps.push({ s, e });
+    }
+    overlaps.sort((a, b) => a.s - b.s);
+    if (!overlaps.length) continue;
+    const merged = [{ ...overlaps[0] }];
+    for (let oi = 1; oi < overlaps.length; oi++) {
+      const ov = overlaps[oi], prev = merged[merged.length - 1];
+      if (ov.s <= prev.e + MAX_GAP) prev.e = Math.max(prev.e, ov.e);
+      else merged.push({ ...ov });
+    }
+    for (const m of merged) {
+      const mS = (prol  > 0 && m.s <= fymin + 5) ? fymin - prol  : m.s;
+      const mE = (prolH > 0 && m.e >= fymax - 5) ? fymax + prolH : m.e;
+      rect(jx - OMEGA_W/2, mS, jx + OMEGA_W/2, mE, '#22d3ee55', '#0891b2', 1);
+    }
+
+    // Gap Zed at junction
+    const leftI  = [...new Set(left.map(p  => `${Math.round(p.ymin)}_${Math.round(p.ymax)}` ))].map(s => s.split('_').map(Number));
+    const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}` ))].map(s => s.split('_').map(Number));
+    const evts = [];
+    for (const [s,e] of leftI)  { evts.push([s,'L+']); evts.push([e,'L-']); }
+    for (const [s,e] of rightI) { evts.push([s,'R+']); evts.push([e,'R-']); }
+    evts.sort((a,b) => a[0]-b[0]);
+    let lC=0,rC=0,prevY=null;
+    const lGaps=[],rGaps=[];
+    for (const [y,ev] of evts) {
+      if (prevY!==null&&y>prevY) {
+        if (lC>0&&rC===0) rGaps.push([prevY,y]);
+        else if (rC>0&&lC===0) lGaps.push([prevY,y]);
+      }
+      if (ev==='L+') lC++; else if (ev==='L-') lC--;
+      else if (ev==='R+') rC++; else if (ev==='R-') rC--;
+      prevY=y;
+    }
+    for (const [gs,ge] of [...lGaps,...rGaps]) {
+      if (Math.round(ge-gs) >= 100) {
+        const gsE = (prol>0&&gs<=fymin+5)?fymin-prol:gs;
+        const geE = (prolH>0&&ge>=fymax-5)?fymax+prolH:ge;
+        rect(jx - ZED_W/2, gsE, jx + ZED_W/2, geE, '#f97316aa', '#ea580c', 1);
+      }
+    }
+  }
+
+  // ── Free-edge Zed ──
+  for (const p of panels) {
+    const yS = (prol>0&&Math.abs(p.ymin-fymin)<5)?fymin-prol:p.ymin;
+    const yE = (prolH>0&&Math.abs(p.ymax-fymax)<5)?fymax+prolH:p.ymax;
+    if (!hasRN.has(p) && panels.some(q => q!==p && q.xmin > p.xmax + MAX_GAP))
+      rect(p.xmax - ZED_W/2, yS, p.xmax + ZED_W/2, yE, '#f97316aa', '#ea580c', 1);
+    if (!hasLN.has(p) && panels.some(q => q!==p && q.xmax < p.xmin - MAX_GAP))
+      rect(p.xmin - ZED_W/2, yS, p.xmin + ZED_W/2, yE, '#f97316aa', '#ea580c', 1);
+  }
+
+  // Legend
+  const ly = svgH - 14;
+  svg += `<rect x="4" y="${ly-10}" width="12" height="10" fill="#22d3ee55" stroke="#0891b2" stroke-width="0.7"/>`;
+  svg += `<text x="19" y="${ly}" fill="var(--text3)" font-size="10">Oméga</text>`;
+  svg += `<rect x="60" y="${ly-10}" width="12" height="10" fill="#facc1566" stroke="#ca8a04" stroke-width="0.7"/>`;
+  svg += `<text x="75" y="${ly}" fill="var(--text3)" font-size="10">Zed entraxe</text>`;
+  svg += `<rect x="145" y="${ly-10}" width="12" height="10" fill="#f97316aa" stroke="#ea580c" stroke-width="0.7"/>`;
+  svg += `<text x="160" y="${ly}" fill="var(--text3)" font-size="10">Zed bord</text>`;
+
+  return `<svg width="${svgW}" height="${svgH + 20}" style="display:block;background:var(--bg2);border-radius:4px;">${svg}</svg>`;
+}
+
 function renderOssature() {
   renderOmegaStockList();
   renderZedStockList();
@@ -4215,7 +4371,17 @@ function renderOssature() {
 
   let html = '';
 
-  // Profils par façade (tous panneaux confondus) — source unique
+  // ── Aperçu SVG ossature par façade ──
+  if (projectRectsSpatial && projectRectsSpatial.length) {
+    const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+    for (const fname of Object.keys(byFacade).sort()) {
+      const facColor = PIECE_COLORS[Object.keys(byFacade).sort().indexOf(fname) % PIECE_COLORS.length];
+      html += `<div class="oss-card" style="border-left:3px solid ${facColor};">
+        <div style="font-weight:700;font-size:13px;margin-bottom:8px;">${fname} — aperçu ossature</div>
+        <div style="overflow-x:auto;">${buildOssatureSvg(fname, byFacade[fname])}</div>
+      </div>`;
+    }
+  }
   const profileReport = computeOssatureProfilesReport();
   let grandOmegaML = 0, grandZedML = 0;
   for (const pr of Object.values(profileReport)) {
