@@ -594,9 +594,12 @@
       <table class="order-table" id="orderTable"></table>
     </div>
 
-    <!-- PLAN DE REPÉRAGE -->
+    <!-- PLAN DE REPÉRAGE + LISTE DE DÉBIT -->
     <div class="card" id="reperageCard" style="display:none;">
-      <div class="card-title">Plan de repérage</div>
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>Plan de repérage</span>
+        <button class="btn-export" onclick="exportListeDebitCSV()" title="Export CSV liste de débit atelier">&#128196; CSV Débit</button>
+      </div>
       <div id="reperageContent"></div>
     </div>
 
@@ -2234,6 +2237,30 @@ function exportCSV() {
   link.click();
 }
 
+function exportListeDebitCSV() {
+  if (!projectRectsSpatial || !projectRectsSpatial.length) {
+    alert('Importez un DXF d\'abord pour générer la liste de débit.');
+    return;
+  }
+  const rows = buildListeDebit();
+  if (!rows.length) { alert('Aucun panneau trouvé.'); return; }
+
+  const nom  = chantier.nom  || 'Chantier';
+  const date = chantier.date || new Date().toISOString().slice(0, 10);
+
+  let csv = `Chantier;${nom};Date;${date}\n`;
+  csv += 'Réf. repère;Façade;L (mm);H (mm);Surf. (m²);Type;Réf. fourn.;Coloris;Ép. (mm)\n';
+  for (const r of rows) {
+    csv += `${r.repere};${r.facade};${r.l};${r.h};${r.surf};${r.type};${r.reference};${r.coloris};${r.epaisseur}\n`;
+  }
+
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `${nom.replace(/[^a-zA-Z0-9]/g, '_') || 'calepinage'}_debit_${date}.csv`;
+  link.click();
+}
+
 // ============================================================
 // EXPORT PDF
 // ============================================================
@@ -2603,6 +2630,72 @@ function exportExcel() {
     return `<Worksheet ss:Name="Pliages"><Table ss:DefaultColumnWidth="110" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
   }
 
+  // ── Onglet Liste de débit ────────────────────────────────────
+  function sheetListeDebit() {
+    const rows = [];
+    rows.push(R(C(`${nom} — Liste de débit atelier`, 'sh1'), ...Array(8).fill(Bl('sh1'))));
+    rows.push(R(C('Date :', 'sh2'), C(date, 'sh2'), ...Array(7).fill(Bl('sh2'))));
+    rows.push(Sp());
+
+    if (!projectRectsSpatial || !projectRectsSpatial.length) {
+      rows.push(R(C('Aucune donnée DXF disponible.')));
+      return `<Worksheet ss:Name="Liste débit"><Table ss:DefaultColumnWidth="110" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
+    }
+
+    rows.push(R(
+      C('Réf. repère','sh2'), C('Façade','sh2'), C('L (mm)','sh2'), C('H (mm)','sh2'),
+      C('Surf. (m²)','sh2'), C('Type','sh2'), C('Réf. fourn.','sh2'), C('Coloris','sh2'), C('Ép. (mm)','sh2')
+    ));
+
+    const debitRows = buildListeDebit();
+    if (!debitRows.length) {
+      rows.push(Sp()); rows.push(R(C('Aucun panneau.')));
+      return `<Worksheet ss:Name="Liste débit"><Table ss:DefaultColumnWidth="110" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
+    }
+
+    let currentType = null;
+    let typeSurf = 0, grandSurf = 0, typeCount = 0;
+
+    for (const r of debitRows) {
+      if (r.type !== currentType) {
+        // Sous-total type précédent
+        if (currentType !== null) {
+          rows.push(R(
+            C(`Sous-total ${currentType}`,'ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'),
+            C(+typeSurf.toFixed(4),'ssub4'), C(`${typeCount} pce(s)`,'ssub'),
+            ...Array(3).fill(Bl('ssub'))
+          ));
+        }
+        rows.push(Sp());
+        // En-tête groupe matière — couleur du groupe si dispo
+        const sid = r.groupId != null ? `sg${r.groupId}` : 'sfac';
+        rows.push(R(C(r.type, sid), C(r.reference, sid), C(r.coloris, sid), C(r.epaisseur, sid), ...Array(5).fill(Bl(sid))));
+        currentType = r.type; typeSurf = 0; typeCount = 0;
+      }
+      rows.push(R(
+        C(r.repere), C(r.facade), C(r.l), C(r.h),
+        C(r.surf,'sn3'), C(r.type), C(r.reference), C(r.coloris), C(r.epaisseur)
+      ));
+      typeSurf += r.surf; grandSurf += r.surf; typeCount++;
+    }
+    // Dernier sous-total
+    if (currentType !== null) {
+      rows.push(R(
+        C(`Sous-total ${currentType}`,'ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'),
+        C(+typeSurf.toFixed(4),'ssub4'), C(`${typeCount} pce(s)`,'ssub'),
+        ...Array(3).fill(Bl('ssub'))
+      ));
+    }
+    rows.push(Sp());
+    rows.push(R(
+      C('TOTAL GÉNÉRAL','sgt'), Bl('sgt'), Bl('sgt'), Bl('sgt'),
+      C(+grandSurf.toFixed(4),'sgt4'), C(`${debitRows.length} pce(s)`,'sgt'),
+      ...Array(3).fill(Bl('sgt'))
+    ));
+
+    return `<Worksheet ss:Name="Liste débit"><Table ss:DefaultColumnWidth="110" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
+  }
+
   // ── Onglet Repérage ──────────────────────────────────────────
   function sheetReperage() {
     const rows = [];
@@ -2648,6 +2741,7 @@ function exportExcel() {
   xmlns:x="urn:schemas-microsoft-com:office:excel"
   xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
   ${STYLES}
+  ${sheetListeDebit()}
   ${sheetReperage()}
   ${sheetPanneaux()}
   ${sheetOssature()}
@@ -6367,6 +6461,46 @@ function downloadDxf(content, filename) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(a.href);
+}
+
+// ── Liste de débit atelier ────────────────────────────────────
+// Retourne [ { repere, facade, l, h, surf, type, reference, coloris, epaisseur } ]
+// Triée par matière → façade → surface décroissante (regroupement pour découpe)
+function buildListeDebit() {
+  const numbered = buildFacadePanelNumbers();
+  const rows = [];
+
+  for (const [fname, items] of Object.entries(numbered)) {
+    for (const item of items) {
+      const grp = groups.find(g => {
+        if (g.colorAci != null) return g.colorAci === item.colorAci;
+        for (const [a, info] of Object.entries(ACI_COLOR_MAP_JS))
+          if (info.color === g.color && parseInt(a) === item.colorAci) return true;
+        return false;
+      });
+      rows.push({
+        repere:    item.label,
+        facade:    fname,
+        l:         item.w,
+        h:         item.h,
+        surf:      +(item.w * item.h / 1e6).toFixed(4),
+        type:      item.colorName,
+        reference: grp?.reference || '',
+        coloris:   grp?.coloris   || '',
+        epaisseur: grp?.epaisseur || 18,
+        hexColor:  item.hexColor,
+        groupId:   grp?.id ?? null,
+      });
+    }
+  }
+
+  rows.sort((a, b) => {
+    if (a.type   !== b.type)   return a.type.localeCompare(b.type);
+    if (a.facade !== b.facade) return a.facade.localeCompare(b.facade);
+    return b.surf - a.surf; // plus grand en premier
+  });
+
+  return rows;
 }
 
 // ── Plan de repérage — numérotation par façade ───────────────
