@@ -588,6 +588,7 @@
           <button class="btn-export" onclick="exportCSV()">&#128196; CSV</button>
           <button class="btn-export" onclick="exportExcel()">&#128202; Excel</button>
           <button class="btn-export" onclick="exportPDF()">&#128247; PDF</button>
+          <button class="btn-export" onclick="exportPdfFacades()" title="PDF par façade — calepinage, ossature, débit, fixations">&#128247; PDF Façades</button>
           <button class="btn-export" onclick="exportDxfPanneaux()" title="Export DXF panneaux avec numérotation">&#128209; DXF Panneaux</button>
         </div>
       </div>
@@ -607,7 +608,10 @@
     <div class="card" id="reperageCard" style="display:none;">
       <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
         <span>Plan de repérage</span>
-        <button class="btn-export" onclick="exportListeDebitCSV()" title="Export CSV liste de débit atelier">&#128196; CSV Débit</button>
+        <div style="display:flex;gap:5px;">
+          <button class="btn-export" onclick="exportPdfFacades()" title="PDF par façade — calepinage, ossature, débit, fixations">&#128247; PDF</button>
+          <button class="btn-export" onclick="exportListeDebitCSV()" title="Export CSV liste de débit atelier">&#128196; CSV Débit</button>
+        </div>
       </div>
       <div id="reperageContent"></div>
     </div>
@@ -2358,6 +2362,196 @@ function buildPanelSVG(panel, colorMap, group) {
   svg+=`<text x="${svgW/2}" y="${svgH+14}" text-anchor="middle" fill="#555" font-size="10" font-family="monospace">${panel.stock.w} mm</text>`;
   svg+=`<text x="-${svgH/2}" y="-6" text-anchor="middle" fill="#555" font-size="10" font-family="monospace" transform="rotate(-90)">${panel.stock.h} mm</text>`;
   return `<svg width="${svgW}" height="${svgH+18}" viewBox="-18 -2 ${svgW+22} ${svgH+20}">${svg}</svg>`;
+}
+
+// ── SVG plan de calepinage d'une façade ──────────────────────
+function buildFacadeSvg(panels, items) {
+  const MAX_W = 680, MAX_H = 320;
+  let fxmin = Infinity, fxmax = -Infinity, fymin = Infinity, fymax = -Infinity;
+  for (const p of panels) {
+    fxmin = Math.min(fxmin, p.xmin); fxmax = Math.max(fxmax, p.xmax);
+    fymin = Math.min(fymin, p.ymin); fymax = Math.max(fymax, p.ymax);
+  }
+  const fw = fxmax - fxmin, fh = fymax - fymin;
+  if (fw <= 0 || fh <= 0) return '<em>Aucun panneau</em>';
+  const scale = Math.min(MAX_W / fw, MAX_H / fh);
+  const svgW = Math.round(fw * scale), svgH = Math.round(fh * scale);
+
+  // label lookup : panel object → {label, hexColor}
+  const labelMap = new Map();
+  for (const item of items) labelMap.set(item.panel, item);
+
+  let svg = `<rect x="0" y="0" width="${svgW}" height="${svgH}" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5" rx="2"/>`;
+
+  for (const p of panels) {
+    const px = (p.xmin - fxmin) * scale;
+    const py = (fymax - p.ymax) * scale;   // Y inversé : DXF Y-up → SVG Y-down
+    const pw = (p.xmax - p.xmin) * scale;
+    const ph = (p.ymax - p.ymin) * scale;
+    const item = labelMap.get(p);
+    const hex = item ? item.hexColor : ((ACI_COLOR_MAP_JS[p.color || 7] || {}).color || '#888');
+    svg += `<rect x="${px.toFixed(1)}" y="${py.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="${hex}" fill-opacity="0.28" stroke="${hex}" stroke-width="1.2"/>`;
+    if (item && pw > 18 && ph > 12) {
+      const cx = (px + pw / 2).toFixed(1), cy = (py + ph / 2).toFixed(1);
+      const fs = Math.max(6, Math.min(13, Math.min(pw, ph) * 0.24));
+      svg += `<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" fill="#1e293b" font-size="${fs.toFixed(1)}" font-weight="800" font-family="monospace">${item.label}</text>`;
+      if (pw > 36 && ph > 26) {
+        svg += `<text x="${cx}" y="${(parseFloat(cy) + fs * 0.95).toFixed(1)}" text-anchor="middle" fill="#475569" font-size="${(fs * 0.68).toFixed(1)}" font-family="monospace">${item.w}\u00d7${item.h}</text>`;
+      }
+    }
+  }
+
+  // Barre d'échelle 1 m
+  const bar = Math.round(1000 * scale);
+  const by = svgH + 14;
+  svg += `<line x1="8" y1="${by}" x2="${8 + bar}" y2="${by}" stroke="#64748b" stroke-width="1.5"/>`;
+  svg += `<line x1="8" y1="${by - 4}" x2="8" y2="${by + 4}" stroke="#64748b" stroke-width="1.5"/>`;
+  svg += `<line x1="${8 + bar}" y1="${by - 4}" x2="${8 + bar}" y2="${by + 4}" stroke="#64748b" stroke-width="1.5"/>`;
+  svg += `<text x="${8 + bar / 2}" y="${by + 12}" text-anchor="middle" fill="#64748b" font-size="9" font-family="sans-serif">1 m</text>`;
+  svg += `<text x="${svgW}" y="${by + 12}" text-anchor="end" fill="#94a3b8" font-size="8" font-family="sans-serif">L=${Math.round(fw)} mm — H=${Math.round(fh)} mm</text>`;
+
+  return `<svg width="${svgW}" height="${svgH + 28}" viewBox="0 0 ${svgW} ${svgH + 28}" style="display:block;max-width:100%;">${svg}</svg>`;
+}
+
+// ── Fixations pour une façade (depuis ossature spatiale) ──────
+function calcFixationFacade(fname, panels, ossProfiles) {
+  const entraxeFix = fixationConfig.entraxeOssature || 600;
+  const minFix = Math.max(1, fixationConfig.minFixOssature || 2);
+  const fixPos = len => Math.max(Math.ceil(len / entraxeFix) + 1, minFix);
+  let fixOmega = 0, fixZed = 0, fixPanneaux = 0;
+  for (const len of ossProfiles.omega) fixOmega += fixPos(len) * 2;
+  for (const len of ossProfiles.zed)   fixZed   += fixPos(len) * 1;
+  if (fixationConfig.trouEnabled) {
+    const cfg = getTrouConfigForFacade(fname);
+    for (const p of panels) {
+      const { holes } = calcHolePositions(Math.round(p.xmax - p.xmin), Math.round(p.ymax - p.ymin), cfg);
+      fixPanneaux += holes.length;
+    }
+  }
+  return { fixOmega, fixZed, fixPanneaux };
+}
+
+// ── Export PDF façade par façade ──────────────────────────────
+function exportPdfFacades() {
+  if (!projectRectsSpatial || !projectRectsSpatial.length) {
+    alert('Importez un DXF d\'abord pour générer le PDF par façade.');
+    return;
+  }
+  const nom  = chantier.nom  || 'Chantier';
+  const date = chantier.date || new Date().toISOString().slice(0, 10);
+
+  const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+  const facadeNames = Object.keys(byFacade).sort();
+  const numbered = buildFacadePanelNumbers();
+
+  let pages = '';
+  for (let fi = 0; fi < facadeNames.length; fi++) {
+    const fname   = facadeNames[fi];
+    const panels  = byFacade[fname];
+    const items   = numbered[fname] || [];
+    const totalSurf = (panels.reduce((s, p) => s + (p.xmax - p.xmin) * (p.ymax - p.ymin), 0) / 1e6).toFixed(2);
+
+    // Ossature
+    const ossProfiles = computeOssatFacadeProfiles(fname, panels);
+    const omML = (ossProfiles.omega.reduce((s, l) => s + l, 0) / 1000).toFixed(2);
+    const zdML = (ossProfiles.zed.reduce((s,   l) => s + l, 0) / 1000).toFixed(2);
+    const gbLen = arr => { const m = {}; for (const l of arr) m[l] = (m[l]||0)+1; return Object.entries(m).sort((a,b)=>+b[0]-+a[0]); };
+    const omRows = gbLen(ossProfiles.omega).map(([l,q]) => `<tr><td>Oméga</td><td class="mono">${l} mm</td><td>×${q}</td><td class="mono">${(+l*q/1000).toFixed(2)} ml</td></tr>`).join('');
+    const zdRows = gbLen(ossProfiles.zed).map(([l,q])   => `<tr><td>Zed</td><td class="mono">${l} mm</td><td>×${q}</td><td class="mono">${(+l*q/1000).toFixed(2)} ml</td></tr>`).join('');
+
+    // Fixations
+    const { fixOmega, fixZed, fixPanneaux } = calcFixationFacade(fname, panels, ossProfiles);
+
+    // Débit table
+    const debitRows = items.map(item =>
+      `<tr><td class="mono bold">${item.label}</td><td class="mono">${item.w}×${item.h}</td><td>${(item.w*item.h/1e6).toFixed(4)}</td><td><span class="dot" style="background:${item.hexColor}"></span>${item.colorName}</td></tr>`
+    ).join('');
+
+    // SVG façade
+    const facadeSvg = buildFacadeSvg(panels, items);
+
+    pages += `
+    <div class="page${fi > 0 ? ' page-break' : ''}">
+      <div class="page-header">
+        <div>
+          <div class="page-title">${fname}</div>
+          <div class="page-sub">${nom}</div>
+        </div>
+        <div class="page-meta">
+          <div>${date}</div>
+          <div>${items.length} panneau(x) — ${totalSurf} m²</div>
+        </div>
+      </div>
+
+      <div class="section-title">Plan de calepinage</div>
+      <div class="svg-wrap">${facadeSvg}</div>
+
+      <div class="two-col">
+        <div class="col">
+          <div class="section-title">Ossature</div>
+          <table class="data-table">
+            <thead><tr><th>Profil</th><th>Longueur</th><th>Qté</th><th>ML</th></tr></thead>
+            <tbody>${omRows}${zdRows}</tbody>
+            <tfoot>
+              <tr class="total-row"><td colspan="3">Total Oméga</td><td class="mono">${omML} ml</td></tr>
+              <tr class="total-row"><td colspan="3">Total Zed</td><td class="mono">${zdML} ml</td></tr>
+            </tfoot>
+          </table>
+        </div>
+        <div class="col">
+          <div class="section-title">Fixations</div>
+          <table class="data-table">
+            <thead><tr><th>Type</th><th>Quantité</th></tr></thead>
+            <tbody>
+              <tr><td>Fixations Oméga</td><td class="mono bold">${fixOmega}</td></tr>
+              <tr><td>Fixations Zed</td><td class="mono bold">${fixZed}</td></tr>
+              ${fixationConfig.trouEnabled ? `<tr><td>Fixations panneaux</td><td class="mono bold">${fixPanneaux}</td></tr>` : ''}
+            </tbody>
+            <tfoot>
+              <tr class="total-row"><td>TOTAL</td><td class="mono">${fixOmega + fixZed + fixPanneaux}</td></tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+      <div class="section-title" style="margin-top:14px;">Liste de débit — ${fname}</div>
+      <table class="data-table" style="width:100%">
+        <thead><tr><th>N° repère</th><th>Dimensions (mm)</th><th>Surf. (m²)</th><th>Type</th></tr></thead>
+        <tbody>${debitRows}</tbody>
+      </table>
+    </div>`;
+  }
+
+  const css = `
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1e293b; margin: 0; padding: 0; }
+    .page { padding: 12mm 14mm; }
+    .page-break { page-break-before: always; }
+    .page-header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2.5px solid #1e293b; padding-bottom: 8px; margin-bottom: 14px; }
+    .page-title { font-size: 20px; font-weight: 800; letter-spacing: 1px; }
+    .page-sub { font-size: 13px; color: #475569; margin-top: 2px; }
+    .page-meta { text-align: right; font-size: 11px; color: #64748b; line-height: 1.6; }
+    .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: #475569; border-bottom: 1px solid #e2e8f0; margin: 12px 0 6px; padding-bottom: 3px; }
+    .svg-wrap { margin: 6px 0 10px; }
+    .two-col { display: flex; gap: 18px; margin-top: 4px; }
+    .col { flex: 1; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+    .data-table th { background: #1e293b; color: #fff; padding: 4px 7px; text-align: left; font-weight: 600; }
+    .data-table td { padding: 3px 7px; border-bottom: 1px solid #e2e8f0; }
+    .data-table tr:nth-child(even) td { background: #f8fafc; }
+    .data-table tfoot .total-row td { background: #f0fdf4; font-weight: 700; border-top: 1.5px solid #166534; color: #166534; }
+    .mono { font-family: monospace; }
+    .bold { font-weight: 700; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+    @media print { body { font-size: 10px; } .page { padding: 8mm 10mm; } }
+  `;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>Calepinage façades — ${nom}</title>
+    <style>${css}</style>
+  </head><body>${pages}<script>window.onload=()=>window.print();<\/script></body></html>`;
+
+  window.open(URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' })), '_blank');
 }
 
 function exportPDF() {
