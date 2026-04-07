@@ -594,6 +594,12 @@
       <table class="order-table" id="orderTable"></table>
     </div>
 
+    <!-- PLAN DE REPÉRAGE -->
+    <div class="card" id="reperageCard" style="display:none;">
+      <div class="card-title">Plan de repérage</div>
+      <div id="reperageContent"></div>
+    </div>
+
     <!-- PROJECT SAVE/LOAD -->
     <div class="card">
       <div class="card-title">Projet / Chantier</div>
@@ -2098,6 +2104,44 @@ function renderAllResults() {
   tableHTML += `<tr><td colspan="4" style="text-align:right;color:var(--text3);">TOTAL</td><td class="no-wrap" style="text-align:center;">${grandTotalPanels}</td><td class="no-wrap">${(grandTotalStock/1e6).toFixed(2)} m&sup2;</td><td class="no-wrap" style="color:var(--yellow);font-weight:700;">${hasPrice ? grandTotalPrice.toFixed(2)+' €' : '—'}</td></tr>`;
   document.getElementById('orderTable').innerHTML = tableHTML;
   document.getElementById('orderCard').style.display = 'block';
+  renderReperage();
+}
+
+function renderReperage() {
+  const card = document.getElementById('reperageCard');
+  const content = document.getElementById('reperageContent');
+  if (!card || !content) return;
+  if (!projectRectsSpatial || !projectRectsSpatial.length) {
+    card.style.display = 'none';
+    return;
+  }
+  const numbered = buildFacadePanelNumbers();
+  const facadeNames = Object.keys(numbered).sort();
+  if (!facadeNames.length) { card.style.display = 'none'; return; }
+
+  let html = '';
+  for (const fname of facadeNames) {
+    const items = numbered[fname];
+    const totalSurf = (items.reduce((s, it) => s + it.w * it.h, 0) / 1e6).toFixed(3);
+    html += `<div style="margin-bottom:18px;">
+      <div style="font-weight:700;font-size:12px;margin-bottom:6px;color:var(--text2);">${fname} — ${items.length} panneau(x) — ${totalSurf} m²</div>
+      <table class="order-table" style="width:100%;font-size:11px;">
+        <thead><tr>
+          <th>N°</th><th>L (mm)</th><th>H (mm)</th><th>Type</th>
+        </tr></thead>
+        <tbody>`;
+    for (const item of items) {
+      html += `<tr>
+        <td class="mono" style="font-weight:700;">${item.label}</td>
+        <td class="mono">${item.w}</td>
+        <td class="mono">${item.h}</td>
+        <td style="font-size:10px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${item.hexColor};margin-right:4px;vertical-align:middle;"></span>${item.colorName}</td>
+      </tr>`;
+    }
+    html += `</tbody></table></div>`;
+  }
+  content.innerHTML = html;
+  card.style.display = '';
 }
 
 function renderPanelCard(panel, colorMap, group, subsectionColorMap) {
@@ -2559,6 +2603,43 @@ function exportExcel() {
     return `<Worksheet ss:Name="Pliages"><Table ss:DefaultColumnWidth="110" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
   }
 
+  // ── Onglet Repérage ──────────────────────────────────────────
+  function sheetReperage() {
+    const rows = [];
+    rows.push(R(C(`${nom} — Plan de repérage`, 'sh1'), ...Array(5).fill(Bl('sh1'))));
+    rows.push(R(C('Date :', 'sh2'), C(date, 'sh2'), ...Array(4).fill(Bl('sh2'))));
+    rows.push(Sp());
+
+    if (!projectRectsSpatial || !projectRectsSpatial.length) {
+      rows.push(R(C('Aucune donnée DXF disponible pour le plan de repérage.')));
+      return `<Worksheet ss:Name="Repérage"><Table ss:DefaultColumnWidth="120" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
+    }
+
+    rows.push(R(C('N° repère','sh2'), C('Façade','sh2'), C('L (mm)','sh2'), C('H (mm)','sh2'), C('Surf. (m²)','sh2'), C('Type','sh2')));
+
+    const numbered = buildFacadePanelNumbers();
+    const facadeNames = Object.keys(numbered).sort();
+    let grandSurf = 0;
+
+    for (const fname of facadeNames) {
+      const items = numbered[fname];
+      rows.push(Sp());
+      rows.push(R(C(fname,'sfac'), ...Array(5).fill(Bl('sfac'))));
+      let facSurf = 0;
+      for (const item of items) {
+        const surf = +(item.w * item.h / 1e6).toFixed(4);
+        facSurf += surf;
+        rows.push(R(C(item.label), C(fname), C(item.w), C(item.h), C(surf,'sn3'), C(item.colorName)));
+      }
+      rows.push(R(C(`Sous-total ${fname}`,'ssub'), Bl('ssub'), Bl('ssub'), Bl('ssub'), C(+facSurf.toFixed(4),'ssub4'), Bl('ssub')));
+      grandSurf += facSurf;
+    }
+    rows.push(Sp());
+    rows.push(R(C('TOTAL GÉNÉRAL','sgt'), ...Array(3).fill(Bl('sgt')), C(+grandSurf.toFixed(4),'sgt4'), Bl('sgt')));
+
+    return `<Worksheet ss:Name="Repérage"><Table ss:DefaultColumnWidth="120" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
+  }
+
   // ── Assemblage et téléchargement ─────────────────────────────
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <?mso-application progid="Excel.Sheet"?>
@@ -2567,6 +2648,7 @@ function exportExcel() {
   xmlns:x="urn:schemas-microsoft-com:office:excel"
   xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
   ${STYLES}
+  ${sheetReperage()}
   ${sheetPanneaux()}
   ${sheetOssature()}
   ${sheetFixations()}
@@ -2772,6 +2854,7 @@ function applyProjectData(data) {
   allResults = null;
   document.getElementById('summaryCard').style.display = 'none';
   document.getElementById('orderCard').style.display = 'none';
+  renderReperage();
   document.getElementById('mainContent').innerHTML =
     '<div class="card placeholder"><div class="icon">&#9670;</div><div class="text">Projet charg\u00e9 \u2014 clique sur <span style="color:var(--accent);font-weight:700;">&#9654; OPTIMISER TOUT</span></div></div>';
   renderGroupTabs();
@@ -6286,6 +6369,44 @@ function downloadDxf(content, filename) {
   URL.revokeObjectURL(a.href);
 }
 
+// ── Plan de repérage — numérotation par façade ───────────────
+// Retourne { facadeName: [ { panel, label, w, h, colorAci, hexColor, colorName } ] }
+// Tri : rangées bas→haut, gauche→droite dans chaque rangée (ordre de pose)
+function buildFacadePanelNumbers() {
+  if (!projectRectsSpatial || !projectRectsSpatial.length) return {};
+  const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+  const ROW_SNAP = 50; // panneaux à ±50mm de ymin = même rangée
+  const result = {};
+  for (const [fname, panels] of Object.entries(byFacade)) {
+    const sorted = [...panels].sort((a, b) => {
+      const ya = Math.round(a.ymin / ROW_SNAP) * ROW_SNAP;
+      const yb = Math.round(b.ymin / ROW_SNAP) * ROW_SNAP;
+      if (ya !== yb) return ya - yb;   // bas → haut
+      return a.xmin - b.xmin;          // gauche → droite
+    });
+    result[fname] = sorted.map((p, i) => {
+      const aci = p.color || 7;
+      const aciInfo = ACI_COLOR_MAP_JS[aci] || { name: 'Inconnu', color: '#888888' };
+      const grp = groups.find(g => {
+        if (g.colorAci != null) return g.colorAci === aci;
+        for (const [a, info] of Object.entries(ACI_COLOR_MAP_JS))
+          if (info.color === g.color && parseInt(a) === aci) return true;
+        return false;
+      });
+      return {
+        panel: p,
+        label: 'P' + (i + 1),
+        w: Math.round(p.xmax - p.xmin),
+        h: Math.round(p.ymax - p.ymin),
+        colorAci: aci,
+        hexColor: aciInfo.color,
+        colorName: grp ? grp.name : aciInfo.name,
+      };
+    });
+  }
+  return result;
+}
+
 // Group rects by facade and return sorted facade data
 function groupRectsByFacade(rectsSpatial, facadeLabels) {
   const fLabels = facadeLabels && facadeLabels.length ? facadeLabels : [[[0, 0], 'Facade']];
@@ -6550,12 +6671,13 @@ function exportDxfPanneaux() {
     const titleH = Math.max(200, facH * 0.05);
     dxf.addText(titleX, fymin - TITLE_MARGIN - titleH * 0.5, titleH, fname, 'TITRE', 7, 1);
 
-    // Sort panels: left to right, bottom to top
+    // Tri identique à buildFacadePanelNumbers : rangées bas→haut, gauche→droite
+    const ROW_SNAP = 50;
     const sorted = [...panels].sort((a, b) => {
-      const xa = Math.round(a.xmin / 50) * 50;
-      const xb = Math.round(b.xmin / 50) * 50;
-      if (xa !== xb) return xa - xb;
-      return a.ymin - b.ymin;
+      const ya = Math.round(a.ymin / ROW_SNAP) * ROW_SNAP;
+      const yb = Math.round(b.ymin / ROW_SNAP) * ROW_SNAP;
+      if (ya !== yb) return ya - yb;
+      return a.xmin - b.xmin;
     });
 
     const trouCfg = fixationConfig.trouEnabled ? getTrouConfigForFacade(fname) : null;
