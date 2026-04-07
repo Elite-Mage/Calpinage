@@ -594,6 +594,15 @@
       <table class="order-table" id="orderTable"></table>
     </div>
 
+    <!-- ALERTES DXF -->
+    <div id="anomaliesCard" style="display:none;margin-bottom:10px;border-radius:8px;overflow:hidden;border:1.5px solid var(--anomaly-border,#f59e0b);">
+      <div id="anomaliesHeader" style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--anomaly-bg,#fef3c7);cursor:pointer;" onclick="document.getElementById('anomaliesBody').style.display=document.getElementById('anomaliesBody').style.display==='none'?'':'none'">
+        <span id="anomaliesTitle" style="font-weight:700;font-size:12px;color:var(--anomaly-color,#92400e);">⚠ Anomalies DXF</span>
+        <span style="font-size:10px;color:var(--anomaly-color,#92400e);">▾ détails</span>
+      </div>
+      <div id="anomaliesBody" style="padding:8px 12px;background:var(--card-bg);font-size:11px;line-height:1.7;"></div>
+    </div>
+
     <!-- PLAN DE REPÉRAGE + LISTE DE DÉBIT -->
     <div class="card" id="reperageCard" style="display:none;">
       <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
@@ -2108,6 +2117,7 @@ function renderAllResults() {
   document.getElementById('orderTable').innerHTML = tableHTML;
   document.getElementById('orderCard').style.display = 'block';
   renderReperage();
+  renderAnomalies();
 }
 
 function renderReperage() {
@@ -2144,6 +2154,62 @@ function renderReperage() {
     html += `</tbody></table></div>`;
   }
   content.innerHTML = html;
+  card.style.display = '';
+}
+
+function renderAnomalies() {
+  const card = document.getElementById('anomaliesCard');
+  const title = document.getElementById('anomaliesTitle');
+  const body  = document.getElementById('anomaliesBody');
+  const header = document.getElementById('anomaliesHeader');
+  if (!card) return;
+
+  if (!projectRectsSpatial || !projectRectsSpatial.length) {
+    card.style.display = 'none';
+    return;
+  }
+
+  const anomalies = detectDxfAnomalies(projectRectsSpatial);
+  if (!anomalies.length) {
+    card.style.display = 'none';
+    return;
+  }
+
+  // Gravité maximale → couleur de la card
+  const hasError = anomalies.some(a => a.severity === 'error');
+  const hasWarn  = !hasError && anomalies.some(a => a.severity === 'warning');
+  if (hasError) {
+    card.style.setProperty('--anomaly-border', '#ef4444');
+    card.style.setProperty('--anomaly-bg',     '#fee2e2');
+    card.style.setProperty('--anomaly-color',  '#991b1b');
+  } else if (hasWarn) {
+    card.style.setProperty('--anomaly-border', '#f59e0b');
+    card.style.setProperty('--anomaly-bg',     '#fef3c7');
+    card.style.setProperty('--anomaly-color',  '#92400e');
+  } else {
+    card.style.setProperty('--anomaly-border', '#3b82f6');
+    card.style.setProperty('--anomaly-bg',     '#eff6ff');
+    card.style.setProperty('--anomaly-color',  '#1e40af');
+  }
+
+  const icons = { error: '🔴', warning: '🟠', info: '🔵' };
+  const counts = {};
+  for (const a of anomalies) counts[a.type] = (counts[a.type] || 0) + 1;
+
+  const typeLabels = {
+    tiny: 'petit(s)', duplicate: 'doublon(s)', overlap: 'superposition(s)',
+    wide_joint: 'joint(s) large(s)', large: 'grand(s)',
+  };
+  const summary = Object.entries(counts)
+    .map(([t, n]) => `${n} ${typeLabels[t] || t}`)
+    .join(', ');
+
+  title.textContent = `${hasError ? '🔴' : '🟠'} ${anomalies.length} anomalie(s) — ${summary}`;
+
+  body.innerHTML = anomalies.map(a =>
+    `<div style="margin:2px 0;">${icons[a.severity] || '⚪'} ${a.msg}</div>`
+  ).join('');
+
   card.style.display = '';
 }
 
@@ -2949,6 +3015,7 @@ function applyProjectData(data) {
   document.getElementById('summaryCard').style.display = 'none';
   document.getElementById('orderCard').style.display = 'none';
   renderReperage();
+  renderAnomalies();
   document.getElementById('mainContent').innerHTML =
     '<div class="card placeholder"><div class="icon">&#9670;</div><div class="text">Projet charg\u00e9 \u2014 clique sur <span style="color:var(--accent);font-weight:700;">&#9654; OPTIMISER TOUT</span></div></div>';
   renderGroupTabs();
@@ -6463,6 +6530,104 @@ function downloadDxf(content, filename) {
   URL.revokeObjectURL(a.href);
 }
 
+// ── Détection anomalies DXF ───────────────────────────────────
+// Retourne [ { type, severity, msg } ]
+// severity : 'error' (rouge) | 'warning' (orange) | 'info' (bleu)
+function detectDxfAnomalies(rects) {
+  const anomalies = [];
+  if (!rects || !rects.length) return anomalies;
+
+  const TOL = 5; // tolérance spatiale mm
+
+  // ── 1. Panneaux trop petits (<100mm) ──────────────────────────
+  const tiny = rects.filter(p => {
+    const w = Math.round(p.xmax - p.xmin);
+    const h = Math.round(p.ymax - p.ymin);
+    return w < 100 || h < 100;
+  });
+  if (tiny.length) {
+    tiny.forEach(p => {
+      const w = Math.round(p.xmax - p.xmin), h = Math.round(p.ymax - p.ymin);
+      anomalies.push({ type: 'tiny', severity: 'warning',
+        msg: `Panneau ${w}\u00d7${h} mm — dimension inférieure à 100 mm` });
+    });
+  }
+
+  // ── 2. Doublons exacts (même position ±5mm) ───────────────────
+  const seen = new Set();
+  for (let i = 0; i < rects.length; i++) {
+    for (let j = i + 1; j < rects.length; j++) {
+      const a = rects[i], b = rects[j];
+      if (Math.abs(a.xmin - b.xmin) < TOL && Math.abs(a.xmax - b.xmax) < TOL &&
+          Math.abs(a.ymin - b.ymin) < TOL && Math.abs(a.ymax - b.ymax) < TOL) {
+        const key = `${i}-${j}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          const w = Math.round(a.xmax - a.xmin), h = Math.round(a.ymax - a.ymin);
+          anomalies.push({ type: 'duplicate', severity: 'error',
+            msg: `Doublon exact : ${w}\u00d7${h} mm à X=${Math.round(a.xmin)}, Y=${Math.round(a.ymin)}` });
+        }
+      }
+    }
+  }
+
+  // ── 3. Superpositions (recouvrement >5mm dans les deux axes) ──
+  for (let i = 0; i < rects.length; i++) {
+    for (let j = i + 1; j < rects.length; j++) {
+      const a = rects[i], b = rects[j];
+      const ox = Math.min(a.xmax, b.xmax) - Math.max(a.xmin, b.xmin);
+      const oy = Math.min(a.ymax, b.ymax) - Math.max(a.ymin, b.ymin);
+      if (ox > TOL && oy > TOL) {
+        // Ignorer si déjà signalé comme doublon
+        const isdup = Math.abs(a.xmin - b.xmin) < TOL && Math.abs(a.xmax - b.xmax) < TOL &&
+                      Math.abs(a.ymin - b.ymin) < TOL && Math.abs(a.ymax - b.ymax) < TOL;
+        if (!isdup) {
+          const wa = Math.round(a.xmax - a.xmin), ha = Math.round(a.ymax - a.ymin);
+          const wb = Math.round(b.xmax - b.xmin), hb = Math.round(b.ymax - b.ymin);
+          anomalies.push({ type: 'overlap', severity: 'error',
+            msg: `Superposition ${Math.round(ox)}\u00d7${Math.round(oy)} mm entre panneau ${wa}\u00d7${ha} et ${wb}\u00d7${hb}` });
+        }
+      }
+    }
+  }
+
+  // ── 4. Joints horizontaux trop larges (>50mm entre voisins) ──
+  // Détecte des panneaux dans la même rangée (même niveau Y) séparés de >50mm
+  const ROW_SNAP = 50;
+  const byRow = {};
+  for (const p of rects) {
+    const rowKey = Math.round(p.ymin / ROW_SNAP) * ROW_SNAP;
+    if (!byRow[rowKey]) byRow[rowKey] = [];
+    byRow[rowKey].push(p);
+  }
+  for (const rowPanels of Object.values(byRow)) {
+    const sorted = [...rowPanels].sort((a, b) => a.xmin - b.xmin);
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const a = sorted[i], b = sorted[i + 1];
+      // Voisins seulement si ils se recouvrent en Y
+      const yOverlap = Math.min(a.ymax, b.ymax) - Math.max(a.ymin, b.ymin);
+      if (yOverlap < 50) continue; // pas vraiment dans la même rangée
+      const gap = Math.round(b.xmin - a.xmax);
+      if (gap > 50 && gap < 800) { // >50mm = anomalie, <800mm = pas une ouverture intentionnelle
+        const wa = Math.round(a.xmax - a.xmin), wb = Math.round(b.xmax - b.xmin);
+        anomalies.push({ type: 'wide_joint', severity: 'warning',
+          msg: `Joint horizontal ${gap} mm entre voisins (${wa} mm et ${wb} mm) — joint attendu 5-20 mm` });
+      }
+    }
+  }
+
+  // ── 5. Panneaux anormalement grands (>5000mm) ─────────────────
+  for (const p of rects) {
+    const w = Math.round(p.xmax - p.xmin), h = Math.round(p.ymax - p.ymin);
+    if (w > 5000 || h > 5000) {
+      anomalies.push({ type: 'large', severity: 'info',
+        msg: `Panneau très grand : ${w}\u00d7${h} mm — vérifier le DXF` });
+    }
+  }
+
+  return anomalies;
+}
+
 // ── Liste de débit atelier ────────────────────────────────────
 // Retourne [ { repere, facade, l, h, surf, type, reference, coloris, epaisseur } ]
 // Triée par matière → façade → surface décroissante (regroupement pour découpe)
@@ -6640,8 +6805,11 @@ function exportDxfPliage() {
   const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
   const facadeNames = Object.keys(byFacade).sort();
   const TITLE_MARGIN = 300;
-  const titleHEst = 200;
-  const yOffsets = computeFacadeRowOffsets(facadeNames, byFacade, TITLE_MARGIN + titleHEst + 400);
+  // Hauteur réelle des titres = max(150, h*0.04) — doit correspondre à ce qu'on dessine
+  const titleHEstPliage = Math.max(150, 0.04 * Math.max(...facadeNames.map(fn => {
+    const ps = byFacade[fn]; return Math.max(...ps.map(p => p.ymax)) - Math.min(...ps.map(p => p.ymin));
+  })));
+  const yOffsets = computeFacadeRowOffsets(facadeNames, byFacade, TITLE_MARGIN + titleHEstPliage + 400);
 
   // Global extents
   let gxmin = Infinity, gxmax = -Infinity, gymin = Infinity, gymax = -Infinity;
