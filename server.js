@@ -27,6 +27,17 @@ db.exec(`
 // ─── EXPRESS ─────────────────────────────────────────────────────────────────
 const app = express();
 app.use(express.json({ limit: '5mb' }));
+
+// Force le rechargement de index.html à chaque visite (pas de cache navigateur)
+app.get('/', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+app.get('/index.html', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
 app.use(express.static(__dirname));
 
 // List projects
