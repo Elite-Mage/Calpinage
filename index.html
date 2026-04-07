@@ -920,6 +920,11 @@
     </div>
 
     <div class="card">
+      <div class="card-title">Vue</div>
+      <button class="btn-secondary" onclick="v3dResetCamera()" style="width:100%;margin-bottom:8px;">&#8635; Réinitialiser vue</button>
+    </div>
+
+    <div class="card">
       <div class="card-title">Export</div>
       <button class="btn" onclick="exportDxf3D()" style="width:100%;margin-bottom:8px;">&#8595; Exporter DXF 3D</button>
     </div>
@@ -5746,7 +5751,7 @@ function renderFixation() {
 // ============================================================
 
 // Camera state for interactive canvas
-let v3dCam = { theta: -25, phi: 20, scale: 1, panX: 0, panY: 0, autoScale: 0.08 };
+let v3dCam = { theta: -35, phi: 25, scale: 1, panX: 0, panY: 0, autoScale: 0.08 };
 let v3dScene = [];  // pre-built polygons {verts:[{wx,wy,wz}], fill, stroke, order}
 
 function vue3dChanged() {
@@ -5778,9 +5783,28 @@ function vue3dFacadeChanged(idx, fname) {
 // Compute 3D world origin for each facade (auto-chain if not manual)
 function computeFacadeOrigins(facadeNames, facadeWidths) {
   const result = {};
+
+  // Check if user has manually set any angle
+  const anyManual = facadeNames.some(fn => (vue3dConfig.facades[fn] || {}).angle != null);
+
+  // Auto-mode: interleave large/small facades so opposite sides have matching widths
+  // Sorted descending: [L1, L2, S1, S2] → interleaved: [L1, S1, L2, S2]
+  let orderedNames;
+  if (!anyManual) {
+    const sorted = [...facadeNames].sort((a, b) => (facadeWidths[b] || 0) - (facadeWidths[a] || 0));
+    const half = Math.ceil(sorted.length / 2);
+    orderedNames = [];
+    for (let i = 0; i < half; i++) {
+      orderedNames.push(sorted[i]);
+      if (i + half < sorted.length) orderedNames.push(sorted[i + half]);
+    }
+  } else {
+    orderedNames = facadeNames;
+  }
+
   let cx = 0, cy = 0;
-  for (let i = 0; i < facadeNames.length; i++) {
-    const fname = facadeNames[i];
+  for (let i = 0; i < orderedNames.length; i++) {
+    const fname = orderedNames[i];
     const cfg = vue3dConfig.facades[fname] || {};
     const angle = (cfg.angle != null ? cfg.angle : i * 90) * Math.PI / 180;
     const ox = cfg.originX != null ? cfg.originX : cx;
@@ -5791,6 +5815,11 @@ function computeFacadeOrigins(facadeNames, facadeWidths) {
     cy = oy + Math.sin(angle) * w;
   }
   return result;
+}
+
+function v3dResetCamera() {
+  v3dCam.theta = -35; v3dCam.phi = 25; v3dCam.scale = 1; v3dCam.panX = 0; v3dCam.panY = 0;
+  buildV3DScene(); drawV3D();
 }
 
 // Project a 3D world point to 2D screen using camera angles
@@ -5922,18 +5951,19 @@ function buildV3DScene() {
       v3dScene.push({ verts, fill: c, stroke, order: 2 });
     }
   }
-  // Auto-fit scale: estimate world extent
-  let wxMin = Infinity, wxMax = -Infinity, wzMin = Infinity, wzMax = -Infinity;
+  // Auto-fit scale: estimate world extent across all axes
+  let wxMin = Infinity, wxMax = -Infinity, wyMin = Infinity, wyMax = -Infinity, wzMax = -Infinity;
   for (const poly of v3dScene) {
     for (const v of poly.verts) {
-      wxMin = Math.min(wxMin, v.wx, v.wy);
-      wxMax = Math.max(wxMax, v.wx, v.wy);
-      wzMin = Math.min(wzMin, v.wz);
+      wxMin = Math.min(wxMin, v.wx); wxMax = Math.max(wxMax, v.wx);
+      wyMin = Math.min(wyMin, v.wy); wyMax = Math.max(wyMax, v.wy);
       wzMax = Math.max(wzMax, v.wz);
     }
   }
-  const extent = Math.max(wxMax - wxMin, wzMax - wzMin, 1);
-  v3dCam.autoScale = 400 / extent;
+  const diagXY = Math.sqrt(Math.pow(wxMax - wxMin, 2) + Math.pow(wyMax - wyMin, 2));
+  const extent = Math.max(diagXY, wzMax, 1);
+  v3dCam.autoScale = 350 / extent;
+  v3dCam.scale = 1;  // reset zoom on scene rebuild
 }
 
 // 3D → isometric screen projection
