@@ -7633,6 +7633,7 @@ function exportDxfOssature() {
   dxf.addLayer('ZED_BORD', 6);
   dxf.addLayer('FIXATION', 3);
   dxf.addLayer('FIXATION_OSS', 1);
+  dxf.addLayer('OMEGA_AXES', 5);
   dxf.addLayer('TITRE', 7);
   dxf.addLayer('TEXTE', 7);
 
@@ -7964,6 +7965,29 @@ function exportDxfOssature() {
           if (prol > 0 && gs <= fymin + 5) violetXsSet.add(jx);
           if (prolH > 0 && ge >= fymax - 5) violetXsSetHaut.add(jx);
         }
+      }
+    }
+
+    // ── Axes omégas (option) ──
+    if (ossatureConfig.showOmegaAxes) {
+      const omegaXsSorted = Object.keys(junctions).map(Number).sort((a, b) => a - b);
+      const axisTextH = Math.max(80, titleH * 0.4);
+      const dimY = ossTop + 200 + axisTextH;
+      for (const jx of omegaXsSorted) {
+        // Trait d'axe vertical sur toute la hauteur ossature
+        dxf.addLine(jx, ossBottom, jx, ossTop, 'OMEGA_AXES', 5);
+        // Tiret sur la ligne de cote
+        dxf.addLine(jx, dimY - axisTextH * 0.6, jx, dimY + axisTextH * 0.6, 'OMEGA_AXES', 5);
+      }
+      // Cotes d'entraxe entre omégas consécutifs
+      for (let i = 0; i < omegaXsSorted.length - 1; i++) {
+        const x1 = omegaXsSorted[i], x2 = omegaXsSorted[i + 1];
+        const dist = Math.round(x2 - x1);
+        const midX = (x1 + x2) / 2;
+        // Ligne de cote horizontale
+        dxf.addLine(x1, dimY, x2, dimY, 'OMEGA_AXES', 5);
+        // Texte entraxe au centre
+        dxf.addText(midX, dimY + axisTextH * 0.8, axisTextH, dist + ' mm', 'OMEGA_AXES', 5, 1);
       }
     }
 
