@@ -754,21 +754,16 @@
       <div class="card-title">Fixation ossature</div>
       <div class="oss-config">
         <div>
-          <label>Entraxe fixations (mm)</label>
-          <input type="number" id="fixEntraxeOss" value="600" min="10" max="3000" step="10"
-            oninput="fixationConfig.entraxeOssature=+this.value; renderFixation(); scheduleSave();">
+          <label>Vis / longeron — Zed</label>
+          <input type="number" id="fixNFixZed" value="1" min="1" max="5" step="1"
+            title="Nombre de vis par longeron pour les profils Zed"
+            oninput="fixationConfig.nFixZed=+this.value; renderFixation(); scheduleSave();">
         </div>
         <div>
-          <label>Min. fix. / pièce horiz.</label>
-          <input type="number" id="fixMinOssH" value="2" min="1" max="20" step="1"
-            title="Minimum de fixations par pièce horizontale (oméga et zed)"
-            oninput="fixationConfig.minFixOssatureH=+this.value; renderFixation(); scheduleSave();">
-        </div>
-        <div>
-          <label>Min. fix. / pièce vert.</label>
-          <input type="number" id="fixMinOssV" value="2" min="1" max="20" step="1"
-            title="Minimum de fixations par pièce verticale (oméga et zed)"
-            oninput="fixationConfig.minFixOssatureV=+this.value; renderFixation(); scheduleSave();">
+          <label>Vis / longeron — Oméga</label>
+          <input type="number" id="fixNFixOmega" value="2" min="1" max="5" step="1"
+            title="Nombre de vis par longeron pour les profils Oméga"
+            oninput="fixationConfig.nFixOmega=+this.value; renderFixation(); scheduleSave();">
         </div>
         <div>
           <label>Prix / fix. ossature (€/u)</label>
@@ -1041,9 +1036,8 @@ let devisConfig = { prixMO: '' };
 let fixationConfig = {
   prixFixation: '',
   prixFixationOss: '',
-  entraxeOssature: 600,
-  minFixOssatureH: 2,   // min fixations / pièce oméga (horizontal, sur le mur)
-  minFixOssatureV: 2,   // min fixations / pièce zed   (vertical,   sur le mur)
+  nFixZed: 1,    // nb vis par longeron pour les profils Zed
+  nFixOmega: 2,  // nb vis par longeron pour les profils Oméga
   trouEnabled: false,
   trouApplyAll: true,
   trouGlobal: { corner: 'bl', offsetX: 50, offsetY: 50, diameter: 8, entraxeH: 600, entraxeV: 600, minH: 1, minV: 1 },
@@ -2435,14 +2429,35 @@ function buildFacadeSvg(panels, items) {
 
 // ── Fixations pour une façade (depuis ossature spatiale) ──────
 function calcFixationFacade(fname, panels, ossProfiles) {
-  const entraxeFix = fixationConfig.entraxeOssature || 600;
-  const minFixH = Math.max(1, fixationConfig.minFixOssatureH ?? fixationConfig.minFixOssature ?? 2);
-  const minFixV = Math.max(1, fixationConfig.minFixOssatureV ?? fixationConfig.minFixOssature ?? 2);
-  const minFix  = Math.max(minFixH, minFixV);
-  const fixPos  = len => Math.max(Math.ceil(len / entraxeFix) + 1, minFix);
+  const nFixOmega = Math.max(1, fixationConfig.nFixOmega ?? 2);
+  const nFixZed   = Math.max(1, fixationConfig.nFixZed   ?? 1);
+
+  // Positions des longerons : bord bas + joints horizontaux + bord haut
+  let fymin = Infinity, fymax = -Infinity;
+  for (const p of panels) { fymin = Math.min(fymin, p.ymin); fymax = Math.max(fymax, p.ymax); }
+  const prol  = (ossatureConfig.prolongementEnabled  && ossatureConfig.prolongement  > 0) ? ossatureConfig.prolongement  : 0;
+  const prolH = (ossatureConfig.prolongementHautEnabled && ossatureConfig.prolongementHaut > 0) ? ossatureConfig.prolongementHaut : 0;
+  const ossBottom = fymin - prol, ossTop = fymax + prolH;
+  const MAX_GAP = 20;
+  const jointSet = new Set();
+  for (const p of panels) for (const q of panels) {
+    if (q === p) continue;
+    const g = q.ymin - p.ymax;
+    if (g >= 5 && g <= MAX_GAP && p.xmax > q.xmin + 5 && q.xmax > p.xmin + 5)
+      jointSet.add(Math.round((p.ymax + q.ymin) / 2));
+  }
+  const longeronYs = [ossBottom, ...[...jointSet].sort((a,b) => a-b), ossTop];
+
+  // Nb de longerons traversés par un segment de longueur len (depuis ossBottom)
+  function nLongerons(len) {
+    let n = 0;
+    for (const y of longeronYs) if (y - ossBottom <= len + 10) n++;
+    return Math.max(2, n);
+  }
+
   let fixOmega = 0, fixZed = 0, fixPanneaux = 0;
-  for (const len of ossProfiles.omega) fixOmega += fixPos(len);
-  for (const len of ossProfiles.zed)   fixZed   += fixPos(len);
+  for (const len of ossProfiles.omega) fixOmega += nFixOmega * nLongerons(len);
+  for (const len of ossProfiles.zed)   fixZed   += nFixZed   * nLongerons(len);
   if (fixationConfig.trouEnabled) {
     const cfg = getTrouConfigForFacade(fname);
     for (const p of panels) {
@@ -3199,20 +3214,16 @@ function applyProjectData(data) {
   }
   if (data.fixationConfig) {
     fixationConfig = { ...fixationConfig, ...data.fixationConfig };
-    // Migration : ancien champ minFixOssature → nouveaux minFixOssatureH/V
-    if (fixationConfig.minFixOssature != null && fixationConfig.minFixOssatureH == null) {
-      fixationConfig.minFixOssatureH = fixationConfig.minFixOssature;
-      fixationConfig.minFixOssatureV = fixationConfig.minFixOssature;
-    }
+    // Migration : anciens champs entraxe/minFix → nouveaux nFixZed/nFixOmega
+    if (fixationConfig.nFixZed == null)   fixationConfig.nFixZed   = 1;
+    if (fixationConfig.nFixOmega == null) fixationConfig.nFixOmega = 2;
     document.getElementById('fixationPrix').value = fixationConfig.prixFixation || '';
     const prixOssEl = document.getElementById('fixationPrixOss');
     if (prixOssEl) prixOssEl.value = fixationConfig.prixFixationOss || '';
-    const feEl  = document.getElementById('fixEntraxeOss');
-    const fmHEl = document.getElementById('fixMinOssH');
-    const fmVEl = document.getElementById('fixMinOssV');
-    if (feEl)  feEl.value  = fixationConfig.entraxeOssature  || 600;
-    if (fmHEl) fmHEl.value = fixationConfig.minFixOssatureH  ?? 2;
-    if (fmVEl) fmVEl.value = fixationConfig.minFixOssatureV  ?? 2;
+    const nzEl = document.getElementById('fixNFixZed');
+    const noEl = document.getElementById('fixNFixOmega');
+    if (nzEl) nzEl.value = fixationConfig.nFixZed  ?? 1;
+    if (noEl) noEl.value = fixationConfig.nFixOmega ?? 2;
     const trouEl = document.getElementById('trouEnabled');
     const trouAllEl = document.getElementById('trouApplyAll');
     if (trouEl) trouEl.checked = !!fixationConfig.trouEnabled;
@@ -7637,36 +7648,32 @@ function exportDxfOssature() {
   dxf.addLayer('TITRE', 7);
   dxf.addLayer('TEXTE', 7);
 
-  const OSS_FIX_MARGIN = 14; // centre du trou à 14mm du bord (10mm bord + rayon 4mm)
   const OSS_FIX_RADIUS = 4;  // rayon = diamètre 8mm / 2
-  const ossEntraxeFix = fixationConfig.entraxeOssature || 600;
-  const ossMinFixH = Math.max(1, fixationConfig.minFixOssatureH ?? fixationConfig.minFixOssature ?? 2);
-  const ossMinFixV = Math.max(1, fixationConfig.minFixOssatureV ?? fixationConfig.minFixOssature ?? 2);
+  const OSS_FIX_MARGIN = 14; // centre du trou à 14mm du bord
+  const nFixOmega = Math.max(1, fixationConfig.nFixOmega ?? 2);
+  const nFixZed   = Math.max(1, fixationConfig.nFixZed   ?? 1);
 
-  // Y positions relatives dans un segment de longueur len
-  function ossFixPositions(len, minFix) {
-    if (len < 2 * OSS_FIX_MARGIN) return [len / 2]; // trop court → trou centré
-    const first = OSS_FIX_MARGIN, last = len - OSS_FIX_MARGIN;
-    const gap = last - first;
-    const nIntervals = Math.max(1, Math.ceil(gap / ossEntraxeFix));
-    const n = Math.max(nIntervals + 1, minFix);
-    const spacing = gap / (n - 1);
-    return Array.from({ length: n }, (_, i) => first + i * spacing);
-  }
+  // Longerons courants de la façade en cours (mis à jour dans la boucle par façade)
+  let currentFacadeLongeronYs = [];
 
-  // Dessine les trous de fixation sur un tronçon de profil
-  const ossMinFix = Math.max(ossMinFixH, ossMinFixV);
+  // Dessine les vis de fixation aux positions des longerons
   function addOssFixHoles(xmin, yBot, xmax, yTop, isOmega) {
-    const relYs = ossFixPositions(yTop - yBot, ossMinFix);
-    if (isOmega) {
-      for (const ry of relYs) {
-        dxf.addCircle(xmin + OSS_FIX_MARGIN, yBot + ry, OSS_FIX_RADIUS, 'FIXATION_OSS', 1);
-        dxf.addCircle(xmax - OSS_FIX_MARGIN, yBot + ry, OSS_FIX_RADIUS, 'FIXATION_OSS', 1);
-      }
-    } else {
-      const cx = (xmin + xmax) / 2;
-      for (const ry of relYs) {
-        dxf.addCircle(cx, yBot + ry, OSS_FIX_RADIUS, 'FIXATION_OSS', 1);
+    const TOL = 10;
+    // Longerons qui traversent ce segment
+    const ys = currentFacadeLongeronYs
+      .filter(y => y >= yBot - TOL && y <= yTop + TOL)
+      .map(y => Math.max(yBot, Math.min(yTop, y)));
+    if (ys.length === 0) ys.push(yBot, yTop);
+    const nFix = isOmega ? nFixOmega : nFixZed;
+    const profileW = xmax - xmin;
+    const avail = Math.max(profileW - 2 * OSS_FIX_MARGIN, 0);
+    for (const ly of ys) {
+      if (nFix === 1) {
+        dxf.addCircle((xmin + xmax) / 2, ly, OSS_FIX_RADIUS, 'FIXATION_OSS', 1);
+      } else {
+        const step = avail / (nFix - 1);
+        for (let i = 0; i < nFix; i++)
+          dxf.addCircle(xmin + OSS_FIX_MARGIN + i * step, ly, OSS_FIX_RADIUS, 'FIXATION_OSS', 1);
       }
     }
   }
@@ -7812,6 +7819,9 @@ function exportDxfOssature() {
     // Detect horizontal joints and compute cut positions
     const horizontalJoints = detectHorizontalJoints(allPanels);
     const jointCuts = computeCutPositions(horizontalJoints, fixZones);
+
+    // Longerons : bord bas ossature + joints horizontaux (séparations d'étages) + bord haut
+    currentFacadeLongeronYs = [ossBottom, ...horizontalJoints, ossTop];
 
     // Joint edge maps for clipping non-continuous profile ends to 20mm from joint axis
     const jTopEdgeF = new Map(), jBotEdgeF = new Map();
