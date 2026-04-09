@@ -7646,16 +7646,16 @@ function exportDxfOssature() {
   }
 
   const dxf = createDxfBuilder();
-  dxf.addLayer('CONTOUR', 8);
-  dxf.addLayer('PANNEAUX_REF', 9);
-  dxf.addLayer('OMEGA', 4);
-  dxf.addLayer('ZED_ENTRAXE', 2);
-  dxf.addLayer('ZED_BORD', 6);
-  dxf.addLayer('FIXATION', 3);
-  dxf.addLayer('FIXATION_OSS', 1);
-  dxf.addLayer('OMEGA_AXES', 5);
-  dxf.addLayer('TITRE', 7);
-  dxf.addLayer('TEXTE', 7);
+  dxf.addLayer('CONTOUR',      7);   // noir
+  dxf.addLayer('PANNEAUX_REF', 9);   // gris clair (référence)
+  dxf.addLayer('OMEGA',        5);   // bleu
+  dxf.addLayer('ZED_ENTRAXE',  30);  // orange
+  dxf.addLayer('ZED_BORD',     30);  // orange
+  dxf.addLayer('FIXATION',     3);   // vert (zones)
+  dxf.addLayer('FIXATION_OSS', 1);   // rouge (vis)
+  dxf.addLayer('OMEGA_AXES',   7);   // noir
+  dxf.addLayer('TITRE',        7);   // noir
+  dxf.addLayer('TEXTE',        7);   // noir
 
   const OSS_FIX_RADIUS = 4;  // rayon = diamètre 8mm / 2
   const OSS_FIX_MARGIN = 14; // centre du trou à 14mm du bord horizontal
@@ -7806,7 +7806,7 @@ function exportDxfOssature() {
 
   // Single outer contour around all panels (extended for prolongement)
   const ossOuterMargin = 200;
-  dxf.addRect(ossGxmin - ossOuterMargin, ossGymin - ossOuterMargin - prol, ossGxmax + ossOuterMargin, ossGymax + ossOuterMargin + prolH, 'CONTOUR', 8);
+  dxf.addRect(ossGxmin - ossOuterMargin, ossGymin - ossOuterMargin - prol, ossGxmax + ossOuterMargin, ossGymax + ossOuterMargin + prolH, 'CONTOUR', 7);
 
   for (const fname of facadeNames) {
     const allPanels = translatedByFacade[fname];
@@ -7917,7 +7917,7 @@ function exportDxfOssature() {
       mergedZeds.push({ cx, yStart, yEnd });
     }
     for (const { cx, yStart, yEnd } of mergedZeds) {
-      addSplitProfile(cx - ZED_W/2, clipStartF(yStart), cx + ZED_W/2, clipEndF(yEnd), 'ZED_ENTRAXE', 2, jointCuts);
+      addSplitProfile(cx - ZED_W/2, clipStartF(yStart), cx + ZED_W/2, clipEndF(yEnd), 'ZED_ENTRAXE', 30, jointCuts);
       allOssXsSet.add(Math.round(cx));
     }
 
@@ -7965,7 +7965,7 @@ function exportDxfOssature() {
           // Étendre l'Oméga vers le bas/haut si segment touche fymin/fymax et prolongement actif
           const mStart = (prol > 0 && m.start <= fymin + 5) ? fymin - prol : clipStartF(m.start);
           const mEnd = (prolH > 0 && m.end >= fymax - 5) ? fymax + prolH : clipEndF(m.end);
-          addSplitProfile(jx - OMEGA_W/2, mStart, jx + OMEGA_W/2, mEnd, 'OMEGA', 4, jointCuts, true);
+          addSplitProfile(jx - OMEGA_W/2, mStart, jx + OMEGA_W/2, mEnd, 'OMEGA', 5, jointCuts, true);
           if (prol > 0 && m.start <= fymin + 5) omegaXsExt.push(jx);
           if (prolH > 0 && m.end >= fymax - 5) omegaXsExtHaut.push(jx);
         }
@@ -7980,7 +7980,7 @@ function exportDxfOssature() {
         if (Math.round(ge - gs) >= 100) {
           const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : clipStartF(gs);
           const geExt = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : clipEndF(ge);
-          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 6, jointCuts);
+          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 30, jointCuts);
           allOssXsSet.add(jx);
           if (prol > 0 && gs <= fymin + 5) violetXsSet.add(jx);
           if (prolH > 0 && ge >= fymax - 5) violetXsSetHaut.add(jx);
@@ -7990,7 +7990,7 @@ function exportDxfOssature() {
         if (Math.round(ge - gs) >= 100) {
           const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : clipStartF(gs);
           const geExt = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : clipEndF(ge);
-          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 6, jointCuts);
+          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 30, jointCuts);
           allOssXsSet.add(jx);
           if (prol > 0 && gs <= fymin + 5) violetXsSet.add(jx);
           if (prolH > 0 && ge >= fymax - 5) violetXsSetHaut.add(jx);
@@ -8016,7 +8016,7 @@ function exportDxfOssature() {
 
         const dimOffset = textH * 2;
         for (const ax of allSorted)
-          dxf.addLine(ax, ossBottom, ax, ossTop, 'OMEGA_AXES', 5);
+          dxf.addLine(ax, ossBottom, ax, ossTop, 'OMEGA_AXES', 7);
 
         for (let i = 0; i < n - 1; i++) {
           const x1 = allSorted[i], x2 = allSorted[i + 1];
@@ -8025,10 +8025,10 @@ function exportDxfOssature() {
           const isTop = i % 2 === 0;
           const dimY = isTop ? ossTop + dimOffset : ossBottom - dimOffset;
           const tick = textH * 0.5;
-          dxf.addLine(x1, dimY, x2, dimY, 'OMEGA_AXES', 5);
-          dxf.addLine(x1, dimY - tick, x1, dimY + tick, 'OMEGA_AXES', 5);
-          dxf.addLine(x2, dimY - tick, x2, dimY + tick, 'OMEGA_AXES', 5);
-          dxf.addText(midX, isTop ? dimY + textH * 0.8 : dimY - textH * 1.6, textH, dist + ' mm', 'OMEGA_AXES', 5, 1);
+          dxf.addLine(x1, dimY, x2, dimY, 'OMEGA_AXES', 7);
+          dxf.addLine(x1, dimY - tick, x1, dimY + tick, 'OMEGA_AXES', 7);
+          dxf.addLine(x2, dimY - tick, x2, dimY + tick, 'OMEGA_AXES', 7);
+          dxf.addText(midX, isTop ? dimY + textH * 0.8 : dimY - textH * 1.6, textH, dist + ' mm', 'OMEGA_AXES', 7, 1);
         }
       }
     }
@@ -8040,13 +8040,13 @@ function exportDxfOssature() {
       const yStart = isBottomP ? fymin - prol : clipStartF(p.ymin);
       const yEnd = isTopP ? fymax + prolH : clipEndF(p.ymax);
       if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP)) {
-        addSplitProfile(p.xmax - ZED_W/2, yStart, p.xmax + ZED_W/2, yEnd, 'ZED_BORD', 6, jointCuts);
+        addSplitProfile(p.xmax - ZED_W/2, yStart, p.xmax + ZED_W/2, yEnd, 'ZED_BORD', 30, jointCuts);
         allOssXsSet.add(Math.round(p.xmax));
         if (isBottomP) violetXsSet.add(Math.round(p.xmax));
         if (isTopP) violetXsSetHaut.add(Math.round(p.xmax));
       }
       if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP)) {
-        addSplitProfile(p.xmin - ZED_W/2, yStart, p.xmin + ZED_W/2, yEnd, 'ZED_BORD', 6, jointCuts);
+        addSplitProfile(p.xmin - ZED_W/2, yStart, p.xmin + ZED_W/2, yEnd, 'ZED_BORD', 30, jointCuts);
         allOssXsSet.add(Math.round(p.xmin));
         if (isBottomP) violetXsSet.add(Math.round(p.xmin));
         if (isTopP) violetXsSetHaut.add(Math.round(p.xmin));
@@ -8082,7 +8082,7 @@ function exportDxfOssature() {
               const step = gap / (nz + 1);
               for (let z = 1; z <= nz; z++) {
                 const cx = pts[j] + z * step;
-                addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2, jointCuts);
+                addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 30, jointCuts);
               }
             }
           }
@@ -8117,7 +8117,7 @@ function exportDxfOssature() {
               const step = gap / (nz + 1);
               for (let z = 1; z <= nz; z++) {
                 const cx = pts[j] + z * step;
-                addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 2, jointCuts);
+                addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 30, jointCuts);
               }
             }
           }
