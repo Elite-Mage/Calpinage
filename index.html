@@ -8017,67 +8017,6 @@ function exportDxfOssature() {
       }
     }
 
-    // ── Entraxes de toutes les ossatures (option) ──
-    if (ossatureConfig.showOmegaAxes) {
-      const CHAR_W = 5.5;
-      const baseH = Math.max(40, titleH * 0.3);
-
-      // Dessine une rangée de cotes d'entraxe pour un groupe de profils
-      function drawEntraxeRow(xs, dimY, above) {
-        const sorted = [...xs].sort((a, b) => a - b);
-        const m = sorted.length;
-        if (m < 2) return;
-        // Taille uniforme maximale sans superposition (tous sur le même côté)
-        let tH = baseH;
-        for (let i = 0; i + 2 < m; i++) {
-          const mid0 = (sorted[i]   + sorted[i+1]) / 2;
-          const mid1 = (sorted[i+1] + sorted[i+2]) / 2;
-          tH = Math.min(tH, (mid1 - mid0) / CHAR_W);
-        }
-        tH = Math.max(20, tH);
-        const tick = tH * 0.5;
-        for (let i = 0; i < m - 1; i++) {
-          const x1 = sorted[i], x2 = sorted[i+1];
-          const midX = (x1 + x2) / 2;
-          dxf.addLine(x1, dimY, x2, dimY, 'OMEGA_AXES', 7);
-          dxf.addLine(x1, dimY - tick, x1, dimY + tick, 'OMEGA_AXES', 7);
-          dxf.addLine(x2, dimY - tick, x2, dimY + tick, 'OMEGA_AXES', 7);
-          dxf.addText(midX, above ? dimY + tH * 0.8 : dimY - tH * 1.6, tH, Math.round(x2 - x1) + 'mm', 'OMEGA_AXES', 7, 1);
-        }
-      }
-
-      if (ossatureConfig.axesSepHB) {
-        // Mode séparé : profils du haut en haut, profils du bas en bas
-        const offset = baseH * 2;
-        drawEntraxeRow(topOssXsSet, ossTop    + offset, true);
-        drawEntraxeRow(botOssXsSet, ossBottom - offset, false);
-      } else {
-        // Mode alterné : tous les entraxes alternés haut/bas
-        const allSorted = [...allOssXsSet].sort((a, b) => a - b);
-        const n = allSorted.length;
-        if (n >= 2) {
-          let tH = baseH;
-          for (let i = 0; i + 3 < n; i++) {
-            const mid0 = (allSorted[i]   + allSorted[i+1]) / 2;
-            const mid2 = (allSorted[i+2] + allSorted[i+3]) / 2;
-            tH = Math.min(tH, (mid2 - mid0) / CHAR_W);
-          }
-          tH = Math.max(20, tH);
-          const offset = tH * 2, tick = tH * 0.5;
-          for (let i = 0; i < n - 1; i++) {
-            const x1 = allSorted[i], x2 = allSorted[i+1];
-            const midX = (x1 + x2) / 2;
-            const above = i % 2 === 0;
-            const dimY = above ? ossTop + offset : ossBottom - offset;
-            dxf.addLine(x1, dimY, x2, dimY, 'OMEGA_AXES', 7);
-            dxf.addLine(x1, dimY - tick, x1, dimY + tick, 'OMEGA_AXES', 7);
-            dxf.addLine(x2, dimY - tick, x2, dimY + tick, 'OMEGA_AXES', 7);
-            dxf.addText(midX, above ? dimY + tH * 0.8 : dimY - tH * 1.6, tH, Math.round(x2 - x1) + 'mm', 'OMEGA_AXES', 7, 1);
-          }
-        }
-      }
-    }
-
     // Free-edge ZED (bord sans voisin, mais pas bord de façade) — étendu vers le bas/haut si touche fymin/fymax
     for (const p of allPanels) {
       const isBottomP = prol > 0 && Math.abs(p.ymin - fymin) < 5;
@@ -8175,6 +8114,63 @@ function exportDxfOssature() {
                 allOssXsSet.add(rx); topOssXsSet.add(rx);
               }
             }
+          }
+        }
+      }
+    }
+
+    // ── Entraxes de toutes les ossatures (option) — après tous les profils ──
+    if (ossatureConfig.showOmegaAxes) {
+      const CHAR_W = 5.5;
+      const baseH = Math.max(40, titleH * 0.3);
+
+      function drawEntraxeRow(xs, dimY, above) {
+        const sorted = [...xs].sort((a, b) => a - b);
+        const m = sorted.length;
+        if (m < 2) return;
+        let tH = baseH;
+        for (let i = 0; i + 2 < m; i++) {
+          const mid0 = (sorted[i]   + sorted[i+1]) / 2;
+          const mid1 = (sorted[i+1] + sorted[i+2]) / 2;
+          tH = Math.min(tH, (mid1 - mid0) / CHAR_W);
+        }
+        tH = Math.max(20, tH);
+        const tick = tH * 0.5;
+        for (let i = 0; i < m - 1; i++) {
+          const x1 = sorted[i], x2 = sorted[i+1];
+          const midX = (x1 + x2) / 2;
+          dxf.addLine(x1, dimY, x2, dimY, 'OMEGA_AXES', 7);
+          dxf.addLine(x1, dimY - tick, x1, dimY + tick, 'OMEGA_AXES', 7);
+          dxf.addLine(x2, dimY - tick, x2, dimY + tick, 'OMEGA_AXES', 7);
+          dxf.addText(midX, above ? dimY + tH * 0.8 : dimY - tH * 1.6, tH, Math.round(x2 - x1) + 'mm', 'OMEGA_AXES', 7, 1);
+        }
+      }
+
+      if (ossatureConfig.axesSepHB) {
+        const offset = baseH * 2;
+        drawEntraxeRow(topOssXsSet, ossTop    + offset, true);
+        drawEntraxeRow(botOssXsSet, ossBottom - offset, false);
+      } else {
+        const allSorted = [...allOssXsSet].sort((a, b) => a - b);
+        const n = allSorted.length;
+        if (n >= 2) {
+          let tH = baseH;
+          for (let i = 0; i + 3 < n; i++) {
+            const mid0 = (allSorted[i]   + allSorted[i+1]) / 2;
+            const mid2 = (allSorted[i+2] + allSorted[i+3]) / 2;
+            tH = Math.min(tH, (mid2 - mid0) / CHAR_W);
+          }
+          tH = Math.max(20, tH);
+          const offset = tH * 2, tick = tH * 0.5;
+          for (let i = 0; i < n - 1; i++) {
+            const x1 = allSorted[i], x2 = allSorted[i+1];
+            const midX = (x1 + x2) / 2;
+            const above = i % 2 === 0;
+            const dimY = above ? ossTop + offset : ossBottom - offset;
+            dxf.addLine(x1, dimY, x2, dimY, 'OMEGA_AXES', 7);
+            dxf.addLine(x1, dimY - tick, x1, dimY + tick, 'OMEGA_AXES', 7);
+            dxf.addLine(x2, dimY - tick, x2, dimY + tick, 'OMEGA_AXES', 7);
+            dxf.addText(midX, above ? dimY + tH * 0.8 : dimY - tH * 1.6, tH, Math.round(x2 - x1) + 'mm', 'OMEGA_AXES', 7, 1);
           }
         }
       }
