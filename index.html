@@ -734,6 +734,7 @@
       <div id="ossatureSummaryContent"></div>
       <div style="margin-top:12px;display:flex;gap:6px;">
         <button class="btn-export" onclick="exportDxfOssature()" title="Export DXF ossature (oméga + zed)">&#128209; DXF Ossature</button>
+        <button class="btn-export" onclick="exportPdfOssature()" title="Export PDF ossature">&#128247; PDF Ossature</button>
         <button class="btn-export" onclick="exportDxfPanneaux()" title="Export DXF panneaux">&#128209; DXF Panneaux</button>
       </div>
     </div>
@@ -8179,6 +8180,36 @@ function exportDxfOssature() {
 
   const nom = chantier.nom || 'calpinage';
   downloadDxf(dxf.toString(), nom.replace(/[^a-zA-Z0-9]/g, '_') + '_ossature.dxf');
+}
+
+function exportPdfOssature() {
+  if (!projectRectsSpatial || !projectRectsSpatial.length) {
+    alert('Importez un DXF d\'abord.'); return;
+  }
+  const nom  = chantier.nom  || 'Chantier';
+  const date = chantier.date || new Date().toISOString().slice(0, 10);
+  const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+  const facadeNames = Object.keys(byFacade).sort();
+
+  let pages = '';
+  for (const fname of facadeNames) {
+    const svg = buildOssatureSvg(fname, byFacade[fname])
+      .replace(/var\(--bg2\)/g, 'white')
+      .replace(/var\(--bg3\)/g, '#f1f5f9')
+      .replace(/var\(--text3\)/g, '#334155')
+      .replace(/var\(--text\b[^)]*\)/g, '#1e293b');
+    pages += `<div class="page"><div class="hdr"><span class="title">${nom} &mdash; Ossature &mdash; ${fname}</span><span class="meta">${date}</span></div>${svg}</div>`;
+  }
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Ossature ${nom}</title><style>
+    body{margin:0;background:#fff;font-family:system-ui,sans-serif;}
+    .page{padding:10mm;page-break-after:always;}
+    .hdr{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1e293b;margin-bottom:10px;padding-bottom:4px;}
+    .title{font-size:14px;font-weight:700;}.meta{font-size:10px;color:#64748b;}
+    svg{width:100%!important;height:auto!important;background:white!important;border-radius:0!important;}
+    @media print{.page{padding:8mm;}}
+  </style></head><body>${pages}<script>window.onload=()=>window.print();<\/script></body></html>`;
+  window.open(URL.createObjectURL(new Blob([html],{type:'text/html;charset=utf-8'})),'_blank');
 }
 
 // ============================================================
