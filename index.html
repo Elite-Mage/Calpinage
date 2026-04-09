@@ -7812,7 +7812,9 @@ function exportDxfOssature() {
 
   // Single outer contour around all panels (extended for prolongement)
   const ossOuterMargin = 200;
-  dxf.addRect(ossGxmin - ossOuterMargin, ossGymin - ossOuterMargin - prol, ossGxmax + ossOuterMargin, ossGymax + ossOuterMargin + prolH, 'CONTOUR', 7);
+  // Marge supplémentaire si entraxes affichés (texte dépasse au-dessus/en-dessous)
+  const axesExtra = ossatureConfig.showOmegaAxes ? 500 : 0;
+  dxf.addRect(ossGxmin - ossOuterMargin, ossGymin - ossOuterMargin - prol - axesExtra, ossGxmax + ossOuterMargin, ossGymax + ossOuterMargin + prolH + axesExtra, 'CONTOUR', 7);
 
   for (const fname of facadeNames) {
     const allPanels = translatedByFacade[fname];
