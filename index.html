@@ -698,6 +698,16 @@
       </div>
       <div id="fixationZonesContainer"></div>
     </div>
+    <!-- OMEGA PROFILE -->
+    <div class="card">
+      <div class="card-title">Oméga &#937; &mdash; Profil</div>
+      <div id="omegaProfileUI"></div>
+    </div>
+    <!-- ZED PROFILE -->
+    <div class="card">
+      <div class="card-title">Zed Z &mdash; Profil</div>
+      <div id="zedProfileUI"></div>
+    </div>
     <!-- OMEGA STOCK -->
     <div class="card">
       <div class="card-title">Oméga &#937; &mdash; Longueurs fournisseur</div>
@@ -756,26 +766,16 @@
 <div class="layout">
   <div class="sidebar">
     <div class="card">
-      <div class="card-title">Fixation ossature</div>
+      <div class="card-title">Fixation ossature — Oméga &#937;</div>
+      <div id="omegaScrewUI"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Fixation ossature — Zed Z</div>
+      <div id="zedScrewUI"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Fixation ossature — Prix</div>
       <div class="oss-config">
-        <div>
-          <label>Vis / longeron — Zed</label>
-          <input type="number" id="fixNFixZed" value="1" min="1" max="5" step="1"
-            title="Nombre de vis par longeron pour les profils Zed"
-            oninput="fixationConfig.nFixZed=+this.value; renderFixation(); scheduleSave();">
-        </div>
-        <div>
-          <label>Vis / longeron — Oméga</label>
-          <input type="number" id="fixNFixOmega" value="2" min="1" max="5" step="1"
-            title="Nombre de vis par longeron pour les profils Oméga"
-            oninput="fixationConfig.nFixOmega=+this.value; renderFixation(); scheduleSave();">
-        </div>
-        <div>
-          <label>Axe vis — écart bord (mm)</label>
-          <input type="number" id="fixMarginOssV" value="30" min="6" max="200" step="1"
-            title="Distance entre le centre de la vis et le bord haut/bas du profil"
-            oninput="fixationConfig.marginOssV=+this.value; renderFixation(); scheduleSave();">
-        </div>
         <div>
           <label>Prix / fix. ossature (€/u)</label>
           <input type="number" id="fixationPrixOss" value="" placeholder="0.00" min="0" step="0.01"
@@ -1042,7 +1042,16 @@ let nextGroupId = 3;
 let activeGroupId = 1;
 let allResults = null;
 let activeSection = 'panneaux'; // 'panneaux' | 'ossature' | 'devis'
-let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false, prolongEntaxe: 600, prolongementHaut: 0, prolongementHautEnabled: false, fixationGap: 20, fixationZones: {}, fixationApplyAll: false, showOmegaAxes: false, axesSepHB: false };
+function defaultScrewConfig() {
+  return { countH: 1, countV: 2, entraxeH: 300, entraxeV: 300, diametre: 8, bordDist: 10, bothSides: true, side: 'left', extremiteDist: 20 };
+}
+function defaultOmegaProfile() {
+  return { perType: false, global: { segments: [{ id:1, width:80, kind:'width', fixation:true, screwConfig: defaultScrewConfig() }] }, byColor: {}, _nextSegId: 2 };
+}
+function defaultZedProfile() {
+  return { perType: false, global: { segments: [{ id:1, width:40, kind:'width', fixation:true, screwConfig: defaultScrewConfig() }] }, byColor: {}, _nextSegId: 2 };
+}
+let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false, prolongEntaxe: 600, prolongementHaut: 0, prolongementHautEnabled: false, fixationGap: 20, fixationZones: {}, fixationApplyAll: false, showOmegaAxes: false, axesSepHB: false, omegaProfile: defaultOmegaProfile(), zedProfile: defaultZedProfile() };
 let devisConfig = { prixMO: '' };
 let fixationConfig = {
   prixFixation: '',
@@ -2441,8 +2450,17 @@ function buildFacadeSvg(panels, items) {
 
 // ── Fixations pour une façade (depuis ossature spatiale) ──────
 function calcFixationFacade(fname, panels, ossProfiles) {
-  const nFixOmega = Math.max(1, fixationConfig.nFixOmega ?? 2);
-  const nFixZed   = Math.max(1, fixationConfig.nFixZed   ?? 1);
+  // Count screws from profile screw configs
+  function nScrewsPerPiece(type) {
+    const segs = getActiveSegments(type, null);
+    return segs.filter(s=>s.kind==='width'&&s.fixation&&s.screwConfig)
+      .reduce((sum,s)=>{
+        const c=s.screwConfig;
+        return sum + Math.max(1,c.countH||1) * Math.max(1,c.countV||1);
+      }, 0) || (type==='omega' ? 2 : 1);
+  }
+  const nFixOmegaPP = nScrewsPerPiece('omega');
+  const nFixZedPP   = nScrewsPerPiece('zed');
 
   // Positions des longerons : bord bas + joints horizontaux + bord haut
   let fymin = Infinity, fymax = -Infinity;
@@ -2460,16 +2478,16 @@ function calcFixationFacade(fname, panels, ossProfiles) {
   }
   const longeronYs = [ossBottom, ...[...jointSet].sort((a,b) => a-b), ossTop];
 
-  // Nb de longerons traversés par un segment de longueur len (depuis ossBottom)
-  function nLongerons(len) {
+  // Nb de pièces (sections entre longerons) traversées par un segment de longueur len
+  function nPieces(len) {
     let n = 0;
-    for (const y of longeronYs) if (y - ossBottom <= len + 10) n++;
-    return Math.max(2, n);
+    for (let i=0; i<longeronYs.length-1; i++) if (longeronYs[i+1] - ossBottom <= len + 10) n++;
+    return Math.max(1, n);
   }
 
   let fixOmega = 0, fixZed = 0, fixPanneaux = 0;
-  for (const len of ossProfiles.omega) fixOmega += nFixOmega * nLongerons(len);
-  for (const len of ossProfiles.zed)   fixZed   += nFixZed   * nLongerons(len);
+  for (const len of ossProfiles.omega) fixOmega += nFixOmegaPP * nPieces(len);
+  for (const len of ossProfiles.zed)   fixZed   += nFixZedPP   * nPieces(len);
   if (fixationConfig.trouEnabled) {
     const cfg = getTrouConfigForFacade(fname);
     for (const p of panels) {
@@ -3221,6 +3239,13 @@ function applyProjectData(data) {
     renderOmegaStockList();
     renderZedStockList();
     renderFixationZonesUI();
+    // Migrate: ensure profiles exist
+    if (!ossatureConfig.omegaProfile) ossatureConfig.omegaProfile = defaultOmegaProfile();
+    if (!ossatureConfig.zedProfile)   ossatureConfig.zedProfile   = defaultZedProfile();
+    // Ensure _nextSegId
+    if (!ossatureConfig.omegaProfile._nextSegId) ossatureConfig.omegaProfile._nextSegId = (ossatureConfig.omegaProfile.global.segments.length || 0) + 2;
+    if (!ossatureConfig.zedProfile._nextSegId)   ossatureConfig.zedProfile._nextSegId   = (ossatureConfig.zedProfile.global.segments.length   || 0) + 2;
+    renderProfileUI('omega'); renderProfileUI('zed');
   }
   if (data.devisConfig) {
     devisConfig = { ...devisConfig, ...data.devisConfig };
@@ -3234,12 +3259,6 @@ function applyProjectData(data) {
     document.getElementById('fixationPrix').value = fixationConfig.prixFixation || '';
     const prixOssEl = document.getElementById('fixationPrixOss');
     if (prixOssEl) prixOssEl.value = fixationConfig.prixFixationOss || '';
-    const nzEl  = document.getElementById('fixNFixZed');
-    const noEl  = document.getElementById('fixNFixOmega');
-    const mvEl  = document.getElementById('fixMarginOssV');
-    if (nzEl) nzEl.value = fixationConfig.nFixZed    ?? 1;
-    if (noEl) noEl.value = fixationConfig.nFixOmega  ?? 2;
-    if (mvEl) mvEl.value = fixationConfig.marginOssV ?? 30;
     const trouEl = document.getElementById('trouEnabled');
     const trouAllEl = document.getElementById('trouApplyAll');
     if (trouEl) trouEl.checked = !!fixationConfig.trouEnabled;
@@ -4325,8 +4344,8 @@ function switchSection(name) {
   document.querySelectorAll('.section-content').forEach(s => s.classList.remove('active'));
   const sectionEl = document.getElementById('section' + name.charAt(0).toUpperCase() + name.slice(1));
   if (sectionEl) sectionEl.classList.add('active');
-  if (name === 'ossature') { renderOssature(); renderFixationZonesUI(); }
-  if (name === 'fixation') { renderTrouConfigUI(); renderFixation(); }
+  if (name === 'ossature') { renderOssature(); renderFixationZonesUI(); renderProfileUI('omega'); renderProfileUI('zed'); }
+  if (name === 'fixation') { renderTrouConfigUI(); renderFixation(); renderProfileScrewUI('omega'); renderProfileScrewUI('zed'); }
   if (name === 'pliage') renderPliage();
   if (name === 'devis') renderDevis();
   if (name === 'vue3d') renderVue3D();
@@ -4386,6 +4405,202 @@ function removeOmegaStock(i) {
 function removeZedStock(i) {
   ossatureConfig.zedStocks.splice(i, 1);
   renderZedStockList(); renderOssature(); scheduleSave();
+}
+
+// ============================================================
+// PROFIL OSSATURE — UI management
+
+function getOrInitProfile(type) {
+  if (!ossatureConfig.omegaProfile) ossatureConfig.omegaProfile = defaultOmegaProfile();
+  if (!ossatureConfig.zedProfile)   ossatureConfig.zedProfile   = defaultZedProfile();
+  return type === 'omega' ? ossatureConfig.omegaProfile : ossatureConfig.zedProfile;
+}
+
+function renderProfileUI(type) {
+  const id = `${type}ProfileUI`;
+  const el = document.getElementById(id);
+  if (!el) return;
+  const prof = getOrInitProfile(type);
+  const segs = (prof.global && prof.global.segments) || [];
+
+  // Cross-section preview SVG
+  const totalW = segs.filter(s=>s.kind==='width').reduce((s,seg)=>s+(seg.width||0),0) || 1;
+  const totalH = Math.max(...segs.filter(s=>s.kind==='depth').map(s=>s.width||0), 20);
+  const svgW = 120, svgH = 60;
+  let px = 0, crossSvg = '';
+  for (const seg of segs) {
+    if (seg.kind === 'width') {
+      const sw2 = (seg.width / totalW) * svgW;
+      crossSvg += `<rect x="${px.toFixed(1)}" y="${(svgH/2-4).toFixed(1)}" width="${sw2.toFixed(1)}" height="8" fill="${seg.fixation?'#22d3ee88':'#64748b55'}" stroke="#475569" stroke-width="0.8"/>`;
+      if (seg.fixation) {
+        const cx2 = px + sw2/2, cy2 = svgH/2;
+        crossSvg += `<circle cx="${cx2.toFixed(1)}" cy="${cy2.toFixed(1)}" r="3" fill="white" stroke="#333" stroke-width="0.8"/>`;
+        crossSvg += `<line x1="${(cx2-2).toFixed(1)}" y1="${cy2.toFixed(1)}" x2="${(cx2+2).toFixed(1)}" y2="${cy2.toFixed(1)}" stroke="#333" stroke-width="0.6"/>`;
+        crossSvg += `<line x1="${cx2.toFixed(1)}" y1="${(cy2-2).toFixed(1)}" x2="${cx2.toFixed(1)}" y2="${(cy2+2).toFixed(1)}" stroke="#333" stroke-width="0.6"/>`;
+      }
+      const labelX = px + sw2/2;
+      crossSvg += `<text x="${labelX.toFixed(1)}" y="${(svgH/2+18).toFixed(1)}" text-anchor="middle" font-size="8" fill="var(--text3)">${seg.width}</text>`;
+      px += sw2;
+    } else {
+      // depth: draw as a small bracket below
+      const dH = Math.min((seg.width/100)*20, 20);
+      crossSvg += `<rect x="${(px-3).toFixed(1)}" y="${(svgH/2+4).toFixed(1)}" width="3" height="${dH.toFixed(1)}" fill="#94a3b855" stroke="#64748b" stroke-width="0.6"/>`;
+    }
+  }
+  crossSvg += `<text x="${(svgW/2).toFixed(1)}" y="10" text-anchor="middle" font-size="8" fill="var(--text4)">Vue coupe (largeur: ${totalW}mm)</text>`;
+
+  // Segments list
+  let segHtml = segs.map((seg, i) => `
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;background:var(--bg3);border-radius:6px;padding:6px 8px;">
+      <span style="font-size:11px;color:var(--text4);min-width:16px;">${i+1}</span>
+      <select style="background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 4px;font-size:11px;"
+        onchange="updateProfileSeg('${type}',${i},'kind',this.value)">
+        <option value="width" ${seg.kind==='width'?'selected':''}>Largeur</option>
+        <option value="depth" ${seg.kind==='depth'?'selected':''}>Profondeur</option>
+      </select>
+      <input type="number" value="${seg.width||0}" min="1" max="500" step="1" style="width:55px;font-size:11px;"
+        title="Dimension (mm)" oninput="updateProfileSeg('${type}',${i},'width',+this.value)"> <span style="font-size:10px;color:var(--text4)">mm</span>
+      ${seg.kind==='width' ? `<label title="Vis fixées ici" style="display:flex;align-items:center;gap:3px;font-size:11px;cursor:pointer;">
+        <input type="checkbox" ${seg.fixation?'checked':''} onchange="updateProfileSeg('${type}',${i},'fixation',this.checked)">
+        <span>Vis</span>
+      </label>` : ''}
+      <button class="piece-remove" onclick="removeProfileSeg('${type}',${i})" style="margin-left:auto;">&times;</button>
+    </div>`).join('');
+
+  el.innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+        <input type="radio" name="${type}PerType" value="0" ${!prof.perType?'checked':''} onchange="setProfilePerType('${type}',false)"> Global
+      </label>
+      <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+        <input type="radio" name="${type}PerType" value="1" ${prof.perType?'checked':''} onchange="setProfilePerType('${type}',true)"> Par type panneau
+      </label>
+    </div>
+    ${prof.perType ? renderProfileColorSelector(type) : ''}
+    <svg width="${svgW}" height="${svgH+14}" style="display:block;background:var(--bg3);border-radius:4px;margin-bottom:8px;">${crossSvg}</svg>
+    ${segHtml}
+    <button class="btn-add" style="width:100%;margin-top:4px;font-size:12px;" onclick="addProfileSeg('${type}')">+ Segment</button>`;
+}
+
+function renderProfileColorSelector(type) {
+  const colors = Object.entries(ACI_COLOR_MAP_JS);
+  if (!colors.length) return '';
+  const prof = getOrInitProfile(type);
+  const activeColor = prof._activeColor || colors[0][0];
+  let opts = colors.map(([aci, info]) =>
+    `<option value="${aci}" ${activeColor==aci?'selected':''}>${info.name}</option>`
+  ).join('');
+  return `<div style="margin-bottom:8px;">
+    <select style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 8px;font-size:12px;"
+      onchange="setProfileActiveColor('${type}',this.value)">${opts}</select>
+    <div style="font-size:11px;color:var(--text4);margin-top:4px;">Segments ci-dessous s'appliquent à ce type.</div>
+  </div>`;
+}
+
+function setProfilePerType(type, val) {
+  const prof = getOrInitProfile(type);
+  prof.perType = val;
+  renderProfileUI(type);
+  renderOssature(); scheduleSave();
+}
+
+function setProfileActiveColor(type, aci) {
+  const prof = getOrInitProfile(type);
+  prof._activeColor = aci;
+  renderProfileUI(type);
+}
+
+function getEditingSegments(type) {
+  const prof = getOrInitProfile(type);
+  if (prof.perType && prof._activeColor) {
+    if (!prof.byColor[prof._activeColor]) {
+      prof.byColor[prof._activeColor] = { segments: JSON.parse(JSON.stringify(prof.global.segments)) };
+    }
+    return prof.byColor[prof._activeColor].segments;
+  }
+  return prof.global.segments;
+}
+
+function addProfileSeg(type) {
+  const segs = getEditingSegments(type);
+  const prof = getOrInitProfile(type);
+  segs.push({ id: prof._nextSegId++, width: 30, kind: 'width', fixation: false });
+  renderProfileUI(type); renderProfileScrewUI(type);
+  renderOssature(); scheduleSave();
+}
+
+function removeProfileSeg(type, i) {
+  const segs = getEditingSegments(type);
+  segs.splice(i, 1);
+  renderProfileUI(type); renderProfileScrewUI(type);
+  renderOssature(); scheduleSave();
+}
+
+function updateProfileSeg(type, i, field, value) {
+  const segs = getEditingSegments(type);
+  if (!segs[i]) return;
+  segs[i][field] = value;
+  if (field === 'fixation' && value && !segs[i].screwConfig) segs[i].screwConfig = defaultScrewConfig();
+  renderProfileUI(type); renderProfileScrewUI(type);
+  renderOssature(); scheduleSave();
+}
+
+function renderProfileScrewUI(type) {
+  const id = `${type}ScrewUI`;
+  const el = document.getElementById(id);
+  if (!el) return;
+  const segs = getEditingSegments(type);
+  const fixSegs = segs.map((s,i)=>({s,i})).filter(({s})=>s.kind==='width'&&s.fixation&&s.screwConfig);
+  if (!fixSegs.length) {
+    el.innerHTML = `<div style="color:var(--text4);font-size:12px;padding:4px;">Aucun segment "Vis" coché.</div>`;
+    return;
+  }
+  const label = type === 'omega' ? 'Oméga' : 'Zed';
+  el.innerHTML = fixSegs.map(({s, i}) => {
+    const c = s.screwConfig;
+    return `<div style="background:var(--bg3);border-radius:6px;padding:8px;margin-bottom:8px;">
+      <div style="font-size:12px;font-weight:600;margin-bottom:6px;">${label} — Segment ${i+1} (largeur ${s.width}mm)</div>
+      <div class="oss-config">
+        <div><label>Nb vis transversal</label>
+          <input type="number" value="${c.countH}" min="1" max="10" step="1"
+            oninput="updateScrewCfg('${type}',${i},'countH',+this.value)"></div>
+        <div><label>Nb vis longitudinal</label>
+          <input type="number" value="${c.countV}" min="1" max="20" step="1"
+            oninput="updateScrewCfg('${type}',${i},'countV',+this.value)"></div>
+        <div><label>Entraxe max transversal (mm)</label>
+          <input type="number" value="${c.entraxeH}" min="1" max="1000" step="10"
+            oninput="updateScrewCfg('${type}',${i},'entraxeH',+this.value)"></div>
+        <div><label>Entraxe max longitudinal (mm)</label>
+          <input type="number" value="${c.entraxeV}" min="1" max="2000" step="10"
+            oninput="updateScrewCfg('${type}',${i},'entraxeV',+this.value)"></div>
+        <div><label>Diamètre vis (mm)</label>
+          <input type="number" value="${c.diametre}" min="1" max="30" step="0.5"
+            oninput="updateScrewCfg('${type}',${i},'diametre',+this.value)"></div>
+        <div><label>Dist. bord trou → bord segment (mm)</label>
+          <input type="number" value="${c.bordDist}" min="0" max="100" step="1"
+            oninput="updateScrewCfg('${type}',${i},'bordDist',+this.value)"></div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <label style="margin:0;">2 bords</label>
+          <input type="checkbox" ${c.bothSides?'checked':''} onchange="updateScrewCfg('${type}',${i},'bothSides',this.checked);renderProfileScrewUI('${type}')">
+          ${!c.bothSides ? `<select style="background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 6px;font-size:12px;"
+            onchange="updateScrewCfg('${type}',${i},'side',this.value)">
+            <option value="left" ${c.side==='left'?'selected':''}>Bord gauche</option>
+            <option value="right" ${c.side==='right'?'selected':''}>Bord droit</option>
+          </select>` : ''}
+        </div>
+        <div><label>Dist. bord trou → extrémité oss. (mm)</label>
+          <input type="number" value="${c.extremiteDist}" min="0" max="200" step="1"
+            oninput="updateScrewCfg('${type}',${i},'extremiteDist',+this.value)"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function updateScrewCfg(type, segIdx, field, value) {
+  const segs = getEditingSegments(type);
+  if (!segs[segIdx] || !segs[segIdx].screwConfig) return;
+  segs[segIdx].screwConfig[field] = value;
+  renderOssature(); scheduleSave();
 }
 
 // ============================================================
@@ -4758,10 +4973,106 @@ function calcOssature() {
   return results;
 }
 
+// ── Profile helpers ──────────────────────────────────────────
+function getProfile(type) {
+  const prof = type === 'omega' ? ossatureConfig.omegaProfile : ossatureConfig.zedProfile;
+  return prof || (type === 'omega' ? defaultOmegaProfile() : defaultZedProfile());
+}
+
+function getActiveSegments(type, colorAci) {
+  const prof = getProfile(type);
+  if (prof.perType && colorAci != null && prof.byColor && prof.byColor[colorAci]) {
+    return prof.byColor[colorAci].segments || [];
+  }
+  return (prof.global && prof.global.segments) || [];
+}
+
+function getProfileTotalWidth(type, colorAci) {
+  const segs = getActiveSegments(type, colorAci);
+  const total = segs.filter(s => s.kind === 'width').reduce((sum, s) => sum + (s.width || 0), 0);
+  return total || (type === 'omega' ? 80 : 40);
+}
+
+// Returns [{seg, segLeft}] for fixation-enabled segments, given ossature centered at cx
+function getFixationSegments(type, colorAci, cx) {
+  const segs = getActiveSegments(type, colorAci);
+  const totalW = getProfileTotalWidth(type, colorAci);
+  let profileLeft = cx - totalW / 2;
+  let xCursor = profileLeft;
+  const result = [];
+  for (const seg of segs) {
+    if (seg.kind === 'width') {
+      if (seg.fixation && seg.screwConfig) {
+        result.push({ seg, segLeft: xCursor });
+      }
+      xCursor += seg.width || 0;
+    }
+    // depth segments don't advance xCursor (they go into the wall, not visible)
+  }
+  return result;
+}
+
+// Calculate screw positions for one fixation segment on one ossature piece
+// pieceY1..pieceY2 = extents of the piece (in real mm coords)
+function calcScrewPositions(seg, segLeft, pieceY1, pieceY2) {
+  const cfg = seg.screwConfig;
+  const r = (cfg.diametre || 8) / 2;
+  const W = seg.width || 40;
+  // X positions within segment
+  const leftMin = (cfg.bothSides || cfg.side === 'left')  ? cfg.bordDist + r : r;
+  const rightMax = (cfg.bothSides || cfg.side === 'right') ? W - cfg.bordDist - r : W - r;
+  const xPositions = [];
+  const nH = Math.max(1, cfg.countH || 1);
+  if (nH === 1) {
+    xPositions.push(segLeft + (leftMin + rightMax) / 2);
+  } else {
+    for (let i = 0; i < nH; i++) {
+      xPositions.push(segLeft + leftMin + i * (rightMax - leftMin) / (nH - 1));
+    }
+  }
+  // Y positions along piece
+  const extR = (cfg.extremiteDist || 20) + r;
+  const yBot = pieceY1 + extR, yTop = pieceY2 - extR;
+  if (yBot > yTop) return [];
+  const nV = Math.max(cfg.countV || 2, Math.ceil((yTop - yBot) / (cfg.entraxeV || 300)) + 1);
+  const yPositions = [];
+  if (nV === 1) {
+    yPositions.push((yBot + yTop) / 2);
+  } else {
+    for (let i = 0; i < nV; i++) {
+      yPositions.push(yBot + i * (yTop - yBot) / (nV - 1));
+    }
+  }
+  const positions = [];
+  for (const x of xPositions) for (const y of yPositions) positions.push({ x, y });
+  return positions;
+}
+
+// Compute piece boundaries for an ossature at cx covering [yStart..yEnd] given panels
+function getPieceBoundaries(cx, yStart, yEnd, panels) {
+  const MAX_GAP = 20;
+  const joints = new Set();
+  for (const p of panels) {
+    for (const q of panels) {
+      if (q === p) continue;
+      const g = q.ymin - p.ymax;
+      if (g >= 5 && g <= MAX_GAP && p.xmax > q.xmin + 5 && q.xmax > p.xmin + 5) {
+        const jy = (p.ymax + q.ymin) / 2;
+        if (jy > yStart + 5 && jy < yEnd - 5) joints.add(Math.round(jy));
+      }
+    }
+  }
+  const sorted = [yStart, ...[...joints].sort((a, b) => a - b), yEnd];
+  const pieces = [];
+  for (let i = 0; i < sorted.length - 1; i++) pieces.push({ y1: sorted[i], y2: sorted[i + 1] });
+  return pieces;
+}
+
 function buildOssatureSvg(fname, panels) {
   const ENTRAXE = ossatureConfig.entaxeMax || 600;
   const MAX_GAP = 20;
-  const ZED_W = 40, OMEGA_W = 80;
+  const OMEGA_W = getProfileTotalWidth('omega');
+  const ZED_W   = getProfileTotalWidth('zed');
   const prol  = (ossatureConfig.prolongementEnabled  && ossatureConfig.prolongement  > 0) ? ossatureConfig.prolongement  : 0;
   const prolH = (ossatureConfig.prolongementHautEnabled && ossatureConfig.prolongementHaut > 0) ? ossatureConfig.prolongementHaut : 0;
 
@@ -4789,6 +5100,25 @@ function buildOssatureSvg(fname, panels) {
     const x = sx(xr), y = sy(yt), w = sw(xr2 - xr), h = sw(yt - yb);
     if (w < 0.5 || h < 0.5) return;
     svg += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" fill-opacity="${opacity||1}" stroke="${stroke}" stroke-width="0.7"/>`;
+  }
+
+  // Draw screw circles for an ossature at cx, from yStart to yEnd
+  function drawScrews(type, cx, yStart, yEnd, colorAci) {
+    const fixSegs = getFixationSegments(type, colorAci, cx);
+    if (!fixSegs.length) return;
+    const pieces = getPieceBoundaries(cx, yStart, yEnd, panels);
+    for (const { seg, segLeft } of fixSegs) {
+      const r = (seg.screwConfig.diametre || 8) / 2;
+      for (const piece of pieces) {
+        const pts = calcScrewPositions(seg, segLeft, piece.y1, piece.y2);
+        for (const { x, y } of pts) {
+          const px = sx(x), py = sy(y), pr = Math.max(1.5, sw(r));
+          svg += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${pr.toFixed(1)}" fill="white" stroke="#333" stroke-width="0.8" opacity="0.9"/>`;
+          svg += `<line x1="${(px-pr*0.6).toFixed(1)}" y1="${py.toFixed(1)}" x2="${(px+pr*0.6).toFixed(1)}" y2="${py.toFixed(1)}" stroke="#333" stroke-width="0.6"/>`;
+          svg += `<line x1="${px.toFixed(1)}" y1="${(py-pr*0.6).toFixed(1)}" x2="${px.toFixed(1)}" y2="${(py+pr*0.6).toFixed(1)}" stroke="#333" stroke-width="0.6"/>`;
+        }
+      }
+    }
   }
 
   // Panels (gray)
@@ -4830,6 +5160,7 @@ function buildOssatureSvg(fname, panels) {
     if (prol  > 0 && Math.abs(yStart - fymin) < 5) yStart = fymin - prol;
     if (prolH > 0 && Math.abs(yEnd   - fymax) < 5) yEnd   = fymax + prolH;
     rect(cx - ZED_W/2, yStart, cx + ZED_W/2, yEnd, '#facc1566', '#ca8a04', 1);
+    drawScrews('zed', cx, yStart, yEnd, null);
   }
 
   // ── Junctions → Omega ──
@@ -4863,6 +5194,7 @@ function buildOssatureSvg(fname, panels) {
       const mS = (prol  > 0 && m.s <= fymin + 5) ? fymin - prol  : m.s;
       const mE = (prolH > 0 && m.e >= fymax - 5) ? fymax + prolH : m.e;
       rect(jx - OMEGA_W/2, mS, jx + OMEGA_W/2, mE, '#22d3ee55', '#0891b2', 1);
+      drawScrews('omega', jx, mS, mE, null);
     }
 
     // Gap Zed at junction
@@ -4888,6 +5220,7 @@ function buildOssatureSvg(fname, panels) {
         const gsE = (prol>0&&gs<=fymin+5)?fymin-prol:gs;
         const geE = (prolH>0&&ge>=fymax-5)?fymax+prolH:ge;
         rect(jx - ZED_W/2, gsE, jx + ZED_W/2, geE, '#f97316aa', '#ea580c', 1);
+        drawScrews('zed', jx, gsE, geE, null);
       }
     }
   }
@@ -4896,10 +5229,14 @@ function buildOssatureSvg(fname, panels) {
   for (const p of panels) {
     const yS = (prol>0&&Math.abs(p.ymin-fymin)<5)?fymin-prol:p.ymin;
     const yE = (prolH>0&&Math.abs(p.ymax-fymax)<5)?fymax+prolH:p.ymax;
-    if (!hasRN.has(p) && panels.some(q => q!==p && q.xmin > p.xmax + MAX_GAP))
+    if (!hasRN.has(p) && panels.some(q => q!==p && q.xmin > p.xmax + MAX_GAP)) {
       rect(p.xmax - ZED_W/2, yS, p.xmax + ZED_W/2, yE, '#f97316aa', '#ea580c', 1);
-    if (!hasLN.has(p) && panels.some(q => q!==p && q.xmax < p.xmin - MAX_GAP))
+      drawScrews('zed', p.xmax, yS, yE, p.color);
+    }
+    if (!hasLN.has(p) && panels.some(q => q!==p && q.xmax < p.xmin - MAX_GAP)) {
       rect(p.xmin - ZED_W/2, yS, p.xmin + ZED_W/2, yE, '#f97316aa', '#ea580c', 1);
+      drawScrews('zed', p.xmin, yS, yE, p.color);
+    }
   }
 
   // ── Axes omégas (option) ──
@@ -7318,7 +7655,7 @@ function exportDxfPanneaux() {
 // Même logique, même tracking, pas de dessin DXF.
 function computeOssatFacadeProfiles(fname, panels) {
   const ENTRAXE_REGULAR = ossatureConfig.entaxeMax || 600;
-  const MAX_GAP = 20, ZED_W = 40, MIN_CUT_LEN = 1500;
+  const MAX_GAP = 20, ZED_W = getProfileTotalWidth('zed'), MIN_CUT_LEN = 1500;
   const prol  = (ossatureConfig.prolongementEnabled  && ossatureConfig.prolongement  > 0) ? ossatureConfig.prolongement  : 0;
   const prolH = (ossatureConfig.prolongementHautEnabled && ossatureConfig.prolongementHaut > 0) ? ossatureConfig.prolongementHaut : 0;
   const pEnt   = ossatureConfig.prolongEntaxe || ENTRAXE_REGULAR;
@@ -7872,8 +8209,8 @@ function exportDxfOssature(builderOverride) {
     }
 
     // ── Pairwise junction detection for omega and zed ──
-    const ZED_W = 40;
-    const OMEGA_W = 80;
+    const ZED_W   = getProfileTotalWidth('zed');
+    const OMEGA_W = getProfileTotalWidth('omega');
 
     // Track positions of extended profiles for prolongement gap-fill
     const extYellowXs = [];
@@ -8248,6 +8585,8 @@ renderGroupTabs();
 renderActiveGroup();
 renderOmegaStockList();
 renderZedStockList();
+renderProfileUI('omega');
+renderProfileUI('zed');
 // Keydown enter for omega/zed stock inputs
 document.getElementById('newOmegaLen')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addOmegaStock(); });
 document.getElementById('newZedLen')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addZedStock(); });
