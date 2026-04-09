@@ -7812,7 +7812,9 @@ function exportDxfOssature() {
 
   // Single outer contour around all panels (extended for prolongement)
   const ossOuterMargin = 200;
-  dxf.addRect(ossGxmin - ossOuterMargin, ossGymin - ossOuterMargin - prol, ossGxmax + ossOuterMargin, ossGymax + ossOuterMargin + prolH, 'CONTOUR', 7);
+  // Marge supplémentaire si entraxes affichés (texte dépasse au-dessus/en-dessous)
+  const axesExtra = ossatureConfig.showOmegaAxes ? 500 : 0;
+  dxf.addRect(ossGxmin - ossOuterMargin, ossGymin - ossOuterMargin - prol - axesExtra, ossGxmax + ossOuterMargin, ossGymax + ossOuterMargin + prolH + axesExtra, 'CONTOUR', 7);
 
   for (const fname of facadeNames) {
     const allPanels = translatedByFacade[fname];
@@ -8132,6 +8134,8 @@ function exportDxfOssature() {
               for (let z = 1; z <= nz; z++) {
                 const cx = pts[j] + z * step;
                 addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 30, jointCuts);
+                const rx = Math.round(cx);
+                allOssXsSet.add(rx); botOssXsSet.add(rx);
               }
             }
           }
@@ -8167,6 +8171,8 @@ function exportDxfOssature() {
               for (let z = 1; z <= nz; z++) {
                 const cx = pts[j] + z * step;
                 addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 30, jointCuts);
+                const rx = Math.round(cx);
+                allOssXsSet.add(rx); topOssXsSet.add(rx);
               }
             }
           }
