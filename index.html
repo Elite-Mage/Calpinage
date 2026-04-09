@@ -7594,7 +7594,7 @@ function computeOssatureProfilesReport() {
 }
 
 // ── EXPORT DXF OSSATURE ──
-function exportDxfOssature() {
+function exportDxfOssature(builderOverride) {
   if (!projectRectsSpatial || !projectRectsSpatial.length) {
     alert('Aucune donnee spatiale disponible. Importez un DXF d\'abord.');
     return;
@@ -7652,7 +7652,7 @@ function exportDxfOssature() {
     return { leftGaps, rightGaps };
   }
 
-  const dxf = createDxfBuilder();
+  const dxf = builderOverride || createDxfBuilder();
   dxf.addLayer('CONTOUR',      7);   // noir
   dxf.addLayer('PANNEAUX_REF', 9);   // gris clair (référence)
   dxf.addLayer('OMEGA',        5);   // bleu
@@ -8178,8 +8178,45 @@ function exportDxfOssature() {
     }
   }
 
-  const nom = chantier.nom || 'calpinage';
-  downloadDxf(dxf.toString(), nom.replace(/[^a-zA-Z0-9]/g, '_') + '_ossature.dxf');
+  if (!builderOverride) {
+    const nom = chantier.nom || 'calpinage';
+    downloadDxf(dxf.toString(), nom.replace(/[^a-zA-Z0-9]/g, '_') + '_ossature.dxf');
+  }
+}
+
+function createSvgBuilder() {
+  const ACI = {1:'#e74c3c',2:'#e6ac00',3:'#27ae60',4:'#00acc1',5:'#1565c0',
+               6:'#8e24aa',7:'#000000',8:'#555555',9:'#999999',30:'#e65100'};
+  let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity;
+  const items=[];
+  const tr=(x,y)=>{xmin=Math.min(xmin,x);xmax=Math.max(xmax,x);ymin=Math.min(ymin,y);ymax=Math.max(ymax,y);};
+  return {
+    addLayer(){},
+    addLine(x1,y1,x2,y2,l,c){tr(x1,y1);tr(x2,y2);items.push({t:'l',x1,y1,x2,y2,c});},
+    addRect(x1,y1,x2,y2,l,c){
+      tr(x1,y1);tr(x2,y2);
+      items.push({t:'r',x1:Math.min(x1,x2),y1:Math.min(y1,y2),x2:Math.max(x1,x2),y2:Math.max(y1,y2),c});
+    },
+    addCircle(cx,cy,r,l,c){tr(cx,cy);items.push({t:'c',cx,cy,r,c});},
+    addText(x,y,h,text,l,c,a){tr(x,y);items.push({t:'tx',x,y,h,text,c,a:a||0});},
+    toSvg(maxW=800,maxH=600){
+      const mg=20, vw=xmax-xmin+mg*2, vh=ymax-ymin+mg*2;
+      const sc=Math.min(maxW/vw,maxH/vh);
+      const W=Math.round(vw*sc), H=Math.round(vh*sc);
+      const sx=x=>((x-xmin+mg)*sc).toFixed(1);
+      const sy=y=>((ymax+mg-y)*sc).toFixed(1);
+      const col=c=>ACI[c]||'#000';
+      let s='';
+      for(const it of items){
+        const k=col(it.c);
+        if(it.t==='l') s+=`<line x1="${sx(it.x1)}" y1="${sy(it.y1)}" x2="${sx(it.x2)}" y2="${sy(it.y2)}" stroke="${k}" stroke-width="0.5"/>`;
+        else if(it.t==='r'){const x=+sx(it.x1),y=+sy(it.y2),w=(it.x2-it.x1)*sc,h=(it.y2-it.y1)*sc; s+=`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="none" stroke="${k}" stroke-width="0.5"/>`;}
+        else if(it.t==='c') s+=`<circle cx="${sx(it.cx)}" cy="${sy(it.cy)}" r="${(it.r*sc).toFixed(1)}" fill="${col(1)}" stroke="${k}" stroke-width="0.5"/>`;
+        else if(it.t==='tx'){const fs=Math.max(4,it.h*sc);s+=`<text x="${sx(it.x)}" y="${sy(it.y)}" font-size="${fs.toFixed(1)}" text-anchor="${it.a===1?'middle':'start'}" fill="${k}" font-family="monospace">${it.text}</text>`;}
+      }
+      return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;width:100%;height:auto;background:white">${s}</svg>`;
+    }
+  };
 }
 
 function exportPdfOssature() {
@@ -8188,27 +8225,17 @@ function exportPdfOssature() {
   }
   const nom  = chantier.nom  || 'Chantier';
   const date = chantier.date || new Date().toISOString().slice(0, 10);
-  const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
-  const facadeNames = Object.keys(byFacade).sort();
-
-  let pages = '';
-  for (const fname of facadeNames) {
-    const svg = buildOssatureSvg(fname, byFacade[fname])
-      .replace(/var\(--bg2\)/g, 'white')
-      .replace(/var\(--bg3\)/g, '#f1f5f9')
-      .replace(/var\(--text3\)/g, '#334155')
-      .replace(/var\(--text\b[^)]*\)/g, '#1e293b');
-    pages += `<div class="page"><div class="hdr"><span class="title">${nom} &mdash; Ossature &mdash; ${fname}</span><span class="meta">${date}</span></div>${svg}</div>`;
-  }
-
+  const svgB = createSvgBuilder();
+  exportDxfOssature(svgB);
+  const svg  = svgB.toSvg(1600, 1000);
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Ossature ${nom}</title><style>
     body{margin:0;background:#fff;font-family:system-ui,sans-serif;}
-    .page{padding:10mm;page-break-after:always;}
+    .page{padding:10mm;}
     .hdr{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #1e293b;margin-bottom:10px;padding-bottom:4px;}
     .title{font-size:14px;font-weight:700;}.meta{font-size:10px;color:#64748b;}
-    svg{width:100%!important;height:auto!important;background:white!important;border-radius:0!important;}
     @media print{.page{padding:8mm;}}
-  </style></head><body>${pages}<script>window.onload=()=>window.print();<\/script></body></html>`;
+  </style></head><body><div class="page"><div class="hdr"><span class="title">${nom} &mdash; Ossature</span><span class="meta">${date}</span></div>${svg}</div>
+  <script>window.onload=()=>window.print();<\/script></body></html>`;
   window.open(URL.createObjectURL(new Blob([html],{type:'text/html;charset=utf-8'})),'_blank');
 }
 
