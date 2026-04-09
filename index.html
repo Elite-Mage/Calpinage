@@ -766,6 +766,12 @@
             oninput="fixationConfig.nFixOmega=+this.value; renderFixation(); scheduleSave();">
         </div>
         <div>
+          <label>Axe vis — écart bord (mm)</label>
+          <input type="number" id="fixMarginOssV" value="30" min="6" max="200" step="1"
+            title="Distance entre le centre de la vis et le bord haut/bas du profil"
+            oninput="fixationConfig.marginOssV=+this.value; renderFixation(); scheduleSave();">
+        </div>
+        <div>
           <label>Prix / fix. ossature (€/u)</label>
           <input type="number" id="fixationPrixOss" value="" placeholder="0.00" min="0" step="0.01"
             oninput="fixationConfig.prixFixationOss=this.value; renderFixation(); scheduleSave();">
@@ -1036,8 +1042,9 @@ let devisConfig = { prixMO: '' };
 let fixationConfig = {
   prixFixation: '',
   prixFixationOss: '',
-  nFixZed: 1,    // nb vis par longeron pour les profils Zed
-  nFixOmega: 2,  // nb vis par longeron pour les profils Oméga
+  nFixZed: 1,      // nb vis par longeron pour les profils Zed
+  nFixOmega: 2,    // nb vis par longeron pour les profils Oméga
+  marginOssV: 30,  // mm entre le centre de la vis et le bord haut/bas du profil
   trouEnabled: false,
   trouApplyAll: true,
   trouGlobal: { corner: 'bl', offsetX: 50, offsetY: 50, diameter: 8, entraxeH: 600, entraxeV: 600, minH: 1, minV: 1 },
@@ -3220,10 +3227,12 @@ function applyProjectData(data) {
     document.getElementById('fixationPrix').value = fixationConfig.prixFixation || '';
     const prixOssEl = document.getElementById('fixationPrixOss');
     if (prixOssEl) prixOssEl.value = fixationConfig.prixFixationOss || '';
-    const nzEl = document.getElementById('fixNFixZed');
-    const noEl = document.getElementById('fixNFixOmega');
-    if (nzEl) nzEl.value = fixationConfig.nFixZed  ?? 1;
-    if (noEl) noEl.value = fixationConfig.nFixOmega ?? 2;
+    const nzEl  = document.getElementById('fixNFixZed');
+    const noEl  = document.getElementById('fixNFixOmega');
+    const mvEl  = document.getElementById('fixMarginOssV');
+    if (nzEl) nzEl.value = fixationConfig.nFixZed    ?? 1;
+    if (noEl) noEl.value = fixationConfig.nFixOmega  ?? 2;
+    if (mvEl) mvEl.value = fixationConfig.marginOssV ?? 30;
     const trouEl = document.getElementById('trouEnabled');
     const trouAllEl = document.getElementById('trouApplyAll');
     if (trouEl) trouEl.checked = !!fixationConfig.trouEnabled;
@@ -7649,9 +7658,11 @@ function exportDxfOssature() {
   dxf.addLayer('TEXTE', 7);
 
   const OSS_FIX_RADIUS = 4;  // rayon = diamètre 8mm / 2
-  const OSS_FIX_MARGIN = 14; // centre du trou à 14mm du bord
+  const OSS_FIX_MARGIN = 14; // centre du trou à 14mm du bord horizontal
   const nFixOmega = Math.max(1, fixationConfig.nFixOmega ?? 2);
   const nFixZed   = Math.max(1, fixationConfig.nFixZed   ?? 1);
+  // Marge verticale : distance min entre le centre de la vis et le bord haut/bas du profil
+  const marginOssV = Math.max(OSS_FIX_RADIUS + 2, fixationConfig.marginOssV ?? 30);
 
   // Longerons courants de la façade en cours (mis à jour dans la boucle par façade)
   let currentFacadeLongeronYs = [];
@@ -7662,8 +7673,11 @@ function exportDxfOssature() {
     // Longerons qui traversent ce segment
     const ys = currentFacadeLongeronYs
       .filter(y => y >= yBot - TOL && y <= yTop + TOL)
-      .map(y => Math.max(yBot, Math.min(yTop, y)));
-    if (ys.length === 0) ys.push(yBot, yTop);
+      // Clamp verticalement : le centre de la vis reste à l'intérieur du profil
+      .map(y => Math.max(yBot + marginOssV, Math.min(yTop - marginOssV, y)));
+    if (ys.length === 0) {
+      ys.push(yBot + marginOssV, yTop - marginOssV);
+    }
     const nFix = isOmega ? nFixOmega : nFixZed;
     const profileW = xmax - xmin;
     const avail = Math.max(profileW - 2 * OSS_FIX_MARGIN, 0);
@@ -7858,6 +7872,8 @@ function exportDxfOssature() {
     const omegaXsExtHaut = [];
     const violetXsSet = new Set();
     const violetXsSetHaut = new Set();
+    // Toutes les positions X d'ossatures (oméga + zed) pour les cotes d'entraxe
+    const allOssXsSet = new Set();
 
     // Entraxe ZED — collect per panel then merge across joints
     const extYellowXsHaut = [];
@@ -7902,6 +7918,7 @@ function exportDxfOssature() {
     }
     for (const { cx, yStart, yEnd } of mergedZeds) {
       addSplitProfile(cx - ZED_W/2, clipStartF(yStart), cx + ZED_W/2, clipEndF(yEnd), 'ZED_ENTRAXE', 2, jointCuts);
+      allOssXsSet.add(Math.round(cx));
     }
 
     // Pairwise junction detection
@@ -7952,6 +7969,7 @@ function exportDxfOssature() {
           if (prol > 0 && m.start <= fymin + 5) omegaXsExt.push(jx);
           if (prolH > 0 && m.end >= fymax - 5) omegaXsExtHaut.push(jx);
         }
+        allOssXsSet.add(jx); // oméga à cette junction
       }
 
       // Gap ZED at junction (bord ouverture) — étendu vers le bas si touche fymin
@@ -7963,6 +7981,7 @@ function exportDxfOssature() {
           const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : clipStartF(gs);
           const geExt = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : clipEndF(ge);
           addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 6, jointCuts);
+          allOssXsSet.add(jx);
           if (prol > 0 && gs <= fymin + 5) violetXsSet.add(jx);
           if (prolH > 0 && ge >= fymax - 5) violetXsSetHaut.add(jx);
         }
@@ -7972,31 +7991,30 @@ function exportDxfOssature() {
           const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : clipStartF(gs);
           const geExt = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : clipEndF(ge);
           addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 6, jointCuts);
+          allOssXsSet.add(jx);
           if (prol > 0 && gs <= fymin + 5) violetXsSet.add(jx);
           if (prolH > 0 && ge >= fymax - 5) violetXsSetHaut.add(jx);
         }
       }
     }
 
-    // ── Axes omégas (option) ──
+    // ── Axes et entraxes de toutes les ossatures (option) ──
     if (ossatureConfig.showOmegaAxes) {
-      const omegaXsSorted = Object.keys(junctions).map(Number).sort((a, b) => a - b);
+      const allSorted = [...allOssXsSet].sort((a, b) => a - b);
       const axisTextH = Math.max(80, titleH * 0.4);
       const dimY = ossTop + 200 + axisTextH;
-      for (const jx of omegaXsSorted) {
+      for (const ax of allSorted) {
         // Trait d'axe vertical sur toute la hauteur ossature
-        dxf.addLine(jx, ossBottom, jx, ossTop, 'OMEGA_AXES', 5);
+        dxf.addLine(ax, ossBottom, ax, ossTop, 'OMEGA_AXES', 5);
         // Tiret sur la ligne de cote
-        dxf.addLine(jx, dimY - axisTextH * 0.6, jx, dimY + axisTextH * 0.6, 'OMEGA_AXES', 5);
+        dxf.addLine(ax, dimY - axisTextH * 0.6, ax, dimY + axisTextH * 0.6, 'OMEGA_AXES', 5);
       }
-      // Cotes d'entraxe entre omégas consécutifs
-      for (let i = 0; i < omegaXsSorted.length - 1; i++) {
-        const x1 = omegaXsSorted[i], x2 = omegaXsSorted[i + 1];
+      // Cotes d'entraxe entre ossatures consécutives
+      for (let i = 0; i < allSorted.length - 1; i++) {
+        const x1 = allSorted[i], x2 = allSorted[i + 1];
         const dist = Math.round(x2 - x1);
         const midX = (x1 + x2) / 2;
-        // Ligne de cote horizontale
         dxf.addLine(x1, dimY, x2, dimY, 'OMEGA_AXES', 5);
-        // Texte entraxe au centre
         dxf.addText(midX, dimY + axisTextH * 0.8, axisTextH, dist + ' mm', 'OMEGA_AXES', 5, 1);
       }
     }
@@ -8009,11 +8027,13 @@ function exportDxfOssature() {
       const yEnd = isTopP ? fymax + prolH : clipEndF(p.ymax);
       if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP)) {
         addSplitProfile(p.xmax - ZED_W/2, yStart, p.xmax + ZED_W/2, yEnd, 'ZED_BORD', 6, jointCuts);
+        allOssXsSet.add(Math.round(p.xmax));
         if (isBottomP) violetXsSet.add(Math.round(p.xmax));
         if (isTopP) violetXsSetHaut.add(Math.round(p.xmax));
       }
       if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP)) {
         addSplitProfile(p.xmin - ZED_W/2, yStart, p.xmin + ZED_W/2, yEnd, 'ZED_BORD', 6, jointCuts);
+        allOssXsSet.add(Math.round(p.xmin));
         if (isBottomP) violetXsSet.add(Math.round(p.xmin));
         if (isTopP) violetXsSetHaut.add(Math.round(p.xmin));
       }
