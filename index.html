@@ -8134,6 +8134,8 @@ function exportDxfOssature() {
               for (let z = 1; z <= nz; z++) {
                 const cx = pts[j] + z * step;
                 addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 30, jointCuts);
+                const rx = Math.round(cx);
+                allOssXsSet.add(rx); botOssXsSet.add(rx);
               }
             }
           }
@@ -8169,6 +8171,8 @@ function exportDxfOssature() {
               for (let z = 1; z <= nz; z++) {
                 const cx = pts[j] + z * step;
                 addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 30, jointCuts);
+                const rx = Math.round(cx);
+                allOssXsSet.add(rx); topOssXsSet.add(rx);
               }
             }
           }
