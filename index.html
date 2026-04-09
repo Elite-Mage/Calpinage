@@ -8001,30 +8001,35 @@ function exportDxfOssature() {
     // ── Axes et entraxes de toutes les ossatures (option) ──
     if (ossatureConfig.showOmegaAxes) {
       const allSorted = [...allOssXsSet].sort((a, b) => a - b);
-      const baseTextH = Math.max(40, titleH * 0.3);
-      const dimOffset = baseTextH * 2;
+      const n = allSorted.length;
+      if (n >= 2) {
+        // Taille uniforme : plus grande possible sans superposition entre textes du même côté
+        // Texte i est centré à midX_i = (allSorted[i]+allSorted[i+1])/2, largeur ≈ textH * 5.5
+        const CHAR_W = 5.5;
+        let textH = Math.max(40, titleH * 0.3);
+        for (let i = 0; i + 3 < n; i++) {
+          const mid0 = (allSorted[i]   + allSorted[i+1]) / 2;
+          const mid2 = (allSorted[i+2] + allSorted[i+3]) / 2;
+          textH = Math.min(textH, (mid2 - mid0) / CHAR_W);
+        }
+        textH = Math.max(20, textH);
 
-      // Traits d'axe verticaux à travers toute la façade
-      for (const ax of allSorted) {
-        dxf.addLine(ax, ossBottom, ax, ossTop, 'OMEGA_AXES', 5);
-      }
+        const dimOffset = textH * 2;
+        for (const ax of allSorted)
+          dxf.addLine(ax, ossBottom, ax, ossTop, 'OMEGA_AXES', 5);
 
-      // Cotes d'entraxe alternées haut/bas
-      for (let i = 0; i < allSorted.length - 1; i++) {
-        const x1 = allSorted[i], x2 = allSorted[i + 1];
-        const dist = Math.round(x2 - x1);
-        const midX = (x1 + x2) / 2;
-        // Hauteur texte adaptative : ~8 chars → textH * 5 ≤ dist
-        const textH = Math.min(baseTextH, Math.max(20, dist / 6));
-        const isTop = i % 2 === 0;
-        const dimY = isTop ? ossTop + dimOffset : ossBottom - dimOffset;
-        const textY = isTop ? dimY + textH * 0.8 : dimY - textH * 1.6;
-        const tick = textH * 0.5;
-
-        dxf.addLine(x1, dimY, x2, dimY, 'OMEGA_AXES', 5);
-        dxf.addLine(x1, dimY - tick, x1, dimY + tick, 'OMEGA_AXES', 5);
-        dxf.addLine(x2, dimY - tick, x2, dimY + tick, 'OMEGA_AXES', 5);
-        dxf.addText(midX, textY, textH, dist + ' mm', 'OMEGA_AXES', 5, 1);
+        for (let i = 0; i < n - 1; i++) {
+          const x1 = allSorted[i], x2 = allSorted[i + 1];
+          const dist = Math.round(x2 - x1);
+          const midX = (x1 + x2) / 2;
+          const isTop = i % 2 === 0;
+          const dimY = isTop ? ossTop + dimOffset : ossBottom - dimOffset;
+          const tick = textH * 0.5;
+          dxf.addLine(x1, dimY, x2, dimY, 'OMEGA_AXES', 5);
+          dxf.addLine(x1, dimY - tick, x1, dimY + tick, 'OMEGA_AXES', 5);
+          dxf.addLine(x2, dimY - tick, x2, dimY + tick, 'OMEGA_AXES', 5);
+          dxf.addText(midX, isTop ? dimY + textH * 0.8 : dimY - textH * 1.6, textH, dist + ' mm', 'OMEGA_AXES', 5, 1);
+        }
       }
     }
 
