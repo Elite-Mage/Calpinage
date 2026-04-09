@@ -8028,7 +8028,7 @@ function exportDxfOssature() {
           dxf.addLine(x1, dimY, x2, dimY, 'OMEGA_AXES', 7);
           dxf.addLine(x1, dimY - tick, x1, dimY + tick, 'OMEGA_AXES', 7);
           dxf.addLine(x2, dimY - tick, x2, dimY + tick, 'OMEGA_AXES', 7);
-          dxf.addText(midX, isTop ? dimY + textH * 0.8 : dimY - textH * 1.6, textH, dist + ' mm', 'OMEGA_AXES', 7, 1);
+          dxf.addText(midX, isTop ? dimY + textH * 0.8 : dimY - textH * 1.6, textH, dist + 'mm', 'OMEGA_AXES', 7, 1);
         }
       }
     }
