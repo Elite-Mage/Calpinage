@@ -1046,10 +1046,22 @@ function defaultScrewConfig() {
   return { countH: 1, countV: 2, entraxeH: 300, entraxeV: 300, diametre: 8, bordDist: 10, bothSides: true, side: 'left', extremiteDist: 20 };
 }
 function defaultOmegaProfile() {
-  return { perType: false, global: { segments: [{ id:1, width:80, kind:'width', fixation:true, screwConfig: defaultScrewConfig() }] }, byColor: {}, _nextSegId: 2 };
+  // 5 segments: aile(L) - web(P) - base(L,vis) - web(P) - aile(L) → forme U
+  return { perType: false, global: { segments: [
+    { id:1, width:30, fixation:false },
+    { id:2, width:100 },
+    { id:3, width:20, fixation:true, screwConfig: defaultScrewConfig() },
+    { id:4, width:100 },
+    { id:5, width:30, fixation:false }
+  ]}, byColor: {}, _nextSegId: 6 };
 }
 function defaultZedProfile() {
-  return { perType: false, global: { segments: [{ id:1, width:40, kind:'width', fixation:true, screwConfig: defaultScrewConfig() }] }, byColor: {}, _nextSegId: 2 };
+  // 3 segments: aile(L,vis) - web(P) - semelle(L) → forme L/Z
+  return { perType: false, global: { segments: [
+    { id:1, width:30, fixation:true, screwConfig: defaultScrewConfig() },
+    { id:2, width:100 },
+    { id:3, width:10, fixation:false }
+  ]}, byColor: {}, _nextSegId: 4 };
 }
 let ossatureConfig = { entaxeMax: 600, kerf: 0, prixOmega: '', prixZed: '', omegaStocks: [], zedStocks: [], hauteurOssature: 0, prolongement: 0, prolongementEnabled: false, prolongEntaxe: 600, prolongementHaut: 0, prolongementHautEnabled: false, fixationGap: 20, fixationZones: {}, fixationApplyAll: false, showOmegaAxes: false, axesSepHB: false, omegaProfile: defaultOmegaProfile(), zedProfile: defaultZedProfile() };
 let devisConfig = { prixMO: '' };
@@ -2453,7 +2465,7 @@ function calcFixationFacade(fname, panels, ossProfiles) {
   // Count screws from profile screw configs
   function nScrewsPerPiece(type) {
     const segs = getActiveSegments(type, null);
-    return segs.filter(s=>s.kind==='width'&&s.fixation&&s.screwConfig)
+    return segs.filter((s,i)=>i%2===0&&s.fixation&&s.screwConfig)
       .reduce((sum,s)=>{
         const c=s.screwConfig;
         return sum + Math.max(1,c.countH||1) * Math.max(1,c.countV||1);
@@ -4416,58 +4428,79 @@ function getOrInitProfile(type) {
   return type === 'omega' ? ossatureConfig.omegaProfile : ossatureConfig.zedProfile;
 }
 
+function buildProfilePathPts(segs) {
+  // Kind by index: even=largeur(→right), odd=profondeur(alternating ↓↑)
+  const pts = [{x:0,y:0}];
+  let x=0,y=0,depthDir=1;
+  for (let i=0;i<segs.length;i++) {
+    const w=segs[i].width||0;
+    if(i%2===0){x+=w;}else{y+=depthDir*w;depthDir*=-1;}
+    pts.push({x,y});
+  }
+  return pts;
+}
+
 function renderProfileUI(type) {
   const id = `${type}ProfileUI`;
   const el = document.getElementById(id);
   if (!el) return;
   const prof = getOrInitProfile(type);
-  const segs = (prof.global && prof.global.segments) || [];
+  const segs = getEditingSegments(type);
+  const maxSegs = type === 'omega' ? 5 : 4;
 
-  // Cross-section preview SVG
-  const totalW = segs.filter(s=>s.kind==='width').reduce((s,seg)=>s+(seg.width||0),0) || 1;
-  const totalH = Math.max(...segs.filter(s=>s.kind==='depth').map(s=>s.width||0), 20);
-  const svgW = 120, svgH = 60;
-  let px = 0, crossSvg = '';
-  for (const seg of segs) {
-    if (seg.kind === 'width') {
-      const sw2 = (seg.width / totalW) * svgW;
-      crossSvg += `<rect x="${px.toFixed(1)}" y="${(svgH/2-4).toFixed(1)}" width="${sw2.toFixed(1)}" height="8" fill="${seg.fixation?'#22d3ee88':'#64748b55'}" stroke="#475569" stroke-width="0.8"/>`;
-      if (seg.fixation) {
-        const cx2 = px + sw2/2, cy2 = svgH/2;
-        crossSvg += `<circle cx="${cx2.toFixed(1)}" cy="${cy2.toFixed(1)}" r="3" fill="white" stroke="#333" stroke-width="0.8"/>`;
-        crossSvg += `<line x1="${(cx2-2).toFixed(1)}" y1="${cy2.toFixed(1)}" x2="${(cx2+2).toFixed(1)}" y2="${cy2.toFixed(1)}" stroke="#333" stroke-width="0.6"/>`;
-        crossSvg += `<line x1="${cx2.toFixed(1)}" y1="${(cy2-2).toFixed(1)}" x2="${cx2.toFixed(1)}" y2="${(cy2+2).toFixed(1)}" stroke="#333" stroke-width="0.6"/>`;
+  // Build path
+  const pts = buildProfilePathPts(segs);
+  const allX=pts.map(p=>p.x), allY=pts.map(p=>p.y);
+  const xMin=Math.min(...allX),xMax=Math.max(...allX);
+  const yMin=Math.min(...allY),yMax=Math.max(...allY);
+  const pad=18, svgW=160, svgH=80;
+  const rangeX=xMax-xMin||1, rangeY=yMax-yMin||1;
+  const sc=Math.min((svgW-2*pad)/rangeX,(svgH-2*pad)/rangeY,2);
+  const toSX=x=>(x-xMin)*sc+pad;
+  const toSY=y=>(y-yMin)*sc+pad;
+
+  const pStr=pts.map(p=>`${toSX(p.x).toFixed(1)},${toSY(p.y).toFixed(1)}`).join(' ');
+  let crossSvg=`<polyline points="${pStr}" fill="none" stroke="var(--accent)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
+
+  // Segment midpoints: labels + fixation dots
+  for(let i=0;i<segs.length;i++){
+    const p1=pts[i],p2=pts[i+1];
+    const mx=(toSX(p1.x)+toSX(p2.x))/2, my=(toSY(p1.y)+toSY(p2.y))/2;
+    const isL=i%2===0;
+    const labelOff=isL?(toSY(p1.y)>svgH/2?12:-10):(toSX(p1.x)>svgW/2?-10:10);
+    if(isL){
+      crossSvg+=`<text x="${mx.toFixed(1)}" y="${(my+labelOff).toFixed(1)}" text-anchor="middle" font-size="8" fill="var(--text3)">${segs[i].width}</text>`;
+      if(segs[i].fixation){
+        crossSvg+=`<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="4" fill="white" stroke="#0891b2" stroke-width="1.2"/>`;
+        crossSvg+=`<line x1="${(mx-2.5).toFixed(1)}" y1="${my.toFixed(1)}" x2="${(mx+2.5).toFixed(1)}" y2="${my.toFixed(1)}" stroke="#0891b2" stroke-width="0.8"/>`;
+        crossSvg+=`<line x1="${mx.toFixed(1)}" y1="${(my-2.5).toFixed(1)}" x2="${mx.toFixed(1)}" y2="${(my+2.5).toFixed(1)}" stroke="#0891b2" stroke-width="0.8"/>`;
       }
-      const labelX = px + sw2/2;
-      crossSvg += `<text x="${labelX.toFixed(1)}" y="${(svgH/2+18).toFixed(1)}" text-anchor="middle" font-size="8" fill="var(--text3)">${seg.width}</text>`;
-      px += sw2;
     } else {
-      // depth: draw as a small bracket below
-      const dH = Math.min((seg.width/100)*20, 20);
-      crossSvg += `<rect x="${(px-3).toFixed(1)}" y="${(svgH/2+4).toFixed(1)}" width="3" height="${dH.toFixed(1)}" fill="#94a3b855" stroke="#64748b" stroke-width="0.6"/>`;
+      const lx=toSX(p1.x)+(toSX(p2.x)-toSX(p1.x)===0?(labelOff):-labelOff*0.5);
+      crossSvg+=`<text x="${lx.toFixed(1)}" y="${my.toFixed(1)}" text-anchor="middle" font-size="7" fill="var(--text4)">${segs[i].width}</text>`;
     }
   }
-  crossSvg += `<text x="${(svgW/2).toFixed(1)}" y="10" text-anchor="middle" font-size="8" fill="var(--text4)">Vue coupe (largeur: ${totalW}mm)</text>`;
+  const totalW=segs.filter((_,i)=>i%2===0).reduce((s,seg)=>s+(seg.width||0),0);
+  crossSvg+=`<text x="${(svgW/2).toFixed(1)}" y="${svgH-2}" text-anchor="middle" font-size="8" fill="var(--text4)">largeur=${totalW}mm</text>`;
 
-  // Segments list
-  let segHtml = segs.map((seg, i) => `
-    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;background:var(--bg3);border-radius:6px;padding:6px 8px;">
-      <span style="font-size:11px;color:var(--text4);min-width:16px;">${i+1}</span>
-      <select style="background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 4px;font-size:11px;"
-        onchange="updateProfileSeg('${type}',${i},'kind',this.value)">
-        <option value="width" ${seg.kind==='width'?'selected':''}>Largeur</option>
-        <option value="depth" ${seg.kind==='depth'?'selected':''}>Profondeur</option>
-      </select>
-      <input type="number" value="${seg.width||0}" min="1" max="500" step="1" style="width:55px;font-size:11px;"
-        title="Dimension (mm)" oninput="updateProfileSeg('${type}',${i},'width',+this.value)"> <span style="font-size:10px;color:var(--text4)">mm</span>
-      ${seg.kind==='width' ? `<label title="Vis fixées ici" style="display:flex;align-items:center;gap:3px;font-size:11px;cursor:pointer;">
-        <input type="checkbox" ${seg.fixation?'checked':''} onchange="updateProfileSeg('${type}',${i},'fixation',this.checked)">
-        <span>Vis</span>
-      </label>` : ''}
-      <button class="piece-remove" onclick="removeProfileSeg('${type}',${i})" style="margin-left:auto;">&times;</button>
-    </div>`).join('');
+  // Segment rows
+  const segHtml=segs.map((seg,i)=>{
+    const isL=i%2===0;
+    const kindLabel=isL?'Largeur':'Profondeur';
+    const kindColor=isL?'var(--accent)':'#94a3b8';
+    return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;background:var(--bg3);border-radius:6px;padding:5px 8px;">
+      <span style="font-size:10px;color:${kindColor};min-width:64px;font-weight:600;">${i+1}. ${kindLabel}</span>
+      <input type="number" value="${seg.width||0}" min="1" max="500" step="1" style="width:58px;font-size:12px;"
+        oninput="updateProfileSeg('${type}',${i},'width',+this.value)">
+      <span style="font-size:10px;color:var(--text4)">mm</span>
+      ${isL?`<label style="display:flex;align-items:center;gap:3px;font-size:11px;cursor:pointer;margin-left:auto;">
+        <input type="checkbox" ${seg.fixation?'checked':''} onchange="updateProfileSeg('${type}',${i},'fixation',this.checked)"><span>Vis</span>
+      </label>`:'<span style="margin-left:auto"></span>'}
+      <button class="piece-remove" onclick="removeProfileSeg('${type}',${i})">&times;</button>
+    </div>`;
+  }).join('');
 
-  el.innerHTML = `
+  el.innerHTML=`
     <div style="display:flex;gap:8px;margin-bottom:8px;">
       <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;">
         <input type="radio" name="${type}PerType" value="0" ${!prof.perType?'checked':''} onchange="setProfilePerType('${type}',false)"> Global
@@ -4476,10 +4509,12 @@ function renderProfileUI(type) {
         <input type="radio" name="${type}PerType" value="1" ${prof.perType?'checked':''} onchange="setProfilePerType('${type}',true)"> Par type panneau
       </label>
     </div>
-    ${prof.perType ? renderProfileColorSelector(type) : ''}
-    <svg width="${svgW}" height="${svgH+14}" style="display:block;background:var(--bg3);border-radius:4px;margin-bottom:8px;">${crossSvg}</svg>
+    ${prof.perType?renderProfileColorSelector(type):''}
+    <svg width="${svgW}" height="${svgH}" style="display:block;background:var(--bg3);border-radius:4px;margin-bottom:8px;">${crossSvg}</svg>
     ${segHtml}
-    <button class="btn-add" style="width:100%;margin-top:4px;font-size:12px;" onclick="addProfileSeg('${type}')">+ Segment</button>`;
+    ${segs.length<maxSegs
+      ?`<button class="btn-add" style="width:100%;margin-top:4px;font-size:12px;" onclick="addProfileSeg('${type}')">+ Segment (${segs.length}/${maxSegs})</button>`
+      :`<div style="font-size:11px;color:var(--text4);text-align:center;margin-top:4px;">Max ${maxSegs} segments</div>`}`;
 }
 
 function renderProfileColorSelector(type) {
@@ -4524,7 +4559,10 @@ function getEditingSegments(type) {
 function addProfileSeg(type) {
   const segs = getEditingSegments(type);
   const prof = getOrInitProfile(type);
-  segs.push({ id: prof._nextSegId++, width: 30, kind: 'width', fixation: false });
+  const maxSegs = type === 'omega' ? 5 : 4;
+  if (segs.length >= maxSegs) return;
+  const isLargeur = segs.length % 2 === 0; // next will be at index segs.length
+  segs.push({ id: prof._nextSegId++, width: isLargeur ? 30 : 100, fixation: false });
   renderProfileUI(type); renderProfileScrewUI(type);
   renderOssature(); scheduleSave();
 }
@@ -4550,7 +4588,7 @@ function renderProfileScrewUI(type) {
   const el = document.getElementById(id);
   if (!el) return;
   const segs = getEditingSegments(type);
-  const fixSegs = segs.map((s,i)=>({s,i})).filter(({s})=>s.kind==='width'&&s.fixation&&s.screwConfig);
+  const fixSegs = segs.map((s,i)=>({s,i})).filter(({s,i})=>i%2===0&&s.fixation&&s.screwConfig);
   if (!fixSegs.length) {
     el.innerHTML = `<div style="color:var(--text4);font-size:12px;padding:4px;">Aucun segment "Vis" coché.</div>`;
     return;
@@ -4989,25 +5027,23 @@ function getActiveSegments(type, colorAci) {
 
 function getProfileTotalWidth(type, colorAci) {
   const segs = getActiveSegments(type, colorAci);
-  const total = segs.filter(s => s.kind === 'width').reduce((sum, s) => sum + (s.width || 0), 0);
+  // Kind by position: even index = largeur, odd = profondeur
+  const total = segs.filter((_,i)=>i%2===0).reduce((sum,s)=>sum+(s.width||0), 0);
   return total || (type === 'omega' ? 80 : 40);
 }
 
-// Returns [{seg, segLeft}] for fixation-enabled segments, given ossature centered at cx
+// Returns [{seg, segLeft}] for fixation-enabled largeur segments, centered at cx
 function getFixationSegments(type, colorAci, cx) {
   const segs = getActiveSegments(type, colorAci);
   const totalW = getProfileTotalWidth(type, colorAci);
-  let profileLeft = cx - totalW / 2;
-  let xCursor = profileLeft;
+  let xCursor = cx - totalW / 2;
   const result = [];
-  for (const seg of segs) {
-    if (seg.kind === 'width') {
-      if (seg.fixation && seg.screwConfig) {
-        result.push({ seg, segLeft: xCursor });
-      }
-      xCursor += seg.width || 0;
+  for (let i=0; i<segs.length; i++) {
+    if (i%2===0) { // largeur
+      if (segs[i].fixation && segs[i].screwConfig) result.push({ seg: segs[i], segLeft: xCursor });
+      xCursor += segs[i].width || 0;
     }
-    // depth segments don't advance xCursor (they go into the wall, not visible)
+    // profondeur: not visible in facade X, skip xCursor
   }
   return result;
 }
