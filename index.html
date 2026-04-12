@@ -4599,16 +4599,16 @@ function renderProfileScrewUI(type) {
     return `<div style="background:var(--bg3);border-radius:6px;padding:8px;margin-bottom:8px;">
       <div style="font-size:12px;font-weight:600;margin-bottom:6px;">${label} — Segment ${i+1} (largeur ${s.width}mm)</div>
       <div class="oss-config">
-        <div><label>Nb vis transversal</label>
+        <div><label>Nb vis horizontal</label>
           <input type="number" value="${c.countH}" min="1" max="10" step="1"
             oninput="updateScrewCfg('${type}',${i},'countH',+this.value)"></div>
-        <div><label>Nb vis longitudinal</label>
+        <div><label>Nb vis vertical</label>
           <input type="number" value="${c.countV}" min="1" max="20" step="1"
             oninput="updateScrewCfg('${type}',${i},'countV',+this.value)"></div>
-        <div><label>Entraxe max transversal (mm)</label>
+        <div><label>Entraxe max horizontal (mm)</label>
           <input type="number" value="${c.entraxeH}" min="1" max="1000" step="10"
             oninput="updateScrewCfg('${type}',${i},'entraxeH',+this.value)"></div>
-        <div><label>Entraxe max longitudinal (mm)</label>
+        <div><label>Entraxe max vertical (mm)</label>
           <input type="number" value="${c.entraxeV}" min="1" max="2000" step="10"
             oninput="updateScrewCfg('${type}',${i},'entraxeV',+this.value)"></div>
         <div><label>Diamètre vis (mm)</label>
@@ -5033,30 +5033,45 @@ function getProfileTotalWidth(type, colorAci) {
 }
 
 // Returns [{seg, segLeft}] for fixation-enabled largeur segments, centered at cx
-function getFixationSegments(type, colorAci, cx) {
+// flip=true mirrors the profile horizontally (for left-edge opening Zeds)
+function getFixationSegments(type, colorAci, cx, flip) {
   const segs = getActiveSegments(type, colorAci);
   const totalW = getProfileTotalWidth(type, colorAci);
-  let xCursor = cx - totalW / 2;
   const result = [];
-  for (let i=0; i<segs.length; i++) {
-    if (i%2===0) { // largeur
-      if (segs[i].fixation && segs[i].screwConfig) result.push({ seg: segs[i], segLeft: xCursor });
-      xCursor += segs[i].width || 0;
+  if (!flip) {
+    let xCursor = cx - totalW / 2;
+    for (let i=0; i<segs.length; i++) {
+      if (i%2===0) {
+        if (segs[i].fixation && segs[i].screwConfig) result.push({ seg: segs[i], segLeft: xCursor });
+        xCursor += segs[i].width || 0;
+      }
     }
-    // profondeur: not visible in facade X, skip xCursor
+  } else {
+    // Mirror: segments in reverse, starting from right edge
+    let xCursor = cx + totalW / 2;
+    for (let i=segs.length-1; i>=0; i--) {
+      if (i%2===0) {
+        xCursor -= segs[i].width || 0;
+        if (segs[i].fixation && segs[i].screwConfig) result.push({ seg: segs[i], segLeft: xCursor, flip: true });
+      }
+    }
   }
   return result;
 }
 
 // Calculate screw positions for one fixation segment on one ossature piece
 // pieceY1..pieceY2 = extents of the piece (in real mm coords)
-function calcScrewPositions(seg, segLeft, pieceY1, pieceY2) {
+// flip=true mirrors the side constraint (for reversed profiles)
+function calcScrewPositions(seg, segLeft, pieceY1, pieceY2, flip) {
   const cfg = seg.screwConfig;
   const r = (cfg.diametre || 8) / 2;
   const W = seg.width || 40;
+  // When flipped, 'left' and 'right' sides are swapped
+  const sideLeft  = flip ? 'right' : 'left';
+  const sideRight = flip ? 'left'  : 'right';
   // X positions within segment
-  const leftMin = (cfg.bothSides || cfg.side === 'left')  ? cfg.bordDist + r : r;
-  const rightMax = (cfg.bothSides || cfg.side === 'right') ? W - cfg.bordDist - r : W - r;
+  const leftMin  = (cfg.bothSides || cfg.side === sideLeft)  ? cfg.bordDist + r : r;
+  const rightMax = (cfg.bothSides || cfg.side === sideRight) ? W - cfg.bordDist - r : W - r;
   const xPositions = [];
   const nH = Math.max(1, cfg.countH || 1);
   if (nH === 1) {
@@ -5139,20 +5154,39 @@ function buildOssatureSvg(fname, panels) {
   }
 
   // Draw screw circles for an ossature at cx, from yStart to yEnd
-  function drawScrews(type, cx, yStart, yEnd, colorAci) {
-    const fixSegs = getFixationSegments(type, colorAci, cx);
+  // flip=true mirrors the profile (used for left-edge opening Zeds)
+  function drawScrews(type, cx, yStart, yEnd, colorAci, flip) {
+    const fixSegs = getFixationSegments(type, colorAci, cx, flip);
     if (!fixSegs.length) return;
     const pieces = getPieceBoundaries(cx, yStart, yEnd, panels);
+    const PR = 2.5; // fixed pixel radius — always visible
+    const MIN_SEP = PR * 2 + 1; // minimum px between centers at same Y
+
+    // Collect all screw pixel positions
+    const allPts = [];
     for (const { seg, segLeft } of fixSegs) {
-      const r = (seg.screwConfig.diametre || 8) / 2;
       for (const piece of pieces) {
-        const pts = calcScrewPositions(seg, segLeft, piece.y1, piece.y2);
-        for (const { x, y } of pts) {
-          const px = sx(x), py = sy(y), pr = Math.max(1.5, sw(r));
-          svg += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${pr.toFixed(1)}" fill="white" stroke="#333" stroke-width="0.8" opacity="0.9"/>`;
-          svg += `<line x1="${(px-pr*0.6).toFixed(1)}" y1="${py.toFixed(1)}" x2="${(px+pr*0.6).toFixed(1)}" y2="${py.toFixed(1)}" stroke="#333" stroke-width="0.6"/>`;
-          svg += `<line x1="${px.toFixed(1)}" y1="${(py-pr*0.6).toFixed(1)}" x2="${px.toFixed(1)}" y2="${(py+pr*0.6).toFixed(1)}" stroke="#333" stroke-width="0.6"/>`;
-        }
+        const pts = calcScrewPositions(seg, segLeft, piece.y1, piece.y2, flip);
+        for (const { x, y } of pts) allPts.push({ px: sx(x), py: sy(y) });
+      }
+    }
+
+    // Group by Y (±1px) and enforce minimum X separation so screws are always distinct
+    const byY = {};
+    for (const pt of allPts) {
+      const yk = Math.round(pt.py);
+      if (!byY[yk]) byY[yk] = [];
+      byY[yk].push(pt);
+    }
+    for (const pts of Object.values(byY)) {
+      pts.sort((a, b) => a.px - b.px);
+      for (let i = 1; i < pts.length; i++) {
+        if (pts[i].px - pts[i-1].px < MIN_SEP) pts[i].px = pts[i-1].px + MIN_SEP;
+      }
+      for (const { px, py } of pts) {
+        svg += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${PR}" fill="white" stroke="#0f172a" stroke-width="0.9" opacity="0.95"/>`;
+        svg += `<line x1="${(px-PR*0.65).toFixed(1)}" y1="${py.toFixed(1)}" x2="${(px+PR*0.65).toFixed(1)}" y2="${py.toFixed(1)}" stroke="#0f172a" stroke-width="0.7"/>`;
+        svg += `<line x1="${px.toFixed(1)}" y1="${(py-PR*0.65).toFixed(1)}" x2="${px.toFixed(1)}" y2="${(py+PR*0.65).toFixed(1)}" stroke="#0f172a" stroke-width="0.7"/>`;
       }
     }
   }
@@ -5271,7 +5305,7 @@ function buildOssatureSvg(fname, panels) {
     }
     if (!hasLN.has(p) && panels.some(q => q!==p && q.xmax < p.xmin - MAX_GAP)) {
       rect(p.xmin - ZED_W/2, yS, p.xmin + ZED_W/2, yE, '#f97316aa', '#ea580c', 1);
-      drawScrews('zed', p.xmin, yS, yE, p.color);
+      drawScrews('zed', p.xmin, yS, yE, p.color, true); // flip: fixation côté panneau (droite)
     }
   }
 
