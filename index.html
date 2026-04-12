@@ -8082,26 +8082,23 @@ function exportDxfOssature(builderOverride) {
   let currentFacadeLongeronYs = [];
 
   // Dessine les vis de fixation aux positions des longerons
-  function addOssFixHoles(xmin, yBot, xmax, yTop, isOmega) {
+  // Dessine les vis de fixation aux positions des longerons (nouveau système profil)
+  function addOssFixHoles(ossType, cx, yBot, yTop, flip) {
+    const fixSegs = getFixationSegments(ossType, null, cx, flip || false);
+    if (!fixSegs.length) return;
+    // Pièces = sections entre longerons dans [yBot, yTop]
     const TOL = 10;
-    // Longerons qui traversent ce segment
-    const ys = currentFacadeLongeronYs
-      .filter(y => y >= yBot - TOL && y <= yTop + TOL)
-      // Clamp verticalement : le centre de la vis reste à l'intérieur du profil
-      .map(y => Math.max(yBot + marginOssV, Math.min(yTop - marginOssV, y)));
-    if (ys.length === 0) {
-      ys.push(yBot + marginOssV, yTop - marginOssV);
-    }
-    const nFix = isOmega ? nFixOmega : nFixZed;
-    const profileW = xmax - xmin;
-    const avail = Math.max(profileW - 2 * OSS_FIX_MARGIN, 0);
-    for (const ly of ys) {
-      if (nFix === 1) {
-        dxf.addCircle((xmin + xmax) / 2, ly, OSS_FIX_RADIUS, 'FIXATION_OSS', 1);
-      } else {
-        const step = avail / (nFix - 1);
-        for (let i = 0; i < nFix; i++)
-          dxf.addCircle(xmin + OSS_FIX_MARGIN + i * step, ly, OSS_FIX_RADIUS, 'FIXATION_OSS', 1);
+    const innerYs = currentFacadeLongeronYs
+      .filter(y => y > yBot + TOL && y < yTop - TOL)
+      .sort((a, b) => a - b);
+    const boundaries = [yBot, ...innerYs, yTop];
+    for (const { seg, segLeft } of fixSegs) {
+      const r = (seg.screwConfig.diametre || 8) / 2;
+      for (let pi = 0; pi < boundaries.length - 1; pi++) {
+        const pts = calcScrewPositions(seg, segLeft, boundaries[pi], boundaries[pi + 1], flip || false);
+        for (const { x, y } of pts) {
+          dxf.addCircle(x, y, r, 'FIXATION_OSS', 1);
+        }
       }
     }
   }
@@ -8179,17 +8176,18 @@ function exportDxfOssature(builderOverride) {
   const MIN_CUT_LEN = 1500; // tronçon min pour appliquer une découpe
 
   // Helper: draw a vertical profile split at cut points
-  function addSplitProfile(xmin, yBottom, xmax, yTop, layer, color, cutPositions, isOmega) {
+  function addSplitProfile(xmin, yBottom, xmax, yTop, layer, color, cutPositions, ossType, flip) {
+    const cx = (xmin + xmax) / 2;
     if (!cutPositions || cutPositions.length === 0) {
       dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
-      addOssFixHoles(xmin, yBottom, xmax, yTop, isOmega);
+      addOssFixHoles(ossType, cx, yBottom, yTop, flip || false);
       return;
     }
     const halfGap = 20;
     const relevant = cutPositions.filter(cy => cy - halfGap > yBottom + 1 && cy + halfGap < yTop - 1);
     if (relevant.length === 0) {
       dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
-      addOssFixHoles(xmin, yBottom, xmax, yTop, isOmega);
+      addOssFixHoles(ossType, cx, yBottom, yTop, flip || false);
       return;
     }
     relevant.sort((a, b) => b - a);
@@ -8203,18 +8201,18 @@ function exportDxfOssature(builderOverride) {
     if (segTop - yBottom > 1) segments.push({ top: segTop, bot: yBottom });
     if ((yTop - yBottom) < MIN_CUT_LEN) {
       dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
-      addOssFixHoles(xmin, yBottom, xmax, yTop, isOmega);
+      addOssFixHoles(ossType, cx, yBottom, yTop, flip || false);
       return;
     }
     const interior = segments.length > 2 ? segments.slice(1, -1) : segments;
     if (interior.some(s => (s.top - s.bot) < MIN_CUT_LEN)) {
       dxf.addRect(xmin, yBottom, xmax, yTop, layer, color);
-      addOssFixHoles(xmin, yBottom, xmax, yTop, isOmega);
+      addOssFixHoles(ossType, cx, yBottom, yTop, flip || false);
       return;
     }
     for (const s of segments) {
       dxf.addRect(xmin, s.bot, xmax, s.top, layer, color);
-      addOssFixHoles(xmin, s.bot, xmax, s.top, isOmega);
+      addOssFixHoles(ossType, cx, s.bot, s.top, flip || false);
     }
   }
 
@@ -8335,7 +8333,7 @@ function exportDxfOssature(builderOverride) {
       mergedZeds.push({ cx, yStart, yEnd });
     }
     for (const { cx, yStart, yEnd } of mergedZeds) {
-      addSplitProfile(cx - ZED_W/2, clipStartF(yStart), cx + ZED_W/2, clipEndF(yEnd), 'ZED_ENTRAXE', 30, jointCuts);
+      addSplitProfile(cx - ZED_W/2, clipStartF(yStart), cx + ZED_W/2, clipEndF(yEnd), 'ZED_ENTRAXE', 30, jointCuts, 'zed', false);
       const rx = Math.round(cx);
       allOssXsSet.add(rx);
       if (Math.abs(yEnd   - ossTop)    < 5) topOssXsSet.add(rx);
@@ -8386,7 +8384,7 @@ function exportDxfOssature(builderOverride) {
           // Étendre l'Oméga vers le bas/haut si segment touche fymin/fymax et prolongement actif
           const mStart = (prol > 0 && m.start <= fymin + 5) ? fymin - prol : clipStartF(m.start);
           const mEnd = (prolH > 0 && m.end >= fymax - 5) ? fymax + prolH : clipEndF(m.end);
-          addSplitProfile(jx - OMEGA_W/2, mStart, jx + OMEGA_W/2, mEnd, 'OMEGA', 5, jointCuts, true);
+          addSplitProfile(jx - OMEGA_W/2, mStart, jx + OMEGA_W/2, mEnd, 'OMEGA', 5, jointCuts, 'omega', false);
           if (prol > 0 && m.start <= fymin + 5) omegaXsExt.push(jx);
           if (prolH > 0 && m.end >= fymax - 5) omegaXsExtHaut.push(jx);
         }
@@ -8403,7 +8401,7 @@ function exportDxfOssature(builderOverride) {
         if (Math.round(ge - gs) >= 100) {
           const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : clipStartF(gs);
           const geExt = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : clipEndF(ge);
-          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 30, jointCuts);
+          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 30, jointCuts, 'zed', false);
           allOssXsSet.add(jx);
           if (Math.abs(geExt - ossTop)    < 5) topOssXsSet.add(jx);
           if (Math.abs(gsExt - ossBottom) < 5) botOssXsSet.add(jx);
@@ -8415,7 +8413,7 @@ function exportDxfOssature(builderOverride) {
         if (Math.round(ge - gs) >= 100) {
           const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : clipStartF(gs);
           const geExt = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : clipEndF(ge);
-          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 30, jointCuts);
+          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 30, jointCuts, 'zed', false);
           allOssXsSet.add(jx);
           if (Math.abs(geExt - ossTop)    < 5) topOssXsSet.add(jx);
           if (Math.abs(gsExt - ossBottom) < 5) botOssXsSet.add(jx);
@@ -8432,7 +8430,7 @@ function exportDxfOssature(builderOverride) {
       const yStart = isBottomP ? fymin - prol : clipStartF(p.ymin);
       const yEnd = isTopP ? fymax + prolH : clipEndF(p.ymax);
       if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP)) {
-        addSplitProfile(p.xmax - ZED_W/2, yStart, p.xmax + ZED_W/2, yEnd, 'ZED_BORD', 30, jointCuts);
+        addSplitProfile(p.xmax - ZED_W/2, yStart, p.xmax + ZED_W/2, yEnd, 'ZED_BORD', 30, jointCuts, 'zed', false);
         const rx = Math.round(p.xmax);
         allOssXsSet.add(rx);
         if (isTopP || Math.abs(yEnd - ossTop) < 5)    topOssXsSet.add(rx);
@@ -8441,7 +8439,7 @@ function exportDxfOssature(builderOverride) {
         if (isTopP) violetXsSetHaut.add(rx);
       }
       if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP)) {
-        addSplitProfile(p.xmin - ZED_W/2, yStart, p.xmin + ZED_W/2, yEnd, 'ZED_BORD', 30, jointCuts);
+        addSplitProfile(p.xmin - ZED_W/2, yStart, p.xmin + ZED_W/2, yEnd, 'ZED_BORD', 30, jointCuts, 'zed', true);
         const lx = Math.round(p.xmin);
         allOssXsSet.add(lx);
         if (isTopP || Math.abs(yEnd - ossTop) < 5)    topOssXsSet.add(lx);
@@ -8480,7 +8478,7 @@ function exportDxfOssature(builderOverride) {
               const step = gap / (nz + 1);
               for (let z = 1; z <= nz; z++) {
                 const cx = pts[j] + z * step;
-                addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 30, jointCuts);
+                addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 30, jointCuts, 'zed', false);
                 const rx = Math.round(cx);
                 allOssXsSet.add(rx); botOssXsSet.add(rx);
               }
@@ -8517,7 +8515,7 @@ function exportDxfOssature(builderOverride) {
               const step = gap / (nz + 1);
               for (let z = 1; z <= nz; z++) {
                 const cx = pts[j] + z * step;
-                addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 30, jointCuts);
+                addSplitProfile(cx - ZED_W/2, extY1, cx + ZED_W/2, extY2, 'ZED_ENTRAXE', 30, jointCuts, 'zed', false);
                 const rx = Math.round(cx);
                 allOssXsSet.add(rx); topOssXsSet.add(rx);
               }
