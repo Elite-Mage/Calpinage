@@ -5288,12 +5288,14 @@ function buildOssatureSvg(fname, panels) {
       else if (ev==='R+') rC++; else if (ev==='R-') rC--;
       prevY=y;
     }
-    for (const [gs,ge] of [...lGaps,...rGaps]) {
-      if (Math.round(ge-gs) >= 100) {
-        const gsE = (prol>0&&gs<=fymin+5)?fymin-prol:gs;
-        const geE = (prolH>0&&ge>=fymax-5)?fymax+prolH:ge;
-        rect(jx - ZED_W/2, gsE, jx + ZED_W/2, geE, '#f97316aa', '#ea580c', 1);
-        drawScrews('zed', jx, gsE, geE, null);
+    for (const {gaps, flip} of [{gaps:rGaps,flip:false},{gaps:lGaps,flip:true}]) {
+      for (const [gs,ge] of gaps) {
+        if (Math.round(ge-gs) >= 100) {
+          const gsE = (prol>0&&gs<=fymin+5)?fymin-prol:gs;
+          const geE = (prolH>0&&ge>=fymax-5)?fymax+prolH:ge;
+          rect(jx - ZED_W/2, gsE, jx + ZED_W/2, geE, '#f97316aa', '#ea580c', 1);
+          drawScrews('zed', jx, gsE, geE, null, flip);
+        }
       }
     }
   }
@@ -8417,7 +8419,7 @@ function exportDxfOssature(builderOverride) {
         if (Math.round(ge - gs) >= 100) {
           const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : clipStartF(gs);
           const geExt = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : clipEndF(ge);
-          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 30, jointCuts, 'zed', false);
+          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 30, jointCuts, 'zed', true);
           allOssXsSet.add(jx);
           if (Math.abs(geExt - ossTop)    < 5) topOssXsSet.add(jx);
           if (Math.abs(gsExt - ossBottom) < 5) botOssXsSet.add(jx);
