@@ -5074,11 +5074,14 @@ function calcScrewPositions(seg, segLeft, pieceY1, pieceY2, flip) {
   const rightMax = (cfg.bothSides || cfg.side === sideRight) ? W - cfg.bordDist - r : W - r;
   const xPositions = [];
   const nH = Math.max(1, cfg.countH || 1);
+  // If bordDist leaves no room (leftMin >= rightMax), fall back to distributing within radius margins
+  const xL = leftMin <= rightMax ? leftMin : r;
+  const xR = leftMin <= rightMax ? rightMax : W - r;
   if (nH === 1) {
-    xPositions.push(segLeft + (leftMin + rightMax) / 2);
+    xPositions.push(segLeft + (xL + xR) / 2);
   } else {
     for (let i = 0; i < nH; i++) {
-      xPositions.push(segLeft + leftMin + i * (rightMax - leftMin) / (nH - 1));
+      xPositions.push(segLeft + xL + i * (xR - xL) / (nH - 1));
     }
   }
   // Y positions along piece
@@ -5158,36 +5161,36 @@ function buildOssatureSvg(fname, panels) {
   function drawScrews(type, cx, yStart, yEnd, colorAci, flip) {
     const fixSegs = getFixationSegments(type, colorAci, cx, flip);
     if (!fixSegs.length) return;
-    const pieces = getPieceBoundaries(cx, yStart, yEnd, panels);
+    // Zones de fixation actives sur cette plage du profil
+    const activeFZ = fixZones.filter(z => z.yBottom < yEnd - 5 && z.yTop > yStart + 5);
+    if (!activeFZ.length) return;
+
     const PR = 2.5; // fixed pixel radius — always visible
-    const MIN_SEP = PR * 2 + 1; // minimum px between centers at same Y
 
     // Collect all screw pixel positions
     const allPts = [];
     for (const { seg, segLeft } of fixSegs) {
-      for (const piece of pieces) {
-        const pts = calcScrewPositions(seg, segLeft, piece.y1, piece.y2, flip);
+      for (const fz of activeFZ) {
+        const zy1 = Math.max(fz.yBottom, yStart);
+        const zy2 = Math.min(fz.yTop, yEnd);
+        if (zy2 <= zy1 + 5) continue;
+        const pts = calcScrewPositions(seg, segLeft, zy1, zy2, flip);
         for (const { x, y } of pts) allPts.push({ px: sx(x), py: sy(y) });
       }
     }
+    if (!allPts.length) return;
 
-    // Group by Y (±1px) and enforce minimum X separation so screws are always distinct
-    const byY = {};
-    for (const pt of allPts) {
-      const yk = Math.round(pt.py);
-      if (!byY[yk]) byY[yk] = [];
-      byY[yk].push(pt);
-    }
-    for (const pts of Object.values(byY)) {
-      pts.sort((a, b) => a.px - b.px);
-      for (let i = 1; i < pts.length; i++) {
-        if (pts[i].px - pts[i-1].px < MIN_SEP) pts[i].px = pts[i-1].px + MIN_SEP;
-      }
-      for (const { px, py } of pts) {
-        svg += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${PR}" fill="white" stroke="#0f172a" stroke-width="0.9" opacity="0.95"/>`;
-        svg += `<line x1="${(px-PR*0.65).toFixed(1)}" y1="${py.toFixed(1)}" x2="${(px+PR*0.65).toFixed(1)}" y2="${py.toFixed(1)}" stroke="#0f172a" stroke-width="0.7"/>`;
-        svg += `<line x1="${px.toFixed(1)}" y1="${(py-PR*0.65).toFixed(1)}" x2="${px.toFixed(1)}" y2="${(py+PR*0.65).toFixed(1)}" stroke="#0f172a" stroke-width="0.7"/>`;
-      }
+    // Dédupliquer les positions parfaitement identiques (±1px)
+    const seen = new Set();
+    const unique = allPts.filter(pt => {
+      const key = `${Math.round(pt.px)},${Math.round(pt.py)}`;
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    });
+    for (const { px, py } of unique) {
+      svg += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${PR}" fill="white" stroke="#0f172a" stroke-width="0.9" opacity="0.95"/>`;
+      svg += `<line x1="${(px-PR*0.65).toFixed(1)}" y1="${py.toFixed(1)}" x2="${(px+PR*0.65).toFixed(1)}" y2="${py.toFixed(1)}" stroke="#0f172a" stroke-width="0.7"/>`;
+      svg += `<line x1="${px.toFixed(1)}" y1="${(py-PR*0.65).toFixed(1)}" x2="${px.toFixed(1)}" y2="${(py+PR*0.65).toFixed(1)}" stroke="#0f172a" stroke-width="0.7"/>`;
     }
   }
 
@@ -5285,12 +5288,14 @@ function buildOssatureSvg(fname, panels) {
       else if (ev==='R+') rC++; else if (ev==='R-') rC--;
       prevY=y;
     }
-    for (const [gs,ge] of [...lGaps,...rGaps]) {
-      if (Math.round(ge-gs) >= 100) {
-        const gsE = (prol>0&&gs<=fymin+5)?fymin-prol:gs;
-        const geE = (prolH>0&&ge>=fymax-5)?fymax+prolH:ge;
-        rect(jx - ZED_W/2, gsE, jx + ZED_W/2, geE, '#f97316aa', '#ea580c', 1);
-        drawScrews('zed', jx, gsE, geE, null);
+    for (const {gaps, flip} of [{gaps:rGaps,flip:false},{gaps:lGaps,flip:true}]) {
+      for (const [gs,ge] of gaps) {
+        if (Math.round(ge-gs) >= 100) {
+          const gsE = (prol>0&&gs<=fymin+5)?fymin-prol:gs;
+          const geE = (prolH>0&&ge>=fymax-5)?fymax+prolH:ge;
+          rect(jx - ZED_W/2, gsE, jx + ZED_W/2, geE, '#f97316aa', '#ea580c', 1);
+          drawScrews('zed', jx, gsE, geE, null, flip);
+        }
       }
     }
   }
@@ -8078,24 +8083,23 @@ function exportDxfOssature(builderOverride) {
   // Marge verticale : distance min entre le centre de la vis et le bord haut/bas du profil
   const marginOssV = Math.max(OSS_FIX_RADIUS + 2, fixationConfig.marginOssV ?? 30);
 
-  // Longerons courants de la façade en cours (mis à jour dans la boucle par façade)
+  // Zones de fixation de la façade courante (mis à jour dans la boucle par façade)
   let currentFacadeLongeronYs = [];
+  let currentFacadeFixZones = [];
 
-  // Dessine les vis de fixation aux positions des longerons
-  // Dessine les vis de fixation aux positions des longerons (nouveau système profil)
+  // Place les trous de vis dans les zones de fixation configurées
   function addOssFixHoles(ossType, cx, yBot, yTop, flip) {
     const fixSegs = getFixationSegments(ossType, null, cx, flip || false);
     if (!fixSegs.length) return;
-    // Pièces = sections entre longerons dans [yBot, yTop]
-    const TOL = 10;
-    const innerYs = currentFacadeLongeronYs
-      .filter(y => y > yBot + TOL && y < yTop - TOL)
-      .sort((a, b) => a - b);
-    const boundaries = [yBot, ...innerYs, yTop];
+    const activeFZ = currentFacadeFixZones.filter(z => z.yBottom < yTop - 5 && z.yTop > yBot + 5);
+    if (!activeFZ.length) return;
     for (const { seg, segLeft } of fixSegs) {
       const r = (seg.screwConfig.diametre || 8) / 2;
-      for (let pi = 0; pi < boundaries.length - 1; pi++) {
-        const pts = calcScrewPositions(seg, segLeft, boundaries[pi], boundaries[pi + 1], flip || false);
+      for (const fz of activeFZ) {
+        const zy1 = Math.max(fz.yBottom, yBot);
+        const zy2 = Math.min(fz.yTop, yTop);
+        if (zy2 <= zy1 + 5) continue;
+        const pts = calcScrewPositions(seg, segLeft, zy1, zy2, flip || false);
         for (const { x, y } of pts) {
           dxf.addCircle(x, y, r, 'FIXATION_OSS', 1);
         }
@@ -8250,6 +8254,8 @@ function exportDxfOssature(builderOverride) {
 
     // Longerons : bord bas ossature + joints horizontaux (séparations d'étages) + bord haut
     currentFacadeLongeronYs = [ossBottom, ...horizontalJoints, ossTop];
+    // Zones de fixation de cette façade (pour addOssFixHoles)
+    currentFacadeFixZones = fixZones;
 
     // Joint edge maps for clipping non-continuous profile ends to 20mm from joint axis
     const jTopEdgeF = new Map(), jBotEdgeF = new Map();
@@ -8413,7 +8419,7 @@ function exportDxfOssature(builderOverride) {
         if (Math.round(ge - gs) >= 100) {
           const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : clipStartF(gs);
           const geExt = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : clipEndF(ge);
-          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 30, jointCuts, 'zed', false);
+          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 30, jointCuts, 'zed', true);
           allOssXsSet.add(jx);
           if (Math.abs(geExt - ossTop)    < 5) topOssXsSet.add(jx);
           if (Math.abs(gsExt - ossBottom) < 5) botOssXsSet.add(jx);
