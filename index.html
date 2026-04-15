@@ -5261,7 +5261,7 @@ function buildOssatureSvg(fname, panels) {
     let changed = true;
     while (changed) { changed = false;
       for (let j = 0; j < rawZeds.length; j++) {
-        if (usedZ[j] || Math.abs(rawZeds[j].cx - cx) > 5) continue;
+        if (usedZ[j] || Math.abs(rawZeds[j].cx - cx) > 20) continue;
         const g1 = rawZeds[j].yStart - yEnd, g2 = yStart - rawZeds[j].yEnd;
         if ((g1 >= -5 && g1 <= MAX_GAP) || (g2 >= -5 && g2 <= MAX_GAP)) {
           yStart = Math.min(yStart, rawZeds[j].yStart); yEnd = Math.max(yEnd, rawZeds[j].yEnd);
@@ -8360,7 +8360,7 @@ function exportDxfOssature(builderOverride) {
       while (changed) {
         changed = false;
         for (let j = 0; j < rawZeds.length; j++) {
-          if (usedZ[j] || Math.abs(rawZeds[j].cx - cx) > 5) continue;
+          if (usedZ[j] || Math.abs(rawZeds[j].cx - cx) > 20) continue;
           const g1 = rawZeds[j].yStart - yEnd;
           const g2 = yStart - rawZeds[j].yEnd;
           if ((g1 >= -5 && g1 <= MAX_GAP) || (g2 >= -5 && g2 <= MAX_GAP)) {
@@ -8378,7 +8378,7 @@ function exportDxfOssature(builderOverride) {
       mergedZeds.push({ cx, yStart, yEnd });
     }
     for (const { cx, yStart, yEnd } of mergedZeds) {
-      addSplitProfile(cx - ZED_W/2, clipStartF(yStart), cx + ZED_W/2, clipEndF(yEnd), 'ZED_ENTRAXE', 30, jointCuts, 'zed', false);
+      addSplitProfile(cx - ZED_W/2, yStart, cx + ZED_W/2, yEnd, 'ZED_ENTRAXE', 30, jointCuts, 'zed', false);
       const rx = Math.round(cx);
       allOssXsSet.add(rx);
       if (Math.abs(yEnd   - ossTop)    < 5) topOssXsSet.add(rx);
