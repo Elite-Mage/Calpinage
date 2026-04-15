@@ -2137,6 +2137,41 @@ function renderAllResults() {
   sumHTML += `<div class="summary-row"><span class="summary-label">Surface utile</span><span class="summary-value" style="color:var(--green);">${(grandTotalUsed/1e6).toFixed(2)} m&sup2;</span></div>`;
   sumHTML += `<div class="summary-row"><span class="summary-label">Chute globale</span><span class="summary-value" style="${wasteStyle};font-size:15px;">${globalWaste}%</span></div>`;
 
+  // m² par type et par façade (seulement si plusieurs types)
+  if (groups.length > 1) {
+    const byFacade = {}, byType = {};
+    for (const g of groups) {
+      for (const sub of g.subsections) {
+        for (const st of sub.panelSubtypes) {
+          for (const p of st.pieces) {
+            const m2 = p.w * p.h * p.qty / 1e6;
+            if (!byFacade[sub.name]) byFacade[sub.name] = {};
+            byFacade[sub.name][g.name] = (byFacade[sub.name][g.name] || 0) + m2;
+            byType[g.name] = (byType[g.name] || 0) + m2;
+          }
+        }
+      }
+    }
+    const fnames = Object.keys(byFacade).sort();
+    if (fnames.length) {
+      sumHTML += `<div class="summary-divider"></div>`;
+      for (const fname of fnames) {
+        sumHTML += `<div class="summary-row"><span class="summary-label" style="font-weight:600;font-size:12px;">${fname}</span></div>`;
+        for (const g of groups) {
+          const m2 = byFacade[fname]?.[g.name];
+          if (!m2) continue;
+          sumHTML += `<div class="summary-row summary-sub"><span class="summary-label" style="display:flex;align-items:center;gap:5px;"><span style="width:7px;height:7px;border-radius:50%;background:${g.color};display:inline-block;"></span>${g.name}</span><span class="summary-value" style="font-size:12px;">${m2.toFixed(2)} m²</span></div>`;
+        }
+      }
+      sumHTML += `<div class="summary-divider"></div>`;
+      sumHTML += `<div class="summary-row"><span class="summary-label" style="font-weight:600;font-size:12px;">Total / type</span></div>`;
+      for (const g of groups) {
+        if (!byType[g.name]) continue;
+        sumHTML += `<div class="summary-row summary-sub"><span class="summary-label" style="display:flex;align-items:center;gap:5px;"><span style="width:7px;height:7px;border-radius:50%;background:${g.color};display:inline-block;"></span>${g.name}</span><span class="summary-value">${byType[g.name].toFixed(2)} m²</span></div>`;
+      }
+    }
+  }
+
   document.getElementById('summaryContent').innerHTML = sumHTML;
   document.getElementById('summaryCard').style.display = 'block';
 
