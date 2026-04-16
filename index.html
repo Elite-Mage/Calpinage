@@ -5287,6 +5287,7 @@ function buildOssatureSvg(fname, panels) {
       hasRN.add(p); hasLN.add(q);
     }
   }
+  const rawBordZeds = [];
   for (const jx of Object.keys(junctions).map(Number)) {
     const { left, right } = junctions[jx];
     const overlaps = [];
@@ -5329,28 +5330,39 @@ function buildOssatureSvg(fname, panels) {
     }
     for (const {gaps, flip} of [{gaps:rGaps,flip:false},{gaps:lGaps,flip:true}]) {
       for (const [gs,ge] of gaps) {
-        if (Math.round(ge-gs) >= 100) {
-          const gsE = (prol>0&&gs<=fymin+5)?fymin-prol:gs;
-          const geE = (prolH>0&&ge>=fymax-5)?fymax+prolH:ge;
-          rect(jx - ZED_W/2, gsE, jx + ZED_W/2, geE, '#f97316aa', '#ea580c', 1);
-          drawScrews('zed', jx, gsE, geE, null, flip);
-        }
+        if (Math.round(ge-gs) >= 100) rawBordZeds.push({ cx: jx, yStart: gs, yEnd: ge, flip });
       }
     }
   }
 
-  // ── Free-edge Zed ──
+  // ── Free-edge Zed (collect) ──
   for (const p of panels) {
-    const yS = (prol>0&&Math.abs(p.ymin-fymin)<5)?fymin-prol:p.ymin;
-    const yE = (prolH>0&&Math.abs(p.ymax-fymax)<5)?fymax+prolH:p.ymax;
-    if (!hasRN.has(p) && panels.some(q => q!==p && q.xmin > p.xmax + MAX_GAP)) {
-      rect(p.xmax - ZED_W/2, yS, p.xmax + ZED_W/2, yE, '#f97316aa', '#ea580c', 1);
-      drawScrews('zed', p.xmax, yS, yE, p.color);
+    if (!hasRN.has(p) && panels.some(q => q!==p && q.xmin > p.xmax + MAX_GAP))
+      rawBordZeds.push({ cx: p.xmax, yStart: p.ymin, yEnd: p.ymax, flip: false });
+    if (!hasLN.has(p) && panels.some(q => q!==p && q.xmax < p.xmin - MAX_GAP))
+      rawBordZeds.push({ cx: p.xmin, yStart: p.ymin, yEnd: p.ymax, flip: true });
+  }
+
+  // ── Merge and draw bord Zeds ──
+  const usedB = new Array(rawBordZeds.length).fill(false);
+  for (let i = 0; i < rawBordZeds.length; i++) {
+    if (usedB[i]) continue;
+    let { cx, yStart, yEnd, flip } = rawBordZeds[i]; usedB[i] = true;
+    let changed = true;
+    while (changed) { changed = false;
+      for (let j = 0; j < rawBordZeds.length; j++) {
+        if (usedB[j] || Math.abs(rawBordZeds[j].cx - cx) > 20) continue;
+        const g1 = rawBordZeds[j].yStart - yEnd, g2 = yStart - rawBordZeds[j].yEnd;
+        if ((g1 >= -5 && g1 <= MAX_GAP) || (g2 >= -5 && g2 <= MAX_GAP)) {
+          yStart = Math.min(yStart, rawBordZeds[j].yStart); yEnd = Math.max(yEnd, rawBordZeds[j].yEnd);
+          usedB[j] = true; changed = true;
+        }
+      }
     }
-    if (!hasLN.has(p) && panels.some(q => q!==p && q.xmax < p.xmin - MAX_GAP)) {
-      rect(p.xmin - ZED_W/2, yS, p.xmin + ZED_W/2, yE, '#f97316aa', '#ea580c', 1);
-      drawScrews('zed', p.xmin, yS, yE, p.color, true); // flip: fixation côté panneau (droite)
-    }
+    if (prol  > 0 && Math.abs(yStart - fymin) < 5) yStart = fymin - prol;
+    if (prolH > 0 && Math.abs(yEnd   - fymax) < 5) yEnd   = fymax + prolH;
+    rect(cx - ZED_W/2, yStart, cx + ZED_W/2, yEnd, '#f97316aa', '#ea580c', 1);
+    drawScrews('zed', cx, yStart, yEnd, null, flip);
   }
 
   // ── Axes omégas (option) ──
@@ -7902,7 +7914,7 @@ function computeOssatFacadeProfiles(fname, panels) {
     let { cx, yStart, yEnd } = rawZeds[i]; usedZ[i] = true;
     let changed = true;
     while (changed) { changed = false; for (let j = 0; j < rawZeds.length; j++) {
-      if (usedZ[j] || Math.abs(rawZeds[j].cx - cx) > 5) continue;
+      if (usedZ[j] || Math.abs(rawZeds[j].cx - cx) > 20) continue;
       const g1 = rawZeds[j].yStart - yEnd, g2 = yStart - rawZeds[j].yEnd;
       if ((g1 >= -5 && g1 <= MAX_GAP) || (g2 >= -5 && g2 <= MAX_GAP)) {
         yStart = Math.min(yStart, rawZeds[j].yStart); yEnd = Math.max(yEnd, rawZeds[j].yEnd); usedZ[j] = true; changed = true;
@@ -7910,7 +7922,7 @@ function computeOssatFacadeProfiles(fname, panels) {
     }}
     if (prol  > 0 && Math.abs(yStart - fymin) < 5) { yStart = fymin - prol;  extYellowXs.push(cx); }
     if (prolH > 0 && Math.abs(yEnd   - fymax) < 5) { yEnd   = fymax + prolH; extYellowXsHaut.push(cx); }
-    splitAndCollect(clipStart(yStart), clipEnd(yEnd), false);
+    splitAndCollect(yStart, yEnd, false);
   }
 
   // ── Junctions (Omega + gap Zed) ──
@@ -7925,6 +7937,7 @@ function computeOssatFacadeProfiles(fname, panels) {
       hasRN.add(p); hasLN.add(q);
     }
   }
+  const rawBordZeds = [];
   for (const jx of Object.keys(junctions).map(Number).sort((a,b) => a-b)) {
     const { left, right } = junctions[jx];
     // Omega
@@ -7950,32 +7963,36 @@ function computeOssatFacadeProfiles(fname, panels) {
     const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`) )].map(s => s.split('_').map(Number));
     const { leftGaps, rightGaps } = getGaps(leftI, rightI);
     for (const [gs, ge] of [...rightGaps, ...leftGaps]) {
-      if (Math.round(ge - gs) >= 100) {
-        const gsE = (prol  > 0 && gs <= fymin + 5) ? fymin - prol  : clipStart(gs);
-        const geE = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : clipEnd(ge);
-        splitAndCollect(gsE, geE, false);
-        if (prol  > 0 && gs <= fymin + 5) violetXsSet.add(jx);
-        if (prolH > 0 && ge >= fymax - 5) violetXsSetHaut.add(jx);
-      }
+      if (Math.round(ge - gs) >= 100) rawBordZeds.push({ cx: jx, yStart: gs, yEnd: ge });
     }
   }
 
-  // ── Free-edge ZED ──
+  // ── Free-edge ZED (collect) ──
   for (const p of panels) {
-    const isBot = prol  > 0 && Math.abs(p.ymin - fymin) < 5;
-    const isTop = prolH > 0 && Math.abs(p.ymax - fymax) < 5;
-    const yS = isBot ? fymin - prol  : clipStart(p.ymin);
-    const yE = isTop ? fymax + prolH : clipEnd(p.ymax);
-    if (!hasRN.has(p) && panels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP)) {
-      splitAndCollect(yS, yE, false);
-      if (isBot) violetXsSet.add(Math.round(p.xmax));
-      if (isTop) violetXsSetHaut.add(Math.round(p.xmax));
-    }
-    if (!hasLN.has(p) && panels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP)) {
-      splitAndCollect(yS, yE, false);
-      if (isBot) violetXsSet.add(Math.round(p.xmin));
-      if (isTop) violetXsSetHaut.add(Math.round(p.xmin));
-    }
+    if (!hasRN.has(p) && panels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP))
+      rawBordZeds.push({ cx: p.xmax, yStart: p.ymin, yEnd: p.ymax });
+    if (!hasLN.has(p) && panels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP))
+      rawBordZeds.push({ cx: p.xmin, yStart: p.ymin, yEnd: p.ymax });
+  }
+
+  // ── Merge bord Zeds ──
+  const usedB = new Array(rawBordZeds.length).fill(false);
+  for (let i = 0; i < rawBordZeds.length; i++) {
+    if (usedB[i]) continue;
+    let { cx, yStart, yEnd } = rawBordZeds[i]; usedB[i] = true;
+    let changed = true;
+    while (changed) { changed = false; for (let j = 0; j < rawBordZeds.length; j++) {
+      if (usedB[j] || Math.abs(rawBordZeds[j].cx - cx) > 20) continue;
+      const g1 = rawBordZeds[j].yStart - yEnd, g2 = yStart - rawBordZeds[j].yEnd;
+      if ((g1 >= -5 && g1 <= MAX_GAP) || (g2 >= -5 && g2 <= MAX_GAP)) {
+        yStart = Math.min(yStart, rawBordZeds[j].yStart); yEnd = Math.max(yEnd, rawBordZeds[j].yEnd); usedB[j] = true; changed = true;
+      }
+    }}
+    const isBot = prol  > 0 && Math.abs(yStart - fymin) < 5;
+    const isTop = prolH > 0 && Math.abs(yEnd   - fymax) < 5;
+    if (isBot) { yStart = fymin - prol;  violetXsSet.add(Math.round(cx)); }
+    if (isTop) { yEnd   = fymax + prolH; violetXsSetHaut.add(Math.round(cx)); }
+    splitAndCollect(yStart, yEnd, false);
   }
 
   // ── Prolongement bas — gap-fill (identique à exportDxfOssature) ──
@@ -8404,6 +8421,7 @@ function exportDxfOssature(builderOverride) {
     }
 
     // OMEGA at junctions + gap ZED
+    const rawBordZeds = [];
     for (const jx of Object.keys(junctions).map(Number).sort((a, b) => a - b)) {
       const { left, right } = junctions[jx];
 
@@ -8438,60 +8456,54 @@ function exportDxfOssature(builderOverride) {
         if (merged.some(m => (prol  > 0 && m.start <= fymin + 5) || Math.abs(m.start - fymin) < 5)) botOssXsSet.add(jx);
       }
 
-      // Gap ZED at junction (bord ouverture) — étendu vers le bas si touche fymin
+      // Gap ZED at junction (bord ouverture) — collect for merge
       const leftI = [...new Set(left.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
       const rightI = [...new Set(right.map(p => `${Math.round(p.ymin)}_${Math.round(p.ymax)}`))].map(s => s.split('_').map(Number));
       const { leftGaps, rightGaps } = getGaps(leftI, rightI);
       for (const [gs, ge] of rightGaps) {
-        if (Math.round(ge - gs) >= 100) {
-          const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : clipStartF(gs);
-          const geExt = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : clipEndF(ge);
-          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 30, jointCuts, 'zed', false);
-          allOssXsSet.add(jx);
-          if (Math.abs(geExt - ossTop)    < 5) topOssXsSet.add(jx);
-          if (Math.abs(gsExt - ossBottom) < 5) botOssXsSet.add(jx);
-          if (prol > 0 && gs <= fymin + 5) violetXsSet.add(jx);
-          if (prolH > 0 && ge >= fymax - 5) violetXsSetHaut.add(jx);
-        }
+        if (Math.round(ge - gs) >= 100) rawBordZeds.push({ cx: jx, yStart: gs, yEnd: ge, flip: false });
       }
       for (const [gs, ge] of leftGaps) {
-        if (Math.round(ge - gs) >= 100) {
-          const gsExt = (prol > 0 && gs <= fymin + 5) ? fymin - prol : clipStartF(gs);
-          const geExt = (prolH > 0 && ge >= fymax - 5) ? fymax + prolH : clipEndF(ge);
-          addSplitProfile(jx - ZED_W/2, gsExt, jx + ZED_W/2, geExt, 'ZED_BORD', 30, jointCuts, 'zed', true);
-          allOssXsSet.add(jx);
-          if (Math.abs(geExt - ossTop)    < 5) topOssXsSet.add(jx);
-          if (Math.abs(gsExt - ossBottom) < 5) botOssXsSet.add(jx);
-          if (prol > 0 && gs <= fymin + 5) violetXsSet.add(jx);
-          if (prolH > 0 && ge >= fymax - 5) violetXsSetHaut.add(jx);
-        }
+        if (Math.round(ge - gs) >= 100) rawBordZeds.push({ cx: jx, yStart: gs, yEnd: ge, flip: true });
       }
     }
 
-    // Free-edge ZED (bord sans voisin, mais pas bord de façade) — étendu vers le bas/haut si touche fymin/fymax
+    // Free-edge ZED (collect for merge)
     for (const p of allPanels) {
-      const isBottomP = prol > 0 && Math.abs(p.ymin - fymin) < 5;
-      const isTopP = prolH > 0 && Math.abs(p.ymax - fymax) < 5;
-      const yStart = isBottomP ? fymin - prol : clipStartF(p.ymin);
-      const yEnd = isTopP ? fymax + prolH : clipEndF(p.ymax);
-      if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP)) {
-        addSplitProfile(p.xmax - ZED_W/2, yStart, p.xmax + ZED_W/2, yEnd, 'ZED_BORD', 30, jointCuts, 'zed', false);
-        const rx = Math.round(p.xmax);
-        allOssXsSet.add(rx);
-        if (isTopP || Math.abs(yEnd - ossTop) < 5)    topOssXsSet.add(rx);
-        if (isBottomP || Math.abs(yStart - ossBottom) < 5) botOssXsSet.add(rx);
-        if (isBottomP) violetXsSet.add(rx);
-        if (isTopP) violetXsSetHaut.add(rx);
+      if (!hasRightN.has(p) && allPanels.some(q => q !== p && q.xmin > p.xmax + MAX_GAP))
+        rawBordZeds.push({ cx: p.xmax, yStart: p.ymin, yEnd: p.ymax, flip: false });
+      if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP))
+        rawBordZeds.push({ cx: p.xmin, yStart: p.ymin, yEnd: p.ymax, flip: true });
+    }
+
+    // ── Merge and draw bord Zeds ──
+    const usedB = new Array(rawBordZeds.length).fill(false);
+    for (let i = 0; i < rawBordZeds.length; i++) {
+      if (usedB[i]) continue;
+      let { cx, yStart, yEnd, flip } = rawBordZeds[i]; usedB[i] = true;
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (let j = 0; j < rawBordZeds.length; j++) {
+          if (usedB[j] || Math.abs(rawBordZeds[j].cx - cx) > 20) continue;
+          const g1 = rawBordZeds[j].yStart - yEnd, g2 = yStart - rawBordZeds[j].yEnd;
+          if ((g1 >= -5 && g1 <= MAX_GAP) || (g2 >= -5 && g2 <= MAX_GAP)) {
+            yStart = Math.min(yStart, rawBordZeds[j].yStart); yEnd = Math.max(yEnd, rawBordZeds[j].yEnd);
+            usedB[j] = true; changed = true;
+          }
+        }
       }
-      if (!hasLeftN.has(p) && allPanels.some(q => q !== p && q.xmax < p.xmin - MAX_GAP)) {
-        addSplitProfile(p.xmin - ZED_W/2, yStart, p.xmin + ZED_W/2, yEnd, 'ZED_BORD', 30, jointCuts, 'zed', true);
-        const lx = Math.round(p.xmin);
-        allOssXsSet.add(lx);
-        if (isTopP || Math.abs(yEnd - ossTop) < 5)    topOssXsSet.add(lx);
-        if (isBottomP || Math.abs(yStart - ossBottom) < 5) botOssXsSet.add(lx);
-        if (isBottomP) violetXsSet.add(lx);
-        if (isTopP) violetXsSetHaut.add(lx);
-      }
+      const isBot = prol  > 0 && Math.abs(yStart - fymin) < 5;
+      const isTop = prolH > 0 && Math.abs(yEnd   - fymax) < 5;
+      if (isBot) { yStart = fymin - prol; }
+      if (isTop) { yEnd   = fymax + prolH; }
+      addSplitProfile(cx - ZED_W/2, yStart, cx + ZED_W/2, yEnd, 'ZED_BORD', 30, jointCuts, 'zed', flip);
+      const rx = Math.round(cx);
+      allOssXsSet.add(rx);
+      if (isTop  || Math.abs(yEnd   - ossTop)    < 5) topOssXsSet.add(rx);
+      if (isBot  || Math.abs(yStart - ossBottom) < 5) botOssXsSet.add(rx);
+      if (isBot) violetXsSet.add(rx);
+      if (isTop) violetXsSetHaut.add(rx);
     }
 
     // ── Prolongement bas — remplissage des trous uniquement ──
