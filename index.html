@@ -592,6 +592,7 @@
           <button class="btn-export" onclick="exportCSV()">&#128196; CSV</button>
           <button class="btn-export" onclick="exportExcel()">&#128202; Excel</button>
           <button class="btn-export" onclick="exportPDF()">&#128247; PDF</button>
+          <button class="btn-export" onclick="exportDimPDF()" title="PDF dimensions panneaux par façade (sans optimisation)">&#128247; PDF Dim.</button>
           <button class="btn-export" onclick="exportPdfFacades()" title="PDF par façade — calepinage, ossature, débit, fixations">&#128247; PDF Façades</button>
           <button class="btn-export" onclick="exportDxfPanneaux()" title="Export DXF panneaux avec numérotation">&#128209; DXF Panneaux</button>
         </div>
@@ -2784,6 +2785,24 @@ function exportPDF() {
   body += `<tr style="background:#f0f0f0;font-weight:700;"><td colspan="5" style="border:1px solid #ccc;padding:7px;text-align:right;">TOTAL</td><td style="border:1px solid #ccc;padding:7px;text-align:center;">&times;${totalPanels}</td><td style="border:1px solid #ccc;padding:7px;">${totalArea.toFixed(2)} m\u00b2</td><td style="border:1px solid #ccc;padding:7px;">${hasPrix ? totalPrix.toFixed(2)+' \u20ac' : '—'}</td></tr>`;
   body += `</table></div>`;
 
+  // Annexe dimensions par façade
+  body += `<div style="page-break-before:always;margin-top:30px;"><div style="font-size:18px;font-weight:800;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:14px;">ANNEXE — DIMENSIONS PANNEAUX PAR FAÇADE</div>`;
+  for (const g of groups) {
+    let anyContent = false, tableRows = '';
+    for (const sub of g.subsections) {
+      const byH = {};
+      for (const st of (sub.panelSubtypes||[])) for (const p of st.pieces) { if (!byH[p.h]) byH[p.h]={}; byH[p.h][p.w]=(byH[p.h][p.w]||0)+p.qty; }
+      for (const h of Object.keys(byH).map(Number).sort((a,b)=>a-b)) for (const w of Object.keys(byH[h]).map(Number).sort((a,b)=>a-b)) {
+        const qty=byH[h][w];
+        tableRows+=`<tr><td style="border:1px solid #ddd;padding:4px 8px;font-weight:600;">${sub.name}</td><td style="border:1px solid #ddd;padding:4px 8px;font-family:monospace;">${h}</td><td style="border:1px solid #ddd;padding:4px 8px;font-family:monospace;">${w}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;font-weight:700;">${qty}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;color:#666;font-size:11px;">${(w*h*qty/1e6).toFixed(4)} m\u00b2</td></tr>`;
+        anyContent=true;
+      }
+    }
+    if (!anyContent) continue;
+    body+=`<div style="page-break-inside:avoid;margin-bottom:18px;"><div style="font-size:13px;font-weight:800;border-left:4px solid ${g.color};padding:4px 10px;background:#f8fafc;margin-bottom:6px;">${g.name}</div><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="background:#e2e8f0;"><th style="border:1px solid #ddd;padding:5px 8px;text-align:left;">Fa\u00e7ade</th><th style="border:1px solid #ddd;padding:5px 8px;text-align:left;">H (mm)</th><th style="border:1px solid #ddd;padding:5px 8px;text-align:left;">L (mm)</th><th style="border:1px solid #ddd;padding:5px 8px;">Qt\u00e9</th><th style="border:1px solid #ddd;padding:5px 8px;text-align:right;">Surface</th></tr></thead><tbody>${tableRows}</tbody></table></div>`;
+  }
+  body += `</div>`;
+
   const fullHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Calepinage \u2014 ${nom}</title>
   <style>
     body { font-family: 'Segoe UI', sans-serif; padding: 15mm; color: #111; font-size: 13px; }
@@ -2848,6 +2867,41 @@ function exportExcel() {
     for (const [aci, info] of Object.entries(ACI_COLOR_MAP_JS))
       if (info.color === g.color) return parseInt(aci);
     return null;
+  }
+
+  // ── Onglet Dimensions par façade ────────────────────────────
+  function sheetDimensions() {
+    const rows = [];
+    rows.push(R(C(`${nom} — Dimensions panneaux par façade`, 'sh1'), ...Array(5).fill(Bl('sh1'))));
+    rows.push(R(C('Date :', 'sh2'), C(date, 'sh2'), ...Array(4).fill(Bl('sh2'))));
+    rows.push(Sp());
+    rows.push(R(C('Type','sh2'), C('Façade','sh2'), C('H (mm)','sh2'), C('L (mm)','sh2'), C('Qté','sh2'), C('Surf. tot. (m²)','sh2')));
+    for (const g of groups) {
+      let anyRow = false;
+      for (const sub of g.subsections) {
+        // Flatten all pieces across subtypes, group by H then L
+        const byH = {};
+        for (const st of (sub.panelSubtypes || [])) {
+          for (const p of st.pieces) {
+            const h = p.h;
+            if (!byH[h]) byH[h] = {};
+            byH[h][p.w] = (byH[h][p.w] || 0) + p.qty;
+          }
+        }
+        const sortedH = Object.keys(byH).map(Number).sort((a, b) => a - b);
+        for (const h of sortedH) {
+          const sortedW = Object.keys(byH[h]).map(Number).sort((a, b) => a - b);
+          for (const w of sortedW) {
+            const qty = byH[h][w];
+            const surf = +(w * h * qty / 1e6).toFixed(4);
+            if (!anyRow) { rows.push(Sp()); anyRow = true; }
+            rows.push(R(C(g.name,`sg${g.id}`), C(sub.name,`sg${g.id}`), C(h,`sg${g.id}`), C(w,`sg${g.id}`), C(qty,`sg${g.id}`), C(surf,`sg${g.id}n`)));
+          }
+        }
+      }
+    }
+    rows.push(Sp());
+    return `<Worksheet ss:Name="Dimensions"><Table ss:DefaultColumnWidth="110" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
   }
 
   // ── Onglet Panneaux ──────────────────────────────────────────
@@ -3165,6 +3219,7 @@ function exportExcel() {
   ${STYLES}
   ${sheetListeDebit()}
   ${sheetReperage()}
+  ${sheetDimensions()}
   ${sheetPanneaux()}
   ${sheetOssature()}
   ${sheetFixations()}
@@ -3175,6 +3230,64 @@ function exportExcel() {
   link.href = URL.createObjectURL(blob);
   link.download = (nom.replace(/[^a-zA-Z0-9]/g,'_')||'calepinage')+'_'+date+'.xls';
   link.click();
+}
+
+function exportDimPDF() {
+  const nom = chantier.nom || 'Calepinage';
+  const date = chantier.date || new Date().toISOString().slice(0,10);
+  const hasPanels = groups.some(g => g.subsections.some(s => (s.panelSubtypes||[]).some(st => st.pieces.length > 0)));
+  if (!hasPanels) { alert('Aucun panneau — importez un DXF ou ajoutez des panneaux.'); return; }
+
+  const TD = (v, style='') => `<td style="border:1px solid #ccc;padding:5px 8px;${style}">${v}</td>`;
+  const TH = v => `<th style="border:1px solid #ccc;padding:6px 8px;background:#e2e8f0;text-align:left;">${v}</th>`;
+
+  let body = `<div style="border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-end;">
+    <div><div style="font-size:20px;font-weight:800;letter-spacing:2px;">◆ DIMENSIONS PANNEAUX</div>
+    <div style="font-size:15px;font-weight:600;margin-top:4px;">${nom}</div></div>
+    <div style="text-align:right;font-size:12px;color:#555;">Date : ${date}</div>
+  </div>`;
+
+  for (const g of groups) {
+    let anyContent = false;
+    let tableRows = '';
+    for (const sub of g.subsections) {
+      const byH = {};
+      for (const st of (sub.panelSubtypes || [])) {
+        for (const p of st.pieces) {
+          if (!byH[p.h]) byH[p.h] = {};
+          byH[p.h][p.w] = (byH[p.h][p.w] || 0) + p.qty;
+        }
+      }
+      const sortedH = Object.keys(byH).map(Number).sort((a, b) => a - b);
+      let firstFacade = true;
+      for (const h of sortedH) {
+        const sortedW = Object.keys(byH[h]).map(Number).sort((a, b) => a - b);
+        for (const w of sortedW) {
+          const qty = byH[h][w];
+          const surf = (w * h * qty / 1e6).toFixed(4);
+          tableRows += `<tr>
+            ${firstFacade ? `<td rowspan="${sortedH.reduce((n,hh)=>n+Object.keys(byH[hh]).length,0)}" style="border:1px solid #ccc;padding:5px 8px;font-weight:700;vertical-align:top;background:#f1f5f9;">${sub.name}</td>` : ''}
+            ${TD(h,'font-family:monospace;')} ${TD(w,'font-family:monospace;')} ${TD(qty,'text-align:center;font-weight:700;')} ${TD(surf+' m²','text-align:right;color:#555;font-size:11px;')}
+          </tr>`;
+          firstFacade = false;
+          anyContent = true;
+        }
+      }
+    }
+    if (!anyContent) continue;
+    body += `<div style="page-break-inside:avoid;margin-bottom:24px;">
+      <div style="font-size:14px;font-weight:800;border-left:5px solid ${g.color};padding:5px 12px;background:#f8fafc;margin-bottom:8px;">${g.name}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead><tr>${TH('Façade')}${TH('H (mm)')}${TH('L (mm)')}${TH('Qté')}${TH('Surface')}</tr></thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>`;
+  }
+
+  const fullHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Dimensions — ${nom}</title>
+  <style>body{font-family:'Segoe UI',sans-serif;padding:15mm;color:#111;font-size:13px;}@media print{body{padding:10mm;}}</style>
+  </head><body>${body}<script>window.onload=()=>window.print();<\/script></body></html>`;
+  window.open(URL.createObjectURL(new Blob([fullHtml], { type: 'text/html;charset=utf-8' })), '_blank');
 }
 
 // ============================================================
