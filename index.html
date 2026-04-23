@@ -9436,32 +9436,27 @@ function dimHarmonizeHeights() {
   }
 
   let changed = 0;
+  // Build joint lookup by (prevHeight_nextHeight) from reference
+  const refJointMap = {};
+  for (let i = 0; i < refLayout.length - 1; i++) {
+    refJointMap[`${refLayout[i].height}_${refLayout[i+1].height}`] = refJoints[i];
+  }
+  const defaultJoint = refJoints[0] || 8;
+
   for (const [fn, fps] of Object.entries(byFacade)) {
     if (fn === refName) continue;
 
-    // Snap heights first
-    for (const p of fps) {
-      const newH = snapH(Math.round(p.ymax - p.ymin));
-      if (newH !== Math.round(p.ymax - p.ymin)) { p.ymax = p.ymin + newH; changed++; }
-    }
-
-    // Assign EXACT y-positions row by row using reference joints
-    // Base: keep the facade's own starting ymin
+    // Group rows FIRST using original y-positions (before any height change)
     const targetRows = groupRowsDim(fps);
     const baseYmin = Math.min(...fps.map(p => p.ymin));
-    // Build joint lookup by (prevHeight_nextHeight) from reference
-    const refJointMap = {};
-    for (let i = 0; i < refLayout.length - 1; i++) {
-      refJointMap[`${refLayout[i].height}_${refLayout[i+1].height}`] = refJoints[i];
-    }
-    const defaultJoint = refJoints[0] || 8;
     let curY = baseYmin;
+
     for (let ri = 0; ri < targetRows.length; ri++) {
-      // Use actual snapped height of panels in this row — NOT refHeights[ri]
-      const rowH = Math.round(Math.max(...targetRows[ri].map(p => p.ymax - p.ymin)));
+      const origRowH = Math.round(Math.max(...targetRows[ri].map(p => p.ymax - p.ymin)));
+      const rowH = snapH(origRowH); // snap the row height to nearest ref height
       if (ri > 0) {
-        const prevH = Math.round(Math.max(...targetRows[ri-1].map(p => p.ymax - p.ymin)));
-        curY += refJointMap[`${prevH}_${rowH}`] ?? defaultJoint;
+        const prevSnapped = snapH(Math.round(Math.max(...targetRows[ri-1].map(p => p.ymax - p.ymin))));
+        curY += refJointMap[`${prevSnapped}_${rowH}`] ?? defaultJoint;
       }
       for (const p of targetRows[ri]) {
         if (p.ymin !== curY || Math.round(p.ymax - p.ymin) !== rowH) changed++;
