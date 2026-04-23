@@ -977,7 +977,7 @@
       <div style="margin-top:10px;">
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
           <input type="checkbox" id="dimApplyAllFacades" onchange="renderDimHeightsList()">
-          Appliquer à toutes les façades
+          Modifier toutes les façades ensemble
         </label>
       </div>
     </div>
@@ -9305,47 +9305,69 @@ function dimHarmonizeHeights() {
   const refPanels = byFacade[refName] || [];
   if (!refPanels.length) { alert('Façade de référence vide.'); return; }
 
-  // Reference heights (distinct, sorted)
-  const refHeights = [...new Set(refPanels.map(p => Math.round(p.ymax - p.ymin)))].sort((a, b) => a - b);
-  if (!refHeights.length) return;
+  // Group panels into horizontal rows (panels sharing same Y band)
+  function groupRows(panels) {
+    const sorted = [...panels].sort((a, b) => a.ymin - b.ymin);
+    const rows = [[sorted[0]]];
+    for (let i = 1; i < sorted.length; i++) {
+      const lastRow = rows[rows.length - 1];
+      const rowYmax = Math.max(...lastRow.map(p => p.ymax));
+      if (sorted[i].ymin <= rowYmax + 25) lastRow.push(sorted[i]);
+      else rows.push([sorted[i]]);
+    }
+    return rows.sort((a, b) => Math.min(...a.map(p => p.ymin)) - Math.min(...b.map(p => p.ymin)));
+  }
 
-  // Snap helper: find nearest height in ref set
+  // Build reference row layout: [{height, joint_below}]
+  const refRows = groupRows(refPanels);
+  const refLayout = refRows.map(row => ({
+    ymin: Math.min(...row.map(p => p.ymin)),
+    ymax: Math.max(...row.map(p => p.ymax)),
+    height: Math.round(Math.max(...row.map(p => p.ymax - p.ymin))),
+  }));
+  // Canonical joint = gap between consecutive reference rows
+  const refJoints = refLayout.slice(1).map((r, i) => Math.max(5, Math.round(r.ymin - refLayout[i].ymax)));
+
+  const refHeights = refLayout.map(r => r.height);
   function snapH(h) {
     return refHeights.reduce((best, rh) => Math.abs(rh - h) < Math.abs(best - h) ? rh : best);
   }
 
-  // Apply to all OTHER facades
   let changed = 0;
   for (const [fn, fps] of Object.entries(byFacade)) {
     if (fn === refName) continue;
-    // Snap heights, then restack per column
+
+    // Snap heights first
     for (const p of fps) {
-      const origH = Math.round(p.ymax - p.ymin);
-      const newH = snapH(origH);
-      if (newH !== origH) { p.ymax = p.ymin + newH; changed++; }
+      const newH = snapH(Math.round(p.ymax - p.ymin));
+      if (newH !== Math.round(p.ymax - p.ymin)) { p.ymax = p.ymin + newH; changed++; }
     }
-    // Restack per column to avoid overlaps
-    const fcols = getDimColumns(fps);
-    for (const col of fcols) {
-      const sorted = [...col.panels].sort((a, b) => a.ymin - b.ymin);
-      for (let i = 1; i < sorted.length; i++) {
-        const prev = sorted[i - 1], cur = sorted[i];
-        const gap = Math.round(cur.ymin - prev.ymax);
-        const preservedGap = Math.max(5, Math.min(20, gap > 0 ? gap : 8));
-        const curH = Math.round(cur.ymax - cur.ymin);
-        cur.ymin = prev.ymax + preservedGap;
-        cur.ymax = cur.ymin + curH;
+
+    // Assign EXACT y-positions row by row using reference joints
+    // Base: keep the facade's own starting ymin
+    const targetRows = groupRows(fps);
+    const baseYmin = Math.min(...fps.map(p => p.ymin));
+    let curY = baseYmin;
+    for (let ri = 0; ri < targetRows.length; ri++) {
+      if (ri > 0) curY += ri - 1 < refJoints.length ? refJoints[ri - 1] : refJoints[refJoints.length - 1] || 8;
+      const rowH = ri < refHeights.length ? refHeights[ri] : Math.round(Math.max(...targetRows[ri].map(p => p.ymax - p.ymin)));
+      for (const p of targetRows[ri]) {
+        if (p.ymin !== curY || Math.round(p.ymax - p.ymin) !== rowH) changed++;
+        p.ymin = curY;
+        p.ymax = curY + rowH;
       }
+      curY += rowH;
     }
   }
 
-  if (changed === 0) { alert('Aucune hauteur à corriger — les façades sont déjà alignées.'); return; }
-
   rebuildGroupsFromSpatial();
+  // Auto-enable "all facades" so user can immediately batch-edit heights
+  const cbk = document.getElementById('dimApplyAllFacades');
+  if (cbk) cbk.checked = true;
   renderDimHeightsList();
   renderDimSvg();
   scheduleSave();
-  alert(`${changed} panneau(x) corrigé(s) — hauteurs alignées sur ${refName} (${refHeights.join(', ')} mm).`);
+  alert(`Aligné — ${refHeights.join(' / ')} mm, joints ${refJoints.join('/')} mm.`);
 }
 
 // ============================================================
