@@ -995,7 +995,12 @@
     <div class="card">
       <div class="card-title">Actions</div>
       <button class="btn-primary" style="width:100%;margin-bottom:8px;" onclick="applyDimEdits()">Appliquer les modifications</button>
-      <button class="btn-secondary" style="width:100%;" onclick="resetDimEdits()">Réinitialiser</button>
+      <button class="btn-secondary" style="width:100%;margin-bottom:8px;" onclick="resetDimEdits()">Réinitialiser</button>
+      <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px;">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">Harmoniser hauteurs — façade de référence :</div>
+        <select id="dimRefFacade" style="width:100%;margin-bottom:6px;font-size:12px;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);"></select>
+        <button class="btn-secondary" style="width:100%;font-size:12px;" onclick="dimHarmonizeHeights()">Snap autres façades</button>
+      </div>
     </div>
   </div>
   <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
@@ -8924,6 +8929,12 @@ function renderPanelEditor() {
   renderDimFacadeTabs(names);
   renderDimHeightsList();
   renderDimSvg();
+  // Populate reference facade selector
+  const sel = document.getElementById('dimRefFacade');
+  if (sel) {
+    const prev = sel.value;
+    sel.innerHTML = names.map(n => `<option value="${n}"${n===prev?' selected':''}>${n}</option>`).join('');
+  }
 }
 
 function renderDimFacadeTabs(names) {
@@ -9284,6 +9295,57 @@ function rebuildGroupsFromSpatial() {
 
   renderGroupTabs();
   renderActiveGroup();
+}
+
+function dimHarmonizeHeights() {
+  const refName = document.getElementById('dimRefFacade')?.value;
+  if (!refName || !projectRectsSpatial.length) return;
+
+  const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+  const refPanels = byFacade[refName] || [];
+  if (!refPanels.length) { alert('Façade de référence vide.'); return; }
+
+  // Reference heights (distinct, sorted)
+  const refHeights = [...new Set(refPanels.map(p => Math.round(p.ymax - p.ymin)))].sort((a, b) => a - b);
+  if (!refHeights.length) return;
+
+  // Snap helper: find nearest height in ref set
+  function snapH(h) {
+    return refHeights.reduce((best, rh) => Math.abs(rh - h) < Math.abs(best - h) ? rh : best);
+  }
+
+  // Apply to all OTHER facades
+  let changed = 0;
+  for (const [fn, fps] of Object.entries(byFacade)) {
+    if (fn === refName) continue;
+    // Snap heights, then restack per column
+    for (const p of fps) {
+      const origH = Math.round(p.ymax - p.ymin);
+      const newH = snapH(origH);
+      if (newH !== origH) { p.ymax = p.ymin + newH; changed++; }
+    }
+    // Restack per column to avoid overlaps
+    const fcols = getDimColumns(fps);
+    for (const col of fcols) {
+      const sorted = [...col.panels].sort((a, b) => a.ymin - b.ymin);
+      for (let i = 1; i < sorted.length; i++) {
+        const prev = sorted[i - 1], cur = sorted[i];
+        const gap = Math.round(cur.ymin - prev.ymax);
+        const preservedGap = Math.max(5, Math.min(20, gap > 0 ? gap : 8));
+        const curH = Math.round(cur.ymax - cur.ymin);
+        cur.ymin = prev.ymax + preservedGap;
+        cur.ymax = cur.ymin + curH;
+      }
+    }
+  }
+
+  if (changed === 0) { alert('Aucune hauteur à corriger — les façades sont déjà alignées.'); return; }
+
+  rebuildGroupsFromSpatial();
+  renderDimHeightsList();
+  renderDimSvg();
+  scheduleSave();
+  alert(`${changed} panneau(x) corrigé(s) — hauteurs alignées sur ${refName} (${refHeights.join(', ')} mm).`);
 }
 
 // ============================================================
