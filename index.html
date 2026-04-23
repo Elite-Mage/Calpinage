@@ -592,6 +592,7 @@
           <button class="btn-export" onclick="exportCSV()">&#128196; CSV</button>
           <button class="btn-export" onclick="exportExcel()">&#128202; Excel</button>
           <button class="btn-export" onclick="exportPDF()">&#128247; PDF</button>
+          <button class="btn-export" onclick="exportDimPDF()" title="PDF dimensions panneaux par façade (sans optimisation)">&#128247; PDF Dim.</button>
           <button class="btn-export" onclick="exportPdfFacades()" title="PDF par façade — calepinage, ossature, débit, fixations">&#128247; PDF Façades</button>
           <button class="btn-export" onclick="exportDxfPanneaux()" title="Export DXF panneaux avec numérotation">&#128209; DXF Panneaux</button>
         </div>
@@ -976,23 +977,30 @@
       <div style="margin-top:10px;">
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
           <input type="checkbox" id="dimApplyAllFacades" onchange="renderDimHeightsList()">
-          Appliquer à toutes les façades
+          Modifier toutes les façades ensemble
         </label>
       </div>
     </div>
-    <div class="card" id="dimColCard" style="display:none;">
-      <div class="card-title">Largeur de colonne</div>
-      <div id="dimColInfo" style="font-size:12px;color:var(--text3);margin-bottom:8px;"></div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <label style="font-size:12px;min-width:80px;">Largeur (mm)</label>
-        <input type="number" id="dimColWidthInput" min="10" max="5000" step="1" style="width:80px;" oninput="dimColWidthChanged(+this.value)">
+    <div class="card" id="dimPanelCard" style="display:none;">
+      <div class="card-title">Panneau sélectionné</div>
+      <div id="dimPanelInfo" style="font-size:12px;color:var(--text3);margin-bottom:8px;"></div>
+      <button id="dimFixationBtn" style="width:100%;padding:6px;border-radius:6px;border:none;cursor:pointer;font-size:12px;font-weight:700;" onclick="dimToggleFixation()"></button>
+      <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">Largeur colonne (mm)</div>
+        <div id="dimColInfo" style="font-size:11px;color:var(--text4);margin-bottom:6px;"></div>
+        <input type="number" id="dimColWidthInput" min="10" max="5000" step="1" style="width:100%;box-sizing:border-box;" oninput="dimColWidthChanged(+this.value)">
       </div>
-      <button class="btn-secondary" style="margin-top:8px;width:100%;font-size:12px;" onclick="dimDeselectCol()">Désélectionner</button>
+      <button class="btn-secondary" style="margin-top:8px;width:100%;font-size:12px;" onclick="dimDeselectPanel()">Désélectionner</button>
     </div>
     <div class="card">
       <div class="card-title">Actions</div>
       <button class="btn-primary" style="width:100%;margin-bottom:8px;" onclick="applyDimEdits()">Appliquer les modifications</button>
-      <button class="btn-secondary" style="width:100%;" onclick="resetDimEdits()">Réinitialiser</button>
+      <button class="btn-secondary" style="width:100%;margin-bottom:8px;" onclick="resetDimEdits()">Réinitialiser</button>
+      <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px;">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">Harmoniser hauteurs — façade de référence :</div>
+        <select id="dimRefFacade" style="width:100%;margin-bottom:6px;font-size:12px;padding:4px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);"></select>
+        <button class="btn-secondary" style="width:100%;font-size:12px;" onclick="dimHarmonizeHeights()">Snap autres façades</button>
+      </div>
     </div>
   </div>
   <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
@@ -1131,6 +1139,7 @@ let vue3dConfig = {
 let projectRectsSpatial = []; // Stored spatial rectangles from DXF parsing
 let projectFacadeLabels = []; // Stored facade labels from DXF parsing
 let projectPanelFacadeMap = {}; // Direct panel→facade assignment from clustering
+let projectNoFixationPanels = new Set(); // Indices of panels with fixation disabled
 
 // ============================================================
 // STOCK
@@ -2581,6 +2590,8 @@ function calcFixationFacade(fname, panels, ossProfiles) {
   if (fixationConfig.trouEnabled) {
     const cfg = getTrouConfigForFacade(fname);
     for (const p of panels) {
+      const pIdx = projectRectsSpatial.indexOf(p);
+      if (projectNoFixationPanels.has(pIdx)) continue;
       const { holes } = calcHolePositions(Math.round(p.xmax - p.xmin), Math.round(p.ymax - p.ymin), cfg);
       fixPanneaux += holes.length;
     }
@@ -2779,6 +2790,24 @@ function exportPDF() {
   body += `<tr style="background:#f0f0f0;font-weight:700;"><td colspan="5" style="border:1px solid #ccc;padding:7px;text-align:right;">TOTAL</td><td style="border:1px solid #ccc;padding:7px;text-align:center;">&times;${totalPanels}</td><td style="border:1px solid #ccc;padding:7px;">${totalArea.toFixed(2)} m\u00b2</td><td style="border:1px solid #ccc;padding:7px;">${hasPrix ? totalPrix.toFixed(2)+' \u20ac' : '—'}</td></tr>`;
   body += `</table></div>`;
 
+  // Annexe dimensions par façade
+  body += `<div style="page-break-before:always;margin-top:30px;"><div style="font-size:18px;font-weight:800;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:14px;">ANNEXE — DIMENSIONS PANNEAUX PAR FAÇADE</div>`;
+  for (const g of groups) {
+    let anyContent = false, tableRows = '';
+    for (const sub of g.subsections) {
+      const byH = {};
+      for (const st of (sub.panelSubtypes||[])) for (const p of st.pieces) { if (!byH[p.h]) byH[p.h]={}; byH[p.h][p.w]=(byH[p.h][p.w]||0)+p.qty; }
+      for (const h of Object.keys(byH).map(Number).sort((a,b)=>a-b)) for (const w of Object.keys(byH[h]).map(Number).sort((a,b)=>a-b)) {
+        const qty=byH[h][w];
+        tableRows+=`<tr><td style="border:1px solid #ddd;padding:4px 8px;font-weight:600;">${sub.name}</td><td style="border:1px solid #ddd;padding:4px 8px;font-family:monospace;">${h}</td><td style="border:1px solid #ddd;padding:4px 8px;font-family:monospace;">${w}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:center;font-weight:700;">${qty}</td><td style="border:1px solid #ddd;padding:4px 8px;text-align:right;color:#666;font-size:11px;">${(w*h*qty/1e6).toFixed(4)} m\u00b2</td></tr>`;
+        anyContent=true;
+      }
+    }
+    if (!anyContent) continue;
+    body+=`<div style="page-break-inside:avoid;margin-bottom:18px;"><div style="font-size:13px;font-weight:800;border-left:4px solid ${g.color};padding:4px 10px;background:#f8fafc;margin-bottom:6px;">${g.name}</div><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="background:#e2e8f0;"><th style="border:1px solid #ddd;padding:5px 8px;text-align:left;">Fa\u00e7ade</th><th style="border:1px solid #ddd;padding:5px 8px;text-align:left;">H (mm)</th><th style="border:1px solid #ddd;padding:5px 8px;text-align:left;">L (mm)</th><th style="border:1px solid #ddd;padding:5px 8px;">Qt\u00e9</th><th style="border:1px solid #ddd;padding:5px 8px;text-align:right;">Surface</th></tr></thead><tbody>${tableRows}</tbody></table></div>`;
+  }
+  body += `</div>`;
+
   const fullHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Calepinage \u2014 ${nom}</title>
   <style>
     body { font-family: 'Segoe UI', sans-serif; padding: 15mm; color: #111; font-size: 13px; }
@@ -2843,6 +2872,41 @@ function exportExcel() {
     for (const [aci, info] of Object.entries(ACI_COLOR_MAP_JS))
       if (info.color === g.color) return parseInt(aci);
     return null;
+  }
+
+  // ── Onglet Dimensions par façade ────────────────────────────
+  function sheetDimensions() {
+    const rows = [];
+    rows.push(R(C(`${nom} — Dimensions panneaux par façade`, 'sh1'), ...Array(5).fill(Bl('sh1'))));
+    rows.push(R(C('Date :', 'sh2'), C(date, 'sh2'), ...Array(4).fill(Bl('sh2'))));
+    rows.push(Sp());
+    rows.push(R(C('Type','sh2'), C('Façade','sh2'), C('H (mm)','sh2'), C('L (mm)','sh2'), C('Qté','sh2'), C('Surf. tot. (m²)','sh2')));
+    for (const g of groups) {
+      let anyRow = false;
+      for (const sub of g.subsections) {
+        // Flatten all pieces across subtypes, group by H then L
+        const byH = {};
+        for (const st of (sub.panelSubtypes || [])) {
+          for (const p of st.pieces) {
+            const h = p.h;
+            if (!byH[h]) byH[h] = {};
+            byH[h][p.w] = (byH[h][p.w] || 0) + p.qty;
+          }
+        }
+        const sortedH = Object.keys(byH).map(Number).sort((a, b) => a - b);
+        for (const h of sortedH) {
+          const sortedW = Object.keys(byH[h]).map(Number).sort((a, b) => a - b);
+          for (const w of sortedW) {
+            const qty = byH[h][w];
+            const surf = +(w * h * qty / 1e6).toFixed(4);
+            if (!anyRow) { rows.push(Sp()); anyRow = true; }
+            rows.push(R(C(g.name,`sg${g.id}`), C(sub.name,`sg${g.id}`), C(h,`sg${g.id}`), C(w,`sg${g.id}`), C(qty,`sg${g.id}`), C(surf,`sg${g.id}n`)));
+          }
+        }
+      }
+    }
+    rows.push(Sp());
+    return `<Worksheet ss:Name="Dimensions"><Table ss:DefaultColumnWidth="110" ss:DefaultRowHeight="18">${rows.join('')}</Table></Worksheet>`;
   }
 
   // ── Onglet Panneaux ──────────────────────────────────────────
@@ -3160,6 +3224,7 @@ function exportExcel() {
   ${STYLES}
   ${sheetListeDebit()}
   ${sheetReperage()}
+  ${sheetDimensions()}
   ${sheetPanneaux()}
   ${sheetOssature()}
   ${sheetFixations()}
@@ -3170,6 +3235,64 @@ function exportExcel() {
   link.href = URL.createObjectURL(blob);
   link.download = (nom.replace(/[^a-zA-Z0-9]/g,'_')||'calepinage')+'_'+date+'.xls';
   link.click();
+}
+
+function exportDimPDF() {
+  const nom = chantier.nom || 'Calepinage';
+  const date = chantier.date || new Date().toISOString().slice(0,10);
+  const hasPanels = groups.some(g => g.subsections.some(s => (s.panelSubtypes||[]).some(st => st.pieces.length > 0)));
+  if (!hasPanels) { alert('Aucun panneau — importez un DXF ou ajoutez des panneaux.'); return; }
+
+  const TD = (v, style='') => `<td style="border:1px solid #ccc;padding:5px 8px;${style}">${v}</td>`;
+  const TH = v => `<th style="border:1px solid #ccc;padding:6px 8px;background:#e2e8f0;text-align:left;">${v}</th>`;
+
+  let body = `<div style="border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-end;">
+    <div><div style="font-size:20px;font-weight:800;letter-spacing:2px;">◆ DIMENSIONS PANNEAUX</div>
+    <div style="font-size:15px;font-weight:600;margin-top:4px;">${nom}</div></div>
+    <div style="text-align:right;font-size:12px;color:#555;">Date : ${date}</div>
+  </div>`;
+
+  for (const g of groups) {
+    let anyContent = false;
+    let tableRows = '';
+    for (const sub of g.subsections) {
+      const byH = {};
+      for (const st of (sub.panelSubtypes || [])) {
+        for (const p of st.pieces) {
+          if (!byH[p.h]) byH[p.h] = {};
+          byH[p.h][p.w] = (byH[p.h][p.w] || 0) + p.qty;
+        }
+      }
+      const sortedH = Object.keys(byH).map(Number).sort((a, b) => a - b);
+      let firstFacade = true;
+      for (const h of sortedH) {
+        const sortedW = Object.keys(byH[h]).map(Number).sort((a, b) => a - b);
+        for (const w of sortedW) {
+          const qty = byH[h][w];
+          const surf = (w * h * qty / 1e6).toFixed(4);
+          tableRows += `<tr>
+            ${firstFacade ? `<td rowspan="${sortedH.reduce((n,hh)=>n+Object.keys(byH[hh]).length,0)}" style="border:1px solid #ccc;padding:5px 8px;font-weight:700;vertical-align:top;background:#f1f5f9;">${sub.name}</td>` : ''}
+            ${TD(h,'font-family:monospace;')} ${TD(w,'font-family:monospace;')} ${TD(qty,'text-align:center;font-weight:700;')} ${TD(surf+' m²','text-align:right;color:#555;font-size:11px;')}
+          </tr>`;
+          firstFacade = false;
+          anyContent = true;
+        }
+      }
+    }
+    if (!anyContent) continue;
+    body += `<div style="page-break-inside:avoid;margin-bottom:24px;">
+      <div style="font-size:14px;font-weight:800;border-left:5px solid ${g.color};padding:5px 12px;background:#f8fafc;margin-bottom:8px;">${g.name}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead><tr>${TH('Façade')}${TH('H (mm)')}${TH('L (mm)')}${TH('Qté')}${TH('Surface')}</tr></thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>`;
+  }
+
+  const fullHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Dimensions — ${nom}</title>
+  <style>body{font-family:'Segoe UI',sans-serif;padding:15mm;color:#111;font-size:13px;}@media print{body{padding:10mm;}}</style>
+  </head><body>${body}<script>window.onload=()=>window.print();<\/script></body></html>`;
+  window.open(URL.createObjectURL(new Blob([fullHtml], { type: 'text/html;charset=utf-8' })), '_blank');
 }
 
 // ============================================================
@@ -3289,9 +3412,10 @@ function getProjectData() {
     fixationConfig,
     pliageConfig,
     vue3dConfig,
-    rectsSpatial:    projectRectsSpatial,
-    facadeLabels:    projectFacadeLabels,
-    panelFacadeMap:  projectPanelFacadeMap,
+    rectsSpatial:      projectRectsSpatial,
+    facadeLabels:      projectFacadeLabels,
+    panelFacadeMap:    projectPanelFacadeMap,
+    noFixationPanels:  [...projectNoFixationPanels],
   };
 }
 
@@ -3372,6 +3496,7 @@ function applyProjectData(data) {
   if (data.rectsSpatial) projectRectsSpatial = data.rectsSpatial;
   if (data.facadeLabels) projectFacadeLabels = data.facadeLabels;
   if (data.panelFacadeMap) projectPanelFacadeMap = data.panelFacadeMap;
+  projectNoFixationPanels = new Set(data.noFixationPanels || []);
   allResults = null;
   document.getElementById('summaryCard').style.display = 'none';
   document.getElementById('orderCard').style.display = 'none';
@@ -6094,6 +6219,8 @@ function calcTrouFixations() {
   for (const [fname, panels] of Object.entries(byFacade)) {
     const cfg = getTrouConfigForFacade(fname);
     for (const p of panels) {
+      const pIdx = projectRectsSpatial.indexOf(p);
+      if (projectNoFixationPanels.has(pIdx)) continue;
       const pw = Math.round(p.xmax - p.xmin);
       const ph = Math.round(p.ymax - p.ymin);
       const { holes, warnings: w } = calcHolePositions(pw, ph, cfg);
@@ -6270,16 +6397,20 @@ function renderFixation() {
       const svgW = Math.round((fxmax - fxmin) * scale), svgH = Math.round((fymax - fymin) * scale);
       let svgContent = '';
       for (const p of panels) {
+        const pIdx = projectRectsSpatial.indexOf(p);
+        const noFix = projectNoFixationPanels.has(pIdx);
         const px = (p.xmin - fxmin) * scale, py = (fymax - p.ymax) * scale;
         const pw = (p.xmax - p.xmin) * scale, ph = (p.ymax - p.ymin) * scale;
         const panW = Math.round(p.xmax - p.xmin), panH = Math.round(p.ymax - p.ymin);
         const panelColor = (ACI_COLOR_MAP_JS[p.color || 7] || {}).color || '#888888';
-        svgContent += `<rect x="${px.toFixed(1)}" y="${py.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="${panelColor}22" stroke="${panelColor}" stroke-width="1"/>`;
-        const { holes } = calcHolePositions(panW, panH, cfg);
-        for (const h of holes) {
-          const hx = (px + h.x * scale).toFixed(1), hy = (py + (panH - h.y) * scale).toFixed(1);
-          const hr = Math.max(1.5, h.r * scale).toFixed(1);
-          svgContent += `<circle cx="${hx}" cy="${hy}" r="${hr}" fill="#fff" stroke="#e74c3c" stroke-width="1.2"/>`;
+        svgContent += `<rect x="${px.toFixed(1)}" y="${py.toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="${panelColor}22" stroke="${noFix ? '#e74c3c88' : panelColor}" stroke-width="1" stroke-dasharray="${noFix ? '4,3' : 'none'}"/>`;
+        if (!noFix) {
+          const { holes } = calcHolePositions(panW, panH, cfg);
+          for (const h of holes) {
+            const hx = (px + h.x * scale).toFixed(1), hy = (py + (panH - h.y) * scale).toFixed(1);
+            const hr = Math.max(1.5, h.r * scale).toFixed(1);
+            svgContent += `<circle cx="${hx}" cy="${hy}" r="${hr}" fill="#fff" stroke="#e74c3c" stroke-width="1.2"/>`;
+          }
         }
       }
       html += `<div class="oss-card">
@@ -7803,7 +7934,8 @@ function exportDxfPanneaux() {
       dxf.addText(cx, cy + textH * 0.8, textH, 'P' + (i + 1), 'TEXTE', aciColor, 1);
       dxf.addText(cx, cy - textH * 0.6, textH * 0.7, pw + 'x' + ph, 'COTES', 8, 1);
 
-      if (trouCfg) {
+      const pIdx = projectRectsSpatial.indexOf(p);
+      if (trouCfg && !projectNoFixationPanels.has(pIdx)) {
         const { holes } = calcHolePositions(pw, ph, trouCfg);
         for (const h of holes) {
           dxf.addCircle(p.xmin + h.x, p.ymin + h.y, h.r, 'TROUS', 1);
@@ -8746,7 +8878,7 @@ function exportPdfOssature() {
 // ============================================================
 let dimEditorState = {
   facadeName: null,
-  selectedColKey: null,      // "xmin_xmax" key of selected column
+  selectedPanelIdx: null,    // index in projectRectsSpatial
   heightEdits: {},           // origH (mm) → newH (mm)
   colEdits: {},              // "xmin_xmax" → newW (mm)
 };
@@ -8792,11 +8924,17 @@ function renderPanelEditor() {
   }
   if (!dimEditorState.facadeName || !names.includes(dimEditorState.facadeName)) {
     dimEditorState.facadeName = names[0];
-    dimEditorState.selectedColKey = null;
+    dimEditorState.selectedPanelIdx = null;
   }
   renderDimFacadeTabs(names);
   renderDimHeightsList();
   renderDimSvg();
+  // Populate reference facade selector
+  const sel = document.getElementById('dimRefFacade');
+  if (sel) {
+    const prev = sel.value;
+    sel.innerHTML = names.map(n => `<option value="${n}"${n===prev?' selected':''}>${n}</option>`).join('');
+  }
 }
 
 function renderDimFacadeTabs(names) {
@@ -8808,11 +8946,11 @@ function renderDimFacadeTabs(names) {
 
 function dimSelectFacade(name) {
   dimEditorState.facadeName = name;
-  dimEditorState.selectedColKey = null;
+  dimEditorState.selectedPanelIdx = null;
   renderDimFacadeTabs(getDimFacadeNames());
   renderDimHeightsList();
   renderDimSvg();
-  document.getElementById('dimColCard').style.display = 'none';
+  document.getElementById('dimPanelCard').style.display = 'none';
 }
 
 function renderDimHeightsList() {
@@ -8852,27 +8990,53 @@ function dimHeightChanged(origH, newH) {
 }
 
 function dimColWidthChanged(newW) {
-  const k = dimEditorState.selectedColKey;
-  if (!k) return;
+  const idx = dimEditorState.selectedPanelIdx;
+  if (idx === null) return;
+  const p = projectRectsSpatial[idx];
+  if (!p) return;
+  const cols = getDimColumns(projectRectsSpatial);
+  const col = cols.find(c => Math.abs(c.xmin - p.xmin) < 5 && Math.abs(c.xmax - p.xmax) < 5);
+  if (!col) return;
+  const k = colKey(col);
   if (newW >= 10) dimEditorState.colEdits[k] = newW;
   else delete dimEditorState.colEdits[k];
   renderDimSvg();
 }
 
-function dimDeselectCol() {
-  dimEditorState.selectedColKey = null;
-  document.getElementById('dimColCard').style.display = 'none';
+function dimDeselectPanel() {
+  dimEditorState.selectedPanelIdx = null;
+  document.getElementById('dimPanelCard').style.display = 'none';
   renderDimSvg();
 }
 
-function dimSelectCol(k, xmin, xmax) {
-  dimEditorState.selectedColKey = k;
-  const curW = dimEditorState.colEdits[k] !== undefined ? dimEditorState.colEdits[k] : Math.round(xmax - xmin);
-  const card = document.getElementById('dimColCard');
-  card.style.display = '';
-  document.getElementById('dimColInfo').textContent = `Colonne x=${Math.round(xmin)}–${Math.round(xmax)} mm (${Math.round(xmax - xmin)} mm orig.)`;
+function dimSelectPanel(idx) {
+  dimEditorState.selectedPanelIdx = idx;
+  const p = projectRectsSpatial[idx];
+  if (!p) return;
+  const w = Math.round(p.xmax - p.xmin), h = Math.round(p.ymax - p.ymin);
+  const cols = getDimColumns(projectRectsSpatial);
+  const col = cols.find(c => Math.abs(c.xmin - p.xmin) < 5 && Math.abs(c.xmax - p.xmax) < 5);
+  const k = col ? colKey(col) : null;
+  const curW = k && dimEditorState.colEdits[k] !== undefined ? dimEditorState.colEdits[k] : w;
+  const noFix = projectNoFixationPanels.has(idx);
+  document.getElementById('dimPanelInfo').textContent = `${w} × ${h} mm`;
+  const btn = document.getElementById('dimFixationBtn');
+  btn.textContent = noFix ? '✓ Activer fixation panneau' : '✗ Désactiver fixation panneau';
+  btn.style.background = noFix ? 'var(--accent)' : '#e74c3c';
+  btn.style.color = '#fff';
+  document.getElementById('dimColInfo').textContent = col ? `x=${Math.round(col.xmin)}–${Math.round(col.xmax)} mm (${Math.round(col.xmax - col.xmin)} mm orig.)` : '';
   document.getElementById('dimColWidthInput').value = curW;
+  document.getElementById('dimPanelCard').style.display = '';
   renderDimSvg();
+}
+
+function dimToggleFixation() {
+  const idx = dimEditorState.selectedPanelIdx;
+  if (idx === null) return;
+  if (projectNoFixationPanels.has(idx)) projectNoFixationPanels.delete(idx);
+  else projectNoFixationPanels.add(idx);
+  dimSelectPanel(idx); // refresh button label
+  scheduleSave();
 }
 
 function renderDimSvg() {
@@ -8883,7 +9047,7 @@ function renderDimSvg() {
 
   // Build preview panels with current edits applied
   const cols = getDimColumns(panels);
-  const selKey = dimEditorState.selectedColKey;
+
 
   // Compute display coordinates: apply height & width edits for preview
   // We need to know Y layout: rebuild ymin/ymax per panel using height edits
@@ -8910,26 +9074,35 @@ function renderDimSvg() {
   let rects = '';
   let labels = '';
   const drawnCols = new Set();
+  const selIdx = dimEditorState.selectedPanelIdx;
 
   for (const p of panels) {
+    const pIdx = projectRectsSpatial.indexOf(p);
     const origH = Math.round(p.ymax - p.ymin);
     const colObj = cols.find(c => Math.abs(c.xmin - p.xmin) < 5 && Math.abs(c.xmax - p.xmax) < 5);
     const k = colObj ? colKey(colObj) : null;
-    const isSelCol = k && k === selKey;
+    const isSel = pIdx === selIdx;
     const hasHEdit = dimEditorState.heightEdits[origH] !== undefined && dimEditorState.heightEdits[origH] !== origH;
     const hasWEdit = k && dimEditorState.colEdits[k] !== undefined;
+    const noFix = projectNoFixationPanels.has(pIdx);
 
     const hexColor = (ACI_COLOR_MAP_JS[p.color || 7] || {}).color || '#888888';
-    const stroke = isSelCol ? '#60a5fa' : (hasHEdit || hasWEdit ? '#f97316' : '#33333388');
-    const strokeW = isSelCol ? 2.5 : (hasHEdit || hasWEdit ? 1.8 : 1);
+    const stroke = isSel ? '#60a5fa' : (hasHEdit || hasWEdit ? '#f97316' : '#33333388');
+    const strokeW = isSel ? 2.5 : (hasHEdit || hasWEdit ? 1.8 : 1);
+    const fill = noFix ? `${hexColor}33` : `${hexColor}88`;
 
     const x1 = tx(p.xmin), y1 = ty(p.ymax);
     const x2 = tx(p.xmax), y2 = ty(p.ymin);
     const w = x2 - x1, h = y2 - y1;
 
-    const clickStr = k ? `onclick="dimSelectCol('${k}', ${p.xmin}, ${p.xmax})"` : '';
     rects += `<rect x="${x1.toFixed(1)}" y="${y1.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"
-      fill="${hexColor}88" stroke="${stroke}" stroke-width="${strokeW}" rx="2" style="cursor:pointer;" ${clickStr}/>`;
+      fill="${fill}" stroke="${stroke}" stroke-width="${strokeW}" rx="2" style="cursor:pointer;" onclick="dimSelectPanel(${pIdx})"/>`;
+
+    // No-fixation X mark
+    if (noFix) {
+      const cx2 = (x1 + x2) / 2, cy2 = (y1 + y2) / 2;
+      labels += `<text x="${cx2.toFixed(1)}" y="${(cy2 + 4).toFixed(1)}" text-anchor="middle" font-size="${Math.min(h * 0.5, 14).toFixed(0)}" fill="#e74c3caa" style="pointer-events:none;">✕</text>`;
+    }
 
     // Column width label (once per column)
     if (k && !drawnCols.has(k) && colObj) {
@@ -8937,15 +9110,17 @@ function renderDimSvg() {
       const cx = (tx(colObj.xmin) + tx(colObj.xmax)) / 2;
       const topY = ty(Math.max(...colObj.panels.map(pp => pp.ymax))) - 5;
       const wLabel = dimEditorState.colEdits[k] !== undefined ? `${dimEditorState.colEdits[k]}*` : `${Math.round(colObj.xmax - colObj.xmin)}`;
-      labels += `<text x="${cx.toFixed(1)}" y="${topY.toFixed(1)}" text-anchor="middle" font-size="9" fill="${isSelCol ? '#60a5fa' : '#aaa'}" style="pointer-events:none;">${wLabel}</text>`;
+      labels += `<text x="${cx.toFixed(1)}" y="${topY.toFixed(1)}" text-anchor="middle" font-size="9" fill="${isSel ? '#60a5fa' : '#aaa'}" style="pointer-events:none;">${wLabel}</text>`;
     }
 
     // Height label
-    const cy = (y1 + y2) / 2;
-    const cx2 = (x1 + x2) / 2;
-    const hLabel = hasHEdit ? `${dimEditorState.heightEdits[origH]}*` : `${origH}`;
-    if (h > 12) {
-      labels += `<text x="${cx2.toFixed(1)}" y="${(cy + 3.5).toFixed(1)}" text-anchor="middle" font-size="9" fill="${hasHEdit ? '#f97316' : '#666'}" style="pointer-events:none;">${hLabel}</text>`;
+    if (!noFix) {
+      const cy = (y1 + y2) / 2;
+      const cx2 = (x1 + x2) / 2;
+      const hLabel = hasHEdit ? `${dimEditorState.heightEdits[origH]}*` : `${origH}`;
+      if (h > 12) {
+        labels += `<text x="${cx2.toFixed(1)}" y="${(cy + 3.5).toFixed(1)}" text-anchor="middle" font-size="9" fill="${hasHEdit ? '#f97316' : '#666'}" style="pointer-events:none;">${hLabel}</text>`;
+      }
     }
   }
 
@@ -9020,21 +9195,21 @@ function applyDimEdits() {
   // Clear edits
   dimEditorState.heightEdits = {};
   dimEditorState.colEdits = {};
-  dimEditorState.selectedColKey = null;
+  dimEditorState.selectedPanelIdx = null;
 
   renderDimHeightsList();
   renderDimSvg();
-  document.getElementById('dimColCard').style.display = 'none';
+  document.getElementById('dimPanelCard').style.display = 'none';
   scheduleSave();
 }
 
 function resetDimEdits() {
   dimEditorState.heightEdits = {};
   dimEditorState.colEdits = {};
-  dimEditorState.selectedColKey = null;
+  dimEditorState.selectedPanelIdx = null;
   renderDimHeightsList();
   renderDimSvg();
-  document.getElementById('dimColCard').style.display = 'none';
+  document.getElementById('dimPanelCard').style.display = 'none';
 }
 
 function rebuildGroupsFromSpatial() {
@@ -9120,6 +9295,79 @@ function rebuildGroupsFromSpatial() {
 
   renderGroupTabs();
   renderActiveGroup();
+}
+
+function dimHarmonizeHeights() {
+  const refName = document.getElementById('dimRefFacade')?.value;
+  if (!refName || !projectRectsSpatial.length) return;
+
+  const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+  const refPanels = byFacade[refName] || [];
+  if (!refPanels.length) { alert('Façade de référence vide.'); return; }
+
+  // Group panels into horizontal rows (panels sharing same Y band)
+  function groupRows(panels) {
+    const sorted = [...panels].sort((a, b) => a.ymin - b.ymin);
+    const rows = [[sorted[0]]];
+    for (let i = 1; i < sorted.length; i++) {
+      const lastRow = rows[rows.length - 1];
+      const rowYmax = Math.max(...lastRow.map(p => p.ymax));
+      if (sorted[i].ymin <= rowYmax + 25) lastRow.push(sorted[i]);
+      else rows.push([sorted[i]]);
+    }
+    return rows.sort((a, b) => Math.min(...a.map(p => p.ymin)) - Math.min(...b.map(p => p.ymin)));
+  }
+
+  // Build reference row layout: [{height, joint_below}]
+  const refRows = groupRows(refPanels);
+  const refLayout = refRows.map(row => ({
+    ymin: Math.min(...row.map(p => p.ymin)),
+    ymax: Math.max(...row.map(p => p.ymax)),
+    height: Math.round(Math.max(...row.map(p => p.ymax - p.ymin))),
+  }));
+  // Canonical joint = gap between consecutive reference rows
+  const refJoints = refLayout.slice(1).map((r, i) => Math.max(5, Math.round(r.ymin - refLayout[i].ymax)));
+
+  const refHeights = refLayout.map(r => r.height);
+  function snapH(h) {
+    return refHeights.reduce((best, rh) => Math.abs(rh - h) < Math.abs(best - h) ? rh : best);
+  }
+
+  let changed = 0;
+  for (const [fn, fps] of Object.entries(byFacade)) {
+    if (fn === refName) continue;
+
+    // Snap heights first
+    for (const p of fps) {
+      const newH = snapH(Math.round(p.ymax - p.ymin));
+      if (newH !== Math.round(p.ymax - p.ymin)) { p.ymax = p.ymin + newH; changed++; }
+    }
+
+    // Assign EXACT y-positions row by row using reference joints
+    // Base: keep the facade's own starting ymin
+    const targetRows = groupRows(fps);
+    const baseYmin = Math.min(...fps.map(p => p.ymin));
+    let curY = baseYmin;
+    for (let ri = 0; ri < targetRows.length; ri++) {
+      if (ri > 0) curY += ri - 1 < refJoints.length ? refJoints[ri - 1] : refJoints[refJoints.length - 1] || 8;
+      const rowH = ri < refHeights.length ? refHeights[ri] : Math.round(Math.max(...targetRows[ri].map(p => p.ymax - p.ymin)));
+      for (const p of targetRows[ri]) {
+        if (p.ymin !== curY || Math.round(p.ymax - p.ymin) !== rowH) changed++;
+        p.ymin = curY;
+        p.ymax = curY + rowH;
+      }
+      curY += rowH;
+    }
+  }
+
+  rebuildGroupsFromSpatial();
+  // Auto-enable "all facades" so user can immediately batch-edit heights
+  const cbk = document.getElementById('dimApplyAllFacades');
+  if (cbk) cbk.checked = true;
+  renderDimHeightsList();
+  renderDimSvg();
+  scheduleSave();
+  alert(`Aligné — ${refHeights.join(' / ')} mm, joints ${refJoints.join('/')} mm.`);
 }
 
 // ============================================================
