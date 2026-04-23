@@ -976,10 +976,18 @@
       <div id="dimHeightsList" style="display:flex;flex-direction:column;gap:6px;margin-top:4px;"></div>
       <div style="margin-top:10px;">
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
-          <input type="checkbox" id="dimApplyAllFacades" onchange="renderDimHeightsList()">
+          <input type="checkbox" id="dimApplyAllFacades" onchange="renderDimHeightsList();renderDimWidthsList()">
           Modifier toutes les façades ensemble
         </label>
       </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Largeurs — rangées</div>
+      <div id="dimRegularWidthsList" style="display:flex;flex-direction:column;gap:6px;margin-top:4px;"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Largeurs — bandeau</div>
+      <div id="dimBandeauWidthsList" style="display:flex;flex-direction:column;gap:6px;margin-top:4px;"></div>
     </div>
     <div class="card" id="dimPanelCard" style="display:none;">
       <div class="card-title">Panneau sélectionné</div>
@@ -8878,10 +8886,12 @@ function exportPdfOssature() {
 // ============================================================
 let dimEditorState = {
   facadeName: null,
-  selectedColKey: null,      // "xmin_xmax" — column selected for width edit
-  selectedPanelIdx: null,    // index in projectRectsSpatial — for fixation toggle
-  heightEdits: {},           // origH (mm) → newH (mm)
-  colEdits: {},              // "xmin_xmax" → newW (mm)
+  selectedColKey: null,
+  selectedPanelIdx: null,
+  heightEdits: {},           // origH → newH
+  widthEditsRegular: {},     // origW → newW (rangées principales)
+  widthEditsBandeau: {},     // origW → newW (bandeau toiture = rangée du haut)
+  colEdits: {},              // colKey → newW (override individuel)
 };
 
 function getDimFacadeNames() {
@@ -8915,6 +8925,37 @@ function getDimHeightGroups(panels) {
 
 function colKey(col) { return `${Math.round(col.xmin)}_${Math.round(col.xmax)}`; }
 
+// Group panels into horizontal rows — 2mm tolerance (joint gaps are 5-20mm so no false merges)
+function groupRowsDim(panels) {
+  if (!panels.length) return [];
+  const sorted = [...panels].sort((a, b) => a.ymin - b.ymin);
+  const rows = [[sorted[0]]];
+  for (let i = 1; i < sorted.length; i++) {
+    const lastRow = rows[rows.length - 1];
+    const rowYmax = Math.max(...lastRow.map(p => p.ymax));
+    if (sorted[i].ymin <= rowYmax + 2) lastRow.push(sorted[i]);
+    else rows.push([sorted[i]]);
+  }
+  return rows.sort((a, b) => Math.min(...a.map(p => p.ymin)) - Math.min(...b.map(p => p.ymin)));
+}
+
+// Top row (highest ymin) = bandeau toiture
+function getDimBandeauSet(facadePanels) {
+  const rows = groupRowsDim(facadePanels);
+  return new Set(rows.length ? rows[rows.length - 1] : []);
+}
+
+// Distinct widths grouped by value
+function getDimWidthGroups(panels) {
+  const wMap = {};
+  for (const p of panels) {
+    const w = Math.round(p.xmax - p.xmin);
+    if (!wMap[w]) wMap[w] = [];
+    wMap[w].push(p);
+  }
+  return Object.entries(wMap).map(([w, ps]) => ({ origW: +w, panels: ps })).sort((a, b) => a.origW - b.origW);
+}
+
 function renderPanelEditor() {
   const names = getDimFacadeNames();
   if (!names.length) {
@@ -8929,6 +8970,7 @@ function renderPanelEditor() {
   }
   renderDimFacadeTabs(names);
   renderDimHeightsList();
+  renderDimWidthsList();
   renderDimSvg();
   // Populate reference facade selector
   const sel = document.getElementById('dimRefFacade');
@@ -8950,6 +8992,7 @@ function dimSelectFacade(name) {
   dimEditorState.selectedPanelIdx = null;
   renderDimFacadeTabs(getDimFacadeNames());
   renderDimHeightsList();
+  renderDimWidthsList();
   renderDimSvg();
   document.getElementById('dimPanelCard').style.display = 'none';
 }
@@ -8979,6 +9022,53 @@ function renderDimHeightsList() {
       <span style="font-size:10px;color:var(--text3);">mm</span>
     </div>`;
   }).join('');
+}
+
+function renderDimWidthsList() {
+  const applyAll = document.getElementById('dimApplyAllFacades')?.checked;
+  let allPanels;
+  if (applyAll) {
+    allPanels = projectRectsSpatial;
+  } else {
+    if (!dimEditorState.facadeName) return;
+    const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
+    allPanels = byFacade[dimEditorState.facadeName] || [];
+  }
+  const bandeauSet = getDimBandeauSet(allPanels);
+  const regularPanels = allPanels.filter(p => !bandeauSet.has(p));
+  const bandeauPanels = [...bandeauSet];
+
+  function renderList(panels, edits, onChangeFn, elId) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    const groups = getDimWidthGroups(panels);
+    if (!groups.length) { el.innerHTML = '<span style="color:var(--text4);font-size:12px;">—</span>'; return; }
+    el.innerHTML = groups.map(g => {
+      const cur = edits[g.origW] !== undefined ? edits[g.origW] : g.origW;
+      const changed = edits[g.origW] !== undefined && edits[g.origW] !== g.origW;
+      return `<div style="display:flex;align-items:center;gap:6px;">
+        <span style="font-size:11px;color:var(--text3);min-width:50px;">${g.origW} mm</span>
+        <span style="font-size:10px;color:var(--text4);min-width:28px;">×${g.panels.length}</span>
+        <input type="number" value="${cur}" min="10" max="5000" step="1"
+          style="width:68px;${changed ? 'border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--bg));' : ''}"
+          oninput="${onChangeFn}(${g.origW},+this.value)">
+        <span style="font-size:10px;color:var(--text3);">mm</span>
+      </div>`;
+    }).join('');
+  }
+  renderList(regularPanels, dimEditorState.widthEditsRegular, 'dimRegularWidthChanged', 'dimRegularWidthsList');
+  renderList(bandeauPanels, dimEditorState.widthEditsBandeau, 'dimBandeauWidthChanged', 'dimBandeauWidthsList');
+}
+
+function dimRegularWidthChanged(origW, newW) {
+  if (newW >= 10) dimEditorState.widthEditsRegular[origW] = newW;
+  else delete dimEditorState.widthEditsRegular[origW];
+  renderDimSvg();
+}
+function dimBandeauWidthChanged(origW, newW) {
+  if (newW >= 10) dimEditorState.widthEditsBandeau[origW] = newW;
+  else delete dimEditorState.widthEditsBandeau[origW];
+  renderDimSvg();
 }
 
 function dimHeightChanged(origH, newH) {
@@ -9076,16 +9166,21 @@ function renderDimSvg() {
   const drawnCols = new Set();
   const selColKey = dimEditorState.selectedColKey;
   const selPanelIdx = dimEditorState.selectedPanelIdx;
+  const bandeauSetSvg = getDimBandeauSet(panels);
 
   for (const p of panels) {
     const pIdx = projectRectsSpatial.indexOf(p);
     const origH = Math.round(p.ymax - p.ymin);
+    const origW = Math.round(p.xmax - p.xmin);
     const colObj = cols.find(c => Math.abs(c.xmin - p.xmin) < 5 && Math.abs(c.xmax - p.xmax) < 5);
     const k = colObj ? colKey(colObj) : null;
-    const isSelCol = k && k === selColKey;   // whole column highlighted
-    const isSelPanel = pIdx === selPanelIdx; // this specific panel (fixation)
+    const isSelCol = k && k === selColKey;
+    const isSelPanel = pIdx === selPanelIdx;
+    const isBandeau = bandeauSetSvg.has(p);
     const hasHEdit = dimEditorState.heightEdits[origH] !== undefined && dimEditorState.heightEdits[origH] !== origH;
-    const hasWEdit = k && dimEditorState.colEdits[k] !== undefined;
+    const hasWIndiv = k && dimEditorState.colEdits[k] !== undefined;
+    const hasWGroup = isBandeau ? dimEditorState.widthEditsBandeau[origW] !== undefined : dimEditorState.widthEditsRegular[origW] !== undefined;
+    const hasWEdit = hasWIndiv || hasWGroup;
     const noFix = projectNoFixationPanels.has(pIdx);
 
     const hexColor = (ACI_COLOR_MAP_JS[p.color || 7] || {}).color || '#888888';
@@ -9136,38 +9231,44 @@ function renderDimSvg() {
 
 function applyDimEdits() {
   if (!projectRectsSpatial || !projectRectsSpatial.length) return;
-  const hasH = Object.keys(dimEditorState.heightEdits).length > 0;
-  const hasW = Object.keys(dimEditorState.colEdits).length > 0;
-  if (!hasH && !hasW) { alert('Aucune modification à appliquer.'); return; }
+  const hasH  = Object.keys(dimEditorState.heightEdits).length > 0;
+  const hasW  = Object.keys(dimEditorState.colEdits).length > 0;
+  const hasWR = Object.keys(dimEditorState.widthEditsRegular).length > 0;
+  const hasWB = Object.keys(dimEditorState.widthEditsBandeau).length > 0;
+  if (!hasH && !hasW && !hasWR && !hasWB) { alert('Aucune modification à appliquer.'); return; }
 
   const applyAll = document.getElementById('dimApplyAllFacades')?.checked;
   const { byFacade } = groupRectsByFacade(projectRectsSpatial, projectFacadeLabels);
   const facadeNames = applyAll ? Object.keys(byFacade) : [dimEditorState.facadeName];
 
-  // Collect the panel objects in the target facades
   const targetPanels = new Set();
-  for (const fn of facadeNames) {
-    for (const p of (byFacade[fn] || [])) targetPanels.add(p);
-  }
+  for (const fn of facadeNames) for (const p of (byFacade[fn] || [])) targetPanels.add(p);
 
-  // Build column map for width edits
   const allCols = getDimColumns([...targetPanels]);
 
-  for (const p of targetPanels) {
-    const origH = Math.round(p.ymax - p.ymin);
-    if (hasH && dimEditorState.heightEdits[origH] !== undefined) {
-      const newH = dimEditorState.heightEdits[origH];
-      p.ymax = p.ymin + newH;
-    }
-    if (hasW) {
+  // Per-facade bandeau sets for width group edits
+  const facadeBandeauSets = {};
+  for (const fn of facadeNames) facadeBandeauSets[fn] = getDimBandeauSet(byFacade[fn] || []);
+
+  for (const fn of facadeNames) {
+    const bandeauSet = facadeBandeauSets[fn];
+    for (const p of (byFacade[fn] || [])) {
+      const origH = Math.round(p.ymax - p.ymin);
+      if (hasH && dimEditorState.heightEdits[origH] !== undefined) p.ymax = p.ymin + dimEditorState.heightEdits[origH];
+
       const col = allCols.find(c => Math.abs(c.xmin - p.xmin) < 5 && Math.abs(c.xmax - p.xmax) < 5);
-      if (col) {
-        const k = colKey(col);
-        if (dimEditorState.colEdits[k] !== undefined) {
-          const newW = dimEditorState.colEdits[k];
+      const k = col ? colKey(col) : null;
+      if (hasW && k && dimEditorState.colEdits[k] !== undefined) {
+        const newW = dimEditorState.colEdits[k];
+        const center = (p.xmin + p.xmax) / 2;
+        p.xmin = center - newW / 2; p.xmax = center + newW / 2;
+      } else {
+        const origW = Math.round(p.xmax - p.xmin);
+        const isBandeau = bandeauSet.has(p);
+        const newW = isBandeau ? dimEditorState.widthEditsBandeau[origW] : dimEditorState.widthEditsRegular[origW];
+        if (newW !== undefined) {
           const center = (p.xmin + p.xmax) / 2;
-          p.xmin = center - newW / 2;
-          p.xmax = center + newW / 2;
+          p.xmin = center - newW / 2; p.xmax = center + newW / 2;
         }
       }
     }
@@ -9200,11 +9301,14 @@ function applyDimEdits() {
 
   // Clear edits
   dimEditorState.heightEdits = {};
+  dimEditorState.widthEditsRegular = {};
+  dimEditorState.widthEditsBandeau = {};
   dimEditorState.colEdits = {};
   dimEditorState.selectedColKey = null;
   dimEditorState.selectedPanelIdx = null;
 
   renderDimHeightsList();
+  renderDimWidthsList();
   renderDimSvg();
   document.getElementById('dimPanelCard').style.display = 'none';
   scheduleSave();
@@ -9212,9 +9316,13 @@ function applyDimEdits() {
 
 function resetDimEdits() {
   dimEditorState.heightEdits = {};
+  dimEditorState.widthEditsRegular = {};
+  dimEditorState.widthEditsBandeau = {};
   dimEditorState.colEdits = {};
+  dimEditorState.selectedColKey = null;
   dimEditorState.selectedPanelIdx = null;
   renderDimHeightsList();
+  renderDimWidthsList();
   renderDimSvg();
   document.getElementById('dimPanelCard').style.display = 'none';
 }
@@ -9312,21 +9420,8 @@ function dimHarmonizeHeights() {
   const refPanels = byFacade[refName] || [];
   if (!refPanels.length) { alert('Façade de référence vide.'); return; }
 
-  // Group panels into horizontal rows (panels sharing same Y band)
-  function groupRows(panels) {
-    const sorted = [...panels].sort((a, b) => a.ymin - b.ymin);
-    const rows = [[sorted[0]]];
-    for (let i = 1; i < sorted.length; i++) {
-      const lastRow = rows[rows.length - 1];
-      const rowYmax = Math.max(...lastRow.map(p => p.ymax));
-      if (sorted[i].ymin <= rowYmax + 25) lastRow.push(sorted[i]);
-      else rows.push([sorted[i]]);
-    }
-    return rows.sort((a, b) => Math.min(...a.map(p => p.ymin)) - Math.min(...b.map(p => p.ymin)));
-  }
-
   // Build reference row layout: [{height, joint_below}]
-  const refRows = groupRows(refPanels);
+  const refRows = groupRowsDim(refPanels);
   const refLayout = refRows.map(row => ({
     ymin: Math.min(...row.map(p => p.ymin)),
     ymax: Math.max(...row.map(p => p.ymax)),
@@ -9352,7 +9447,7 @@ function dimHarmonizeHeights() {
 
     // Assign EXACT y-positions row by row using reference joints
     // Base: keep the facade's own starting ymin
-    const targetRows = groupRows(fps);
+    const targetRows = groupRowsDim(fps);
     const baseYmin = Math.min(...fps.map(p => p.ymin));
     // Build joint lookup by (prevHeight_nextHeight) from reference
     const refJointMap = {};
@@ -9382,6 +9477,7 @@ function dimHarmonizeHeights() {
   const cbk = document.getElementById('dimApplyAllFacades');
   if (cbk) cbk.checked = true;
   renderDimHeightsList();
+  renderDimWidthsList();
   renderDimSvg();
   scheduleSave();
   alert(`Aligné — ${refHeights.join(' / ')} mm, joints ${refJoints.join('/')} mm.`);
